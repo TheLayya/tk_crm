@@ -20,6 +20,8 @@ from app.models.monitor import (  # noqa: F401
     MonitorSettings,
 )
 from app.models.video import Video, VideoStats  # noqa: F401
+from app.models.op_account import OpAccount, OpCollectTask, OpAuditLog  # noqa: F401
+from app.models.team import User, Department, Role, RolePermission, UserRole, RefreshToken, OperationToken, LoginLog, OperationLog  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

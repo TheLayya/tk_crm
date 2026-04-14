@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import router from '@/router'
 
 // 创建 axios 实例
 const request = axios.create({
@@ -13,6 +14,10 @@ const request = axios.create({
 // 请求拦截器
 request.interceptors.request.use(
   (config) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
     return config
   },
   (error) => {
@@ -26,7 +31,7 @@ request.interceptors.response.use(
   (response) => {
     return response.data
   },
-  (error) => {
+  async (error) => {
     // 处理网络错误
     if (!error.response) {
       ElMessage.error('网络连接失败，请检查网络设置')
@@ -34,6 +39,25 @@ request.interceptors.response.use(
     }
 
     const { status, data } = error.response
+    const originalRequest = error.config
+
+    // 401: 尝试刷新 token，刷新失败则跳转登录页
+    // 登录接口的 401 不触发刷新（密码错误）
+    if (status === 401 && !originalRequest._retry && !originalRequest.url.includes('/auth/refresh') && !originalRequest.url.includes('/auth/login')) {
+      originalRequest._retry = true
+      try {
+        const { useAuthStore } = await import('@/stores/auth')
+        const authStore = useAuthStore()
+        await authStore.refreshAccessToken()
+        originalRequest.headers['Authorization'] = `Bearer ${localStorage.getItem('token')}`
+        return request(originalRequest)
+      } catch (refreshError) {
+        const { useAuthStore } = await import('@/stores/auth')
+        useAuthStore()._clearState()
+        router.push('/login')
+        return Promise.reject(refreshError)
+      }
+    }
 
     // 根据 HTTP 状态码显示不同错误信息
     switch (status) {
@@ -41,7 +65,10 @@ request.interceptors.response.use(
         ElMessage.error(data?.detail || '请求参数错误')
         break
       case 401:
-        ElMessage.error('未授权，请重新登录')
+        // 登录接口的 401 由页面自己处理，不弹全局提示
+        if (!originalRequest.url.includes('/auth/login')) {
+          ElMessage.error('未授权，请重新登录')
+        }
         break
       case 403:
         ElMessage.error('拒绝访问，权限不足')

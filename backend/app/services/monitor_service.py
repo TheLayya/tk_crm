@@ -24,8 +24,11 @@ def get_accounts(
     is_active: Optional[bool] = None,
     skip: int = 0,
     limit: int = 50,
+    allowed_project_ids: Optional[List[int]] = None,
 ) -> List[MonitorAccount]:
     query = db.query(MonitorAccount)
+    if allowed_project_ids is not None:
+        query = query.filter(MonitorAccount.project_id.in_(allowed_project_ids))
     if project_id is not None:
         query = query.filter(MonitorAccount.project_id == project_id)
     if keyword:
@@ -44,8 +47,11 @@ def count_accounts(
     project_id: Optional[int] = None,
     keyword: Optional[str] = None,
     is_active: Optional[bool] = None,
+    allowed_project_ids: Optional[List[int]] = None,
 ) -> int:
     query = db.query(MonitorAccount)
+    if allowed_project_ids is not None:
+        query = query.filter(MonitorAccount.project_id.in_(allowed_project_ids))
     if project_id is not None:
         query = query.filter(MonitorAccount.project_id == project_id)
     if keyword:

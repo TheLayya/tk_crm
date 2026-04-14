@@ -54,3 +54,17 @@ export function deleteProject(id) {
     method: 'delete'
   })
 }
+
+/**
+ * Get project members
+ */
+export function getProjectMembers(id) {
+  return request({ url: `/projects/${id}/members`, method: 'get' })
+}
+
+/**
+ * Set project members (full replace)
+ */
+export function setProjectMembers(id, usernames) {
+  return request({ url: `/projects/${id}/members`, method: 'put', data: { usernames } })
+}

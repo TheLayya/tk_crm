@@ -13,10 +13,20 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), unique=True, nullable=False, index=True)
     description = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)  # 创建人用户名
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     accounts = relationship("MonitorAccount", back_populates="project", cascade="all, delete-orphan")
+    members = relationship("ProjectMember", cascade="all, delete-orphan")
+
+
+class ProjectMember(Base):
+    """项目协作成员——创建人手动邀请，被邀请者可查看该项目及其账号。"""
+    __tablename__ = "project_members"
+
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    username = Column(String(64), primary_key=True)
 
 
 class MonitorProxy(Base):
@@ -100,5 +110,19 @@ class MonitorSettings(Base):
     default_video_count = Column(Integer, default=20, nullable=False)  # 默认监控视频数量
     site_name = Column(String(100), default="TikTok Monitor", nullable=False)  # 网站名称
     logo_image = Column(Text, nullable=True)  # Logo图片（base64编码）
+    # Backup & notification fields
+    backup_enabled = Column(Boolean, default=False, nullable=False)
+    backup_interval_hours = Column(Integer, default=24, nullable=False)
+    telegram_enabled = Column(Boolean, default=False, nullable=False)
+    telegram_bot_token = Column(String(512), default="", nullable=False)
+    telegram_chat_id = Column(String(128), default="", nullable=False)
+    email_enabled = Column(Boolean, default=False, nullable=False)
+    smtp_host = Column(String(255), default="", nullable=False)
+    smtp_port = Column(Integer, default=587, nullable=False)
+    smtp_username = Column(String(255), default="", nullable=False)
+    smtp_password = Column(String(512), default="", nullable=False)
+    smtp_sender = Column(String(255), default="", nullable=False)
+    email_recipient = Column(String(255), default="", nullable=False)
+    smtp_use_tls = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

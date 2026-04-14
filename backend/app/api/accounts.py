@@ -19,6 +19,14 @@ from app.schemas.account import (
     BatchActionRequest,
 )
 from app.services import monitor_service
+from app.services.auth_service import (
+    require_permission,
+    get_current_user_from_header,
+    get_user_data_scope,
+    get_dept_member_usernames,
+)
+from app.models.monitor import Project
+from app.services.project_service import get_visible_project_ids
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +41,22 @@ def get_accounts(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_from_header),
+    _=Depends(require_permission("monitor:view")),
 ):
     try:
-        total = monitor_service.count_accounts(db, project_id=project_id, keyword=keyword, is_active=is_active)
+        data_scope = get_user_data_scope(db, current_user)
+        dept_usernames = get_dept_member_usernames(db, current_user) if data_scope == "dept" else None
+        allowed_project_ids = get_visible_project_ids(db, current_user.username, data_scope, dept_usernames)
+
+        # 如果指定了 project_id，必须在可见范围内
+        if project_id is not None and allowed_project_ids is not None and project_id not in allowed_project_ids:
+            return {"items": [], "total": 0}
+
+        total = monitor_service.count_accounts(
+            db, project_id=project_id, keyword=keyword, is_active=is_active,
+            allowed_project_ids=allowed_project_ids,
+        )
         accounts = monitor_service.get_accounts(
             db,
             project_id=project_id,
@@ -43,14 +64,15 @@ def get_accounts(
             is_active=is_active,
             skip=skip,
             limit=limit,
+            allowed_project_ids=allowed_project_ids,
         )
-        
+
         result = []
         for account in accounts:
             account_dict = AccountResponse.model_validate(account).model_dump()
             account_dict['project_name'] = account.project.name if account.project else None
             result.append(account_dict)
-        
+
         return {"items": result, "total": total}
     except Exception as e:
         logger.error(f"Failed to get accounts: {e}")

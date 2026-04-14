@@ -85,6 +85,170 @@
           </div>
         </el-form-item>
 
+        <el-divider content-position="left">数据备份</el-divider>
+
+        <el-form-item label="启用自动备份">
+          <el-switch v-model="form.backup_enabled" />
+        </el-form-item>
+
+        <el-form-item label="备份间隔（小时）">
+          <el-input-number
+            v-model="form.backup_interval_hours"
+            :min="1" :max="168"
+            :disabled="!form.backup_enabled"
+          />
+          <span class="hint">1–168 小时（最长7天）</span>
+        </el-form-item>
+
+        <el-form-item label="启用 Telegram 通知">
+          <el-switch v-model="form.telegram_enabled" :disabled="!form.backup_enabled" />
+        </el-form-item>
+
+        <el-form-item label="Telegram Bot Token">
+          <el-input
+            v-model="form.telegram_bot_token"
+            placeholder="请输入 Bot Token"
+            :disabled="!form.backup_enabled || !form.telegram_enabled"
+            show-password
+          />
+        </el-form-item>
+
+        <el-form-item label="Telegram Chat ID">
+          <el-input
+            v-model="form.telegram_chat_id"
+            placeholder="请输入 Chat ID"
+            :disabled="!form.backup_enabled || !form.telegram_enabled"
+          />
+        </el-form-item>
+
+        <el-form-item label="启用邮件通知">
+          <el-switch v-model="form.email_enabled" :disabled="!form.backup_enabled" />
+        </el-form-item>
+
+        <el-form-item label="SMTP 服务器">
+          <el-input
+            v-model="form.smtp_host"
+            placeholder="例如 smtp.gmail.com"
+            :disabled="!form.backup_enabled || !form.email_enabled"
+          />
+        </el-form-item>
+
+        <el-form-item label="SMTP 端口">
+          <el-input-number
+            v-model="form.smtp_port"
+            :min="1" :max="65535"
+            :disabled="!form.backup_enabled || !form.email_enabled"
+          />
+        </el-form-item>
+
+        <el-form-item label="SMTP 用户名">
+          <el-input
+            v-model="form.smtp_username"
+            placeholder="SMTP 登录用户名"
+            :disabled="!form.backup_enabled || !form.email_enabled"
+          />
+        </el-form-item>
+
+        <el-form-item label="SMTP 密码">
+          <el-input
+            v-model="form.smtp_password"
+            placeholder="SMTP 登录密码（留空保持不变）"
+            show-password
+            :disabled="!form.backup_enabled || !form.email_enabled"
+          />
+        </el-form-item>
+
+        <el-form-item label="发件人地址">
+          <el-input
+            v-model="form.smtp_sender"
+            placeholder="例如 noreply@example.com"
+            :disabled="!form.backup_enabled || !form.email_enabled"
+          />
+        </el-form-item>
+
+        <el-form-item label="收件人地址">
+          <el-input
+            v-model="form.email_recipient"
+            placeholder="备份文件接收邮箱"
+            :disabled="!form.backup_enabled || !form.email_enabled"
+          />
+        </el-form-item>
+
+        <el-form-item label="使用 STARTTLS">
+          <el-switch v-model="form.smtp_use_tls" :disabled="!form.backup_enabled || !form.email_enabled" />
+        </el-form-item>
+
+        <el-form-item label="立即备份">
+          <el-button
+            type="warning"
+            :loading="backupLoading"
+            :disabled="!form.backup_enabled || restoreLoading"
+            @click="handleTriggerBackup"
+          >
+            立即备份
+          </el-button>
+          <span v-if="backupResult" class="hint" style="color: #67c23a">
+            ✓ 备份成功，文件已开始下载
+          </span>
+          <span v-if="backupError" class="hint" style="color: #f56c6c">
+            ✗ {{ backupError }}
+          </span>
+        </el-form-item>
+
+        <el-divider content-position="left">备份恢复</el-divider>
+
+        <el-form-item label="选择备份文件">
+          <el-upload
+            accept=".zip"
+            :auto-upload="false"
+            :limit="1"
+            :on-change="(file) => { restoreFile = file }"
+            :on-remove="() => { restoreFile = null }"
+            :file-list="restoreFile ? [restoreFile] : []"
+          >
+            <el-button size="small">选择 .zip 文件</el-button>
+          </el-upload>
+        </el-form-item>
+
+        <el-form-item label="恢复数据库">
+          <el-button
+            type="danger"
+            :loading="restoreLoading"
+            :disabled="restoreLoading || backupLoading || !restoreFile"
+            @click="handleRestore"
+          >
+            恢复数据库
+          </el-button>
+        </el-form-item>
+
+        <el-form-item v-if="restoreResult">
+          <el-alert
+            type="success"
+            :closable="false"
+            show-icon
+            :title="`恢复成功：${restoreResult.filename}`"
+          />
+          <el-alert
+            type="warning"
+            :closable="false"
+            show-icon
+            title="需要重启应用才能使恢复的数据生效，请刷新页面或重启服务。"
+            style="margin-top: 8px"
+          />
+          <div v-if="restoreResult.pre_restore_backup" class="hint" style="margin-top: 8px">
+            恢复前自动备份：{{ restoreResult.pre_restore_backup.filename }}（{{ (restoreResult.pre_restore_backup.file_size / 1024).toFixed(1) }} KB）
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="restoreError">
+          <el-alert
+            type="error"
+            :closable="false"
+            show-icon
+            :title="restoreError"
+          />
+        </el-form-item>
+
         <el-divider />
 
         <el-form-item>
@@ -112,9 +276,10 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { getSettings, updateSettings } from '@/api/settings'
+import { triggerBackup, restoreBackup } from '@/api/backup'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -126,8 +291,30 @@ const form = ref({
   request_timeout: 30,
   default_video_count: 20,
   site_name: 'TikTok Monitor',
-  logo_image: ''
+  logo_image: '',
+  backup_enabled: false,
+  backup_interval_hours: 24,
+  telegram_enabled: false,
+  telegram_bot_token: '',
+  telegram_chat_id: '',
+  email_enabled: false,
+  smtp_host: '',
+  smtp_port: 587,
+  smtp_username: '',
+  smtp_password: '',
+  smtp_sender: '',
+  email_recipient: '',
+  smtp_use_tls: true
 })
+
+const backupLoading = ref(false)
+const backupResult = ref(null)
+const backupError = ref(null)
+
+const restoreFile = ref(null)
+const restoreLoading = ref(false)
+const restoreResult = ref(null)
+const restoreError = ref(null)
 
 const rules = {
   default_interval: [
@@ -163,7 +350,20 @@ const loadSettings = async () => {
       request_timeout: data.request_timeout,
       default_video_count: data.default_video_count || 20,
       site_name: data.site_name || 'TikTok Monitor',
-      logo_image: data.logo_image || ''
+      logo_image: data.logo_image || '',
+      backup_enabled: data.backup_enabled || false,
+      backup_interval_hours: data.backup_interval_hours || 24,
+      telegram_enabled: data.telegram_enabled || false,
+      telegram_bot_token: data.telegram_bot_token || '',
+      telegram_chat_id: data.telegram_chat_id || '',
+      email_enabled: data.email_enabled || false,
+      smtp_host: data.smtp_host || '',
+      smtp_port: data.smtp_port || 587,
+      smtp_username: data.smtp_username || '',
+      smtp_password: data.smtp_password || '',
+      smtp_sender: data.smtp_sender || '',
+      email_recipient: data.email_recipient || '',
+      smtp_use_tls: data.smtp_use_tls !== undefined ? data.smtp_use_tls : true
     }
   } catch (error) {
     console.error('Failed to load settings:', error)
@@ -215,7 +415,20 @@ const handleSubmit = async () => {
       request_timeout: form.value.request_timeout,
       default_video_count: form.value.default_video_count,
       site_name: form.value.site_name,
-      logo_image: form.value.logo_image
+      logo_image: form.value.logo_image,
+      backup_enabled: form.value.backup_enabled,
+      backup_interval_hours: form.value.backup_interval_hours,
+      telegram_enabled: form.value.telegram_enabled,
+      telegram_bot_token: form.value.telegram_bot_token,
+      telegram_chat_id: form.value.telegram_chat_id,
+      email_enabled: form.value.email_enabled,
+      smtp_host: form.value.smtp_host,
+      smtp_port: form.value.smtp_port,
+      smtp_username: form.value.smtp_username,
+      smtp_password: form.value.smtp_password,
+      smtp_sender: form.value.smtp_sender,
+      email_recipient: form.value.email_recipient,
+      smtp_use_tls: form.value.smtp_use_tls
     }
     await updateSettings(payload)
     ElMessage.success('设置保存成功，刷新页面生效')
@@ -232,6 +445,62 @@ const handleSubmit = async () => {
     ElMessage.error('设置保存失败')
   } finally {
     submitting.value = false
+  }
+}
+
+const handleRestore = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '此操作将用备份文件完整替换当前数据库，所有现有数据将被覆盖且无法撤销。确定要继续吗？',
+      '警告：数据库恢复',
+      {
+        confirmButtonText: '确认恢复',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger',
+      }
+    )
+  } catch {
+    return // user cancelled
+  }
+
+  restoreLoading.value = true
+  restoreResult.value = null
+  restoreError.value = null
+
+  try {
+    const data = await restoreBackup(restoreFile.value.raw)
+    restoreResult.value = data
+    restoreFile.value = null
+  } catch (error) {
+    restoreError.value = error.response?.data?.detail || '恢复失败，请查看日志'
+  } finally {
+    restoreLoading.value = false
+  }
+}
+
+const handleTriggerBackup = async () => {
+  backupLoading.value = true
+  backupResult.value = null
+  backupError.value = null
+  try {
+    await triggerBackup()
+    backupResult.value = { filename: '下载已开始', file_size: 0 }
+  } catch (error) {
+    // blob error responses need special handling
+    const detail = error.response?.data
+    if (detail instanceof Blob) {
+      const text = await detail.text()
+      try {
+        backupError.value = JSON.parse(text)?.detail || '备份失败，请查看日志'
+      } catch {
+        backupError.value = '备份失败，请查看日志'
+      }
+    } else {
+      backupError.value = detail?.detail || '备份失败，请查看日志'
+    }
+  } finally {
+    backupLoading.value = false
   }
 }
 
