@@ -84,6 +84,33 @@
 
       <el-main class="main-content">
         <Breadcrumb :isMobile="isMobile" />
+        <!-- 移动端团队子导航 -->
+        <div v-if="isMobile && route.path.startsWith('/team')" class="team-sub-nav">
+          <button
+            v-if="authStore.hasPermission('team:member:view')"
+            class="team-sub-btn"
+            :class="{ 'is-active': route.path === '/team/member' }"
+            @click="router.push('/team/member')"
+          >成员</button>
+          <button
+            v-if="authStore.hasPermission('team:dept:view')"
+            class="team-sub-btn"
+            :class="{ 'is-active': route.path === '/team/dept' }"
+            @click="router.push('/team/dept')"
+          >部门</button>
+          <button
+            v-if="authStore.hasPermission('team:role:view')"
+            class="team-sub-btn"
+            :class="{ 'is-active': route.path === '/team/role' }"
+            @click="router.push('/team/role')"
+          >角色</button>
+          <button
+            v-if="authStore.hasPermission('team:log:view')"
+            class="team-sub-btn"
+            :class="{ 'is-active': route.path === '/team/log' }"
+            @click="router.push('/team/log')"
+          >日志</button>
+        </div>
         <router-view />
       </el-main>
     </el-container>
@@ -376,5 +403,35 @@ onMounted(() => {
     padding-right: 0 !important;
     background: #F2F2F7;
   }
+}
+
+/* ===== 移动端团队子导航 ===== */
+.team-sub-nav {
+  display: flex;
+  background: rgba(118, 118, 128, 0.12);
+  border-radius: 9px;
+  padding: 2px;
+  margin: 0 16px 12px;
+}
+
+.team-sub-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  padding: 6px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #3C3C43;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+  min-height: 32px;
+}
+
+.team-sub-btn.is-active {
+  background: #FFFFFF;
+  color: #000000;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 }
 </style>
