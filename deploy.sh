@@ -28,6 +28,32 @@ info()  { echo -e "${BLUE}[→]${NC} $1"; }
 title() { echo -e "${CYAN}$1${NC}"; }
 
 # =============================================================================
+# GitHub Token 管理（首次输入后保存，后续自动读取）
+# =============================================================================
+TOKEN_FILE="$HOME/.github_token"
+SCRIPT_URL="https://raw.githubusercontent.com/TheLayya/tk_crm/main/deploy.sh"
+
+# 如果通过 curl | bash 执行（没有脚本文件路径），先处理 token 再重新拉取执行
+if [ -z "$BASH_SOURCE" ] || [ "$BASH_SOURCE" = "bash" ] || [ "$0" = "bash" ]; then
+  if [ ! -f "$TOKEN_FILE" ]; then
+    echo -e "${BLUE}[?]${NC} 首次运行，请输入 GitHub Personal Access Token:"
+    read -rsp "  Token: " _token
+    echo ""
+    [ -z "$_token" ] && echo -e "${RED}[✗]${NC} Token 不能为空" && exit 1
+    echo "$_token" > "$TOKEN_FILE"
+    chmod 600 "$TOKEN_FILE"
+    echo -e "${GREEN}[✓]${NC} Token 已保存到 $TOKEN_FILE，后续无需重复输入"
+  fi
+  _saved_token=$(cat "$TOKEN_FILE")
+  exec bash <(curl -fsSL -H "Authorization: token $_saved_token" "$SCRIPT_URL") "$@"
+fi
+
+# 读取已保存的 token（本地执行时使用）
+if [ -f "$TOKEN_FILE" ]; then
+  SAVED_GITHUB_TOKEN=$(cat "$TOKEN_FILE")
+fi
+
+# =============================================================================
 # 子命令处理（在项目目录内执行）
 # =============================================================================
 case "$1" in
@@ -109,10 +135,19 @@ echo ""
 read -rp "$(echo -e "${BLUE}[?]${NC} GitHub 仓库地址 (例: https://github.com/yourname/tiktok-monitor): ")" GITHUB_REPO
 [ -z "$GITHUB_REPO" ] && error "仓库地址不能为空"
 
-# Personal Access Token
-read -rsp "$(echo -e "${BLUE}[?]${NC} GitHub Personal Access Token: ")" GITHUB_TOKEN
-echo ""
-[ -z "$GITHUB_TOKEN" ] && error "Token 不能为空"
+# Personal Access Token（优先使用已保存的 token）
+if [ -n "$SAVED_GITHUB_TOKEN" ]; then
+  GITHUB_TOKEN="$SAVED_GITHUB_TOKEN"
+  log "使用已保存的 GitHub Token"
+else
+  read -rsp "$(echo -e "${BLUE}[?]${NC} GitHub Personal Access Token: ")" GITHUB_TOKEN
+  echo ""
+  [ -z "$GITHUB_TOKEN" ] && error "Token 不能为空"
+  # 保存供下次使用
+  echo "$GITHUB_TOKEN" > "$TOKEN_FILE"
+  chmod 600 "$TOKEN_FILE"
+  log "Token 已保存到 $TOKEN_FILE"
+fi
 
 # 安装目录
 read -rp "$(echo -e "${BLUE}[?]${NC} 安装目录 [默认: /opt/tiktok-monitor]: ")" INSTALL_DIR
