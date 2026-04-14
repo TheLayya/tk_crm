@@ -110,6 +110,7 @@
 
   .ios-card-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     padding: 10px 16px;
     border-top: 0.5px solid rgba(0, 0, 0, 0.08);
@@ -118,6 +119,7 @@
 
   .ios-card-actions .el-button {
     flex: 1;
+    min-width: 60px;
     min-height: 36px;
     border-radius: 8px;
   }

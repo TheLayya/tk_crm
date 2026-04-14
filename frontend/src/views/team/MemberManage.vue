@@ -96,7 +96,7 @@
               <el-tag v-for="r in row.roles" :key="r.id" size="small" style="margin-right:4px">{{ r.name }}</el-tag>
             </span>
           </div>
-          <div class="ios-card-actions">
+          <div class="ios-card-actions ios-card-actions-wrap">
             <el-button v-permission="'team:member:edit'" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button v-permission="'team:member:edit'" size="small" :type="row.is_active ? 'warning' : 'success'" @click="toggleActive(row)">
               {{ row.is_active ? '禁用' : '启用' }}
@@ -383,5 +383,14 @@ onUnmounted(() => {
   .member-manage :deep(.el-card__body) {
     padding: 12px;
   }
+}
+
+.ios-card-actions-wrap {
+  flex-wrap: wrap;
+}
+
+.ios-card-actions-wrap .el-button {
+  flex: unset !important;
+  min-width: unset !important;
 }
 </style>
