@@ -1,6 +1,7 @@
 import httpx
 import asyncio
 import logging
+import string
 import time
 import random
 from datetime import datetime
@@ -168,141 +169,160 @@ class ScraperService:
 
     async def fetch_user_videos(self, sec_uid: str, proxy=None, max_count: int = 20) -> Dict[str, Any]:
         """
-        使用TikTok移动端API抓取用户视频列表（已验证可用的方案）
+        抓取用户视频列表（yt-dlp 同款 Web API 方案，支持翻页）
+        流程：先访问用户详情接口获取 msToken cookie，再分页请求 item_list
         返回格式: {success: bool, data: list | None, error: str | None}
-        
-        Args:
-            sec_uid: 用户的sec_uid
-            proxy: 代理配置
-            max_count: 最多获取的视频数量（默认20）
         """
         proxy_url = self._build_proxy_url(proxy)
         proxies = {"all://": proxy_url} if proxy_url else None
 
+        device_id = str(random.randint(7250000000000000000, 7325099899999994577))
+        verify_fp = 'verify_' + ''.join(random.choices(string.hexdigits.lower(), k=7))
+
+        base_headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': 'https://www.tiktok.com/',
+        }
+
         try:
-            # 生成设备参数
-            device_id = str(random.randint(10**18, 10**19 - 1))
-            iid = str(random.randint(7000000000000000000, 7999999999999999999))
-            openudid = ''.join([format(random.randint(0, 255), '02x') for _ in range(16)])
-            cdid = ''.join([format(random.randint(0, 255), '02x') for _ in range(16)])
-            
             async with httpx.AsyncClient(
                 proxies=proxies,
                 timeout=self.timeout,
-                follow_redirects=True
+                follow_redirects=True,
             ) as client:
-                # 使用移动端API端点
-                base_url = "https://api16-normal-c-alisg.tiktokv.com/lite/v2/public/item/list/"
-                
-                # 构建参数（模拟真实移动设备）
-                params = {
-                    'source': '0',
-                    'sec_user_id': sec_uid,
-                    'count': str(min(max_count, 20)),  # 单次最多20个
-                    'max_cursor': '0',
-                    'filter_private': '1',
-                    'lite_flow_schedule': 'new',
-                    'cdn_cache_is_login': '1',
-                    'cdn_cache_strategy': 'v0',
-                    'manifest_version_code': '370402',
-                    '_rticket': str(int(time.time() * 1000)),
-                    'app_language': 'en',
-                    'app_type': 'normal',
-                    'iid': iid,
-                    'app_package': 'com.zhiliaoapp.musically.go',
-                    'channel': 'googleplay',
-                    'device_type': 'RMO-NX1',
-                    'language': 'en',
-                    'host_abi': 'arm64-v8a',
-                    'locale': 'en',
-                    'resolution': '1080*2316',
-                    'openudid': openudid,
-                    'update_version_code': '370402',
-                    'ac2': '0',
-                    'cdid': cdid,
-                    'sys_region': 'US',
-                    'os_api': '33',
-                    'timezone_name': 'America/New_York',
-                    'dpi': '480',
-                    'carrier_region': 'US',
-                    'ac': 'mobile',
-                    'device_id': device_id,
-                    'os_version': '13',
-                    'timezone_offset': '-14400',
-                    'version_code': '370402',
-                    'app_name': 'musically_go',
-                    'ab_version': '37.4.2',
-                    'version_name': '37.4.2',
-                    'device_brand': 'HONOR',
-                    'op_region': 'US',
-                    'ssmix': 'a',
-                    'device_platform': 'android',
-                    'build_number': '37.4.2',
-                    'region': 'US',
-                    'aid': '1340',
-                    'ts': str(int(time.time())),
-                }
-                
-                # 移动端 User-Agent
-                headers = {
-                    'User-Agent': 'com.zhiliaoapp.musically.go/370402 (Linux; Android 13; en; RMO-NX1; Build/HONORRMO-N21;tt-ok/3.12.13.27-ul)',
-                    'Accept': '*/*',
-                }
-                
-                response = await client.get(base_url, params=params, headers=headers)
-                
-                logger.info(f"Mobile API response status: {response.status_code}")
+                # Step 1: 获取 msToken cookie
+                await client.get(
+                    f'https://www.tiktok.com/api/user/detail/?uniqueId=placeholder&aid=1988&app_name=tiktok_web&device_platform=web_pc&secUid={sec_uid}',
+                    headers=base_headers,
+                )
+                cookies = {c.name: c.value for c in client.cookies.jar}
+                ms_token = cookies.get('msToken', '')
 
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-                        
-                        # 移动端API返回的字段名
-                        aweme_list = data.get('aweme_list', [])
-                        
-                        if not aweme_list:
-                            logger.warning(f"No aweme_list in response, response keys: {data.keys()}")
-                            return {'success': False, 'data': None, 'error': 'No aweme_list in API response'}
-                        
-                        videos = []
-                        for item in aweme_list:
-                            # 移动端API的数据结构
-                            video_id = item.get('aweme_id') or item.get('id')
-                            statistics = item.get('statistics', {})
-                            video_info_data = item.get('video', {})
-                            
-                            # 获取封面URL
-                            cover_url = None
-                            if 'cover' in video_info_data and isinstance(video_info_data['cover'], dict):
-                                url_list = video_info_data['cover'].get('url_list', [])
-                                if url_list:
-                                    cover_url = url_list[0]
-                            
-                            video_info = {
-                                'video_id': video_id,
-                                'title': item.get('desc', ''),
-                                'cover_url': cover_url,
-                                'play_count': statistics.get('play_count', 0),
-                                'like_count': statistics.get('digg_count', 0),
-                                'comment_count': statistics.get('comment_count', 0),
-                                'share_count': statistics.get('share_count', 0),
-                                'published_at': item.get('create_time'),
-                            }
-                            videos.append(video_info)
-                        
-                        logger.info(f"Successfully fetched {len(videos)} videos from mobile API")
-                        return {'success': True, 'data': videos, 'error': None}
-                        
-                    except ValueError as json_error:
-                        response_preview = response.text[:200] if response.text else "(empty)"
-                        logger.error(f"JSON parse error: {json_error}, response preview: {response_preview}")
-                        return {'success': False, 'data': None, 'error': f'Invalid JSON response: {str(json_error)[:100]}'}
+                # Step 2: 分页拉取，cursor 从当前时间戳开始（newest-to-oldest）
+                all_videos = []
+                seen_ids = set()
+                cursor = int(time.time() * 1000)
 
-                return {'success': False, 'data': None, 'error': f'HTTP {response.status_code}'}
+                while len(all_videos) < max_count:
+                    params = {
+                        'aid': '1988',
+                        'app_language': 'en',
+                        'app_name': 'tiktok_web',
+                        'browser_language': 'en-US',
+                        'browser_name': 'Mozilla',
+                        'browser_online': 'true',
+                        'browser_platform': 'Win32',
+                        'browser_version': '5.0 (Windows)',
+                        'channel': 'tiktok_web',
+                        'cookie_enabled': 'true',
+                        'count': '15',
+                        'cursor': str(cursor),
+                        'device_id': device_id,
+                        'device_platform': 'web_pc',
+                        'focus_state': 'true',
+                        'from_page': 'user',
+                        'history_len': '2',
+                        'is_fullscreen': 'false',
+                        'is_page_visible': 'true',
+                        'language': 'en',
+                        'msToken': ms_token,
+                        'os': 'windows',
+                        'priority_region': '',
+                        'referer': '',
+                        'region': 'US',
+                        'screen_height': '1080',
+                        'screen_width': '1920',
+                        'secUid': sec_uid,
+                        'type': '1',
+                        'tz_name': 'UTC',
+                        'verifyFp': verify_fp,
+                        'webcast_language': 'en',
+                    }
+
+                    response = await client.get(
+                        'https://www.tiktok.com/api/creator/item_list/',
+                        params=params,
+                        headers=base_headers,
+                    )
+
+                    logger.info(f"Web API response: {response.status_code}, body_len: {len(response.content)}, cursor={cursor}")
+
+                    if response.status_code != 200 or not response.content:
+                        preview = response.text[:200] if response.content else '(empty)'
+                        logger.warning(f"Web API non-200: {response.status_code}, body: {preview}")
+                        if not all_videos:
+                            return {'success': False, 'data': None, 'error': f'HTTP {response.status_code}'}
+                        break
+
+                    data = response.json()
+                    item_list = data.get('itemList', [])
+
+                    if not item_list:
+                        status_code = data.get('statusCode', data.get('status_code', 0))
+                        logger.warning(f"Web API empty itemList, statusCode={status_code}")
+                        break
+
+                    # 去重后加入结果
+                    new_videos = [v for v in self._parse_item_list(item_list) if v['video_id'] not in seen_ids]
+                    for v in new_videos:
+                        seen_ids.add(v['video_id'])
+                    all_videos.extend(new_videos)
+                    logger.info(f"Web API fetched {len(item_list)} raw, {len(new_videos)} new (total: {len(all_videos)}, need: {max_count})")
+
+                    has_more = data.get('hasMorePrevious', data.get('hasMore', False))
+                    logger.info(f"hasMorePrevious={has_more}")
+
+                    if len(all_videos) >= max_count:
+                        break
+                    if not has_more and len(item_list) < 15:
+                        break  # 真的到底了
+
+                    last_create_time = item_list[-1].get('createTime')
+                    if not last_create_time:
+                        break
+                    new_cursor = int(last_create_time * 1000)
+                    if new_cursor >= cursor:
+                        break  # 防止死循环
+                    cursor = new_cursor
+
+                if all_videos:
+                    result = all_videos[:max_count]
+                    logger.info(f"Total fetched: {len(result)} videos")
+                    return {'success': True, 'data': result, 'error': None}
+
+                return {'success': False, 'data': None, 'error': 'No videos returned'}
 
         except Exception as e:
-            logger.error(f"Fetch videos error for sec_uid={sec_uid}: {e}")
+            logger.error(f"fetch_user_videos error for sec_uid={sec_uid}: {e}")
             return {'success': False, 'data': None, 'error': str(e)[:200]}
+
+    def _parse_item_list(self, item_list: list) -> list:
+        """解析 Web API 返回的 itemList（字段名为驼峰式）"""
+        videos = []
+        for item in item_list:
+            video_id = item.get('id')
+            stats = item.get('stats', {})
+            video_info = item.get('video', {})
+
+            cover_url = None
+            for cover_key in ('cover', 'originCover', 'dynamicCover'):
+                cover_url = video_info.get(cover_key)
+                if cover_url:
+                    break
+
+            videos.append({
+                'video_id': video_id,
+                'title': item.get('desc', ''),
+                'cover_url': cover_url,
+                'play_count': stats.get('playCount', 0),
+                'like_count': stats.get('diggCount', 0),
+                'comment_count': stats.get('commentCount', 0),
+                'share_count': stats.get('shareCount', 0),
+                'published_at': item.get('createTime'),
+            })
+        return videos
 
     async def test_proxy(self, proxy) -> Dict[str, Any]:
         """测试代理连通性，访问 TikTok 主站"""

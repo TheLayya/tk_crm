@@ -201,36 +201,52 @@ async def check_account(db: Session, account: MonitorAccount) -> MonitorHistory:
                 if video_result["success"] and video_result.get("data"):
                     videos_data = video_result["data"]
                     logger.info(f"Account {account.username}: fetched {len(videos_data)} videos")
-                    
+
                     # 保存或更新视频记录
                     for video_info in videos_data:
-                        existing_video = db.query(Video).filter(
-                            Video.account_id == account.id,
-                            Video.video_id == video_info["video_id"]
-                        ).first()
-                        
-                        if existing_video:
-                            # 更新现有视频
-                            existing_video.title = video_info.get("title", existing_video.title)
-                            existing_video.cover_url = video_info.get("cover_url", existing_video.cover_url)
-                            existing_video.play_count = video_info.get("play_count", existing_video.play_count)
-                            existing_video.like_count = video_info.get("like_count", existing_video.like_count)
-                            existing_video.comment_count = video_info.get("comment_count", existing_video.comment_count)
-                            existing_video.share_count = video_info.get("share_count", existing_video.share_count)
-                        else:
-                            # 创建新视频记录
-                            new_video = Video(
-                                account_id=account.id,
-                                video_id=video_info["video_id"],
-                                title=video_info.get("title", ""),
-                                cover_url=video_info.get("cover_url", ""),
-                                play_count=video_info.get("play_count", 0),
-                                like_count=video_info.get("like_count", 0),
-                                comment_count=video_info.get("comment_count", 0),
-                                share_count=video_info.get("share_count", 0),
-                                published_at=datetime.utcfromtimestamp(video_info["published_at"]) if video_info.get("published_at") else None
-                            )
-                            db.add(new_video)
+                        try:
+                            existing_video = db.query(Video).filter(
+                                Video.account_id == account.id,
+                                Video.video_id == video_info["video_id"]
+                            ).first()
+
+                            if existing_video:
+                                existing_video.title = video_info.get("title", existing_video.title)
+                                existing_video.cover_url = video_info.get("cover_url", existing_video.cover_url)
+                                existing_video.play_count = video_info.get("play_count", existing_video.play_count)
+                                existing_video.like_count = video_info.get("like_count", existing_video.like_count)
+                                existing_video.comment_count = video_info.get("comment_count", existing_video.comment_count)
+                                existing_video.share_count = video_info.get("share_count", existing_video.share_count)
+                            else:
+                                new_video = Video(
+                                    account_id=account.id,
+                                    video_id=video_info["video_id"],
+                                    title=video_info.get("title", ""),
+                                    cover_url=video_info.get("cover_url", ""),
+                                    play_count=video_info.get("play_count", 0),
+                                    like_count=video_info.get("like_count", 0),
+                                    comment_count=video_info.get("comment_count", 0),
+                                    share_count=video_info.get("share_count", 0),
+                                    published_at=datetime.utcfromtimestamp(video_info["published_at"]) if video_info.get("published_at") else None
+                                )
+                                db.add(new_video)
+                                db.flush()  # 立即写入，提前暴露冲突
+                        except Exception as ve:
+                            logger.warning(f"Account {account.username}: skip video {video_info.get('video_id')} - {ve}")
+                            db.rollback()
+                            # rollback 后重新查一次，改为 update
+                            try:
+                                existing_video = db.query(Video).filter(
+                                    Video.account_id == account.id,
+                                    Video.video_id == video_info["video_id"]
+                                ).first()
+                                if existing_video:
+                                    existing_video.play_count = video_info.get("play_count", existing_video.play_count)
+                                    existing_video.like_count = video_info.get("like_count", existing_video.like_count)
+                                    existing_video.comment_count = video_info.get("comment_count", existing_video.comment_count)
+                                    existing_video.share_count = video_info.get("share_count", existing_video.share_count)
+                            except Exception:
+                                pass
                 else:
                     logger.warning(f"Account {account.username}: failed to fetch videos - {video_result.get('error')}")
             except Exception as e:
