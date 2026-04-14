@@ -10,8 +10,8 @@
         </div>
       </template>
 
-      <!-- 搜索栏 -->
-      <el-form inline class="search-form">
+      <!-- 搜索栏：桌面端完整版 -->
+      <el-form v-if="!isMobile" inline class="search-form">
         <el-form-item label="部门">
           <el-select v-model="filters.dept_id" clearable placeholder="全部部门" style="width:160px" @change="loadMembers">
             <el-option v-for="d in deptOptions" :key="d.id" :label="d.name" :value="d.id" />
@@ -31,8 +31,18 @@
         </el-form-item>
       </el-form>
 
-      <!-- 表格 -->
-      <el-table :data="members" v-loading="loading" stripe>
+      <!-- 搜索栏：移动端简化版 -->
+      <el-form v-if="isMobile" inline class="search-form">
+        <el-form-item>
+          <el-input v-model="filters.username" clearable placeholder="搜索用户名" @keyup.enter="loadMembers" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="loadMembers">搜索</el-button>
+        </el-form-item>
+      </el-form>
+
+      <!-- 桌面端表格 -->
+      <el-table v-if="!isMobile" :data="members" v-loading="loading" stripe>
         <el-table-column prop="username" label="用户名" />
         <el-table-column prop="real_name" label="姓名" />
         <el-table-column prop="department_name" label="部门" />
@@ -59,11 +69,45 @@
               <el-icon><Lock /></el-icon> 重置密码
             </el-button>
             <el-button v-permission="'team:member:delete'" link type="danger" size="small" @click="openDelete(row)">
-              <el-icon><Lock /></el-icon> 删除
+              <el-icon><Delete /></el-icon> 删除
             </el-button>
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 移动端卡片列表 -->
+      <div v-if="isMobile" class="ios-card-list" v-loading="loading">
+        <div v-for="row in members" :key="row.id" class="ios-card">
+          <div class="ios-card-row">
+            <span class="member-username">{{ row.username }}</span>
+            <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">{{ row.is_active ? '启用' : '禁用' }}</el-tag>
+          </div>
+          <div v-if="row.real_name" class="ios-card-row">
+            <span class="ios-card-row-label">姓名</span>
+            <span class="ios-card-row-value">{{ row.real_name }}</span>
+          </div>
+          <div v-if="row.department_name" class="ios-card-row">
+            <span class="ios-card-row-label">部门</span>
+            <span class="ios-card-row-value">{{ row.department_name }}</span>
+          </div>
+          <div v-if="row.roles?.length" class="ios-card-row">
+            <span class="ios-card-row-label">角色</span>
+            <span class="ios-card-row-value">
+              <el-tag v-for="r in row.roles" :key="r.id" size="small" style="margin-right:4px">{{ r.name }}</el-tag>
+            </span>
+          </div>
+          <div class="ios-card-actions">
+            <el-button v-permission="'team:member:edit'" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button v-permission="'team:member:edit'" size="small" :type="row.is_active ? 'warning' : 'success'" @click="toggleActive(row)">
+              {{ row.is_active ? '禁用' : '启用' }}
+            </el-button>
+            <el-button v-permission="'team:member:edit'" size="small" type="info" @click="handleUnlock(row)">解锁</el-button>
+            <el-button v-permission="'team:member:reset_password'" size="small" @click="openResetPassword(row)">重置密码</el-button>
+            <el-button v-permission="'team:member:delete'" size="small" type="danger" @click="openDelete(row)">删除</el-button>
+          </div>
+        </div>
+        <div v-if="!members.length && !loading" style="text-align:center;color:#999;padding:32px 0">暂无数据</div>
+      </div>
 
       <el-pagination
         v-model:current-page="page"
@@ -123,11 +167,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Lock, Unlock } from '@element-plus/icons-vue'
+import { Plus, Lock, Unlock, Delete } from '@element-plus/icons-vue'
 import { getMembers, createMember, updateMember, deleteMember, resetMemberPassword, getRoles, getDeptTree, unlockMember } from '@/api/team'
 import { verifyPassword } from '@/api/auth'
+
+// 响应式断点
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value <= 768)
+const onResize = () => { windowWidth.value = window.innerWidth }
 
 const members = ref([])
 const loading = ref(false)
@@ -292,10 +341,15 @@ const handleConfirmAction = async () => {
 }
 
 onMounted(async () => {
+  window.addEventListener('resize', onResize)
   const [tree, roleList] = await Promise.all([getDeptTree(), getRoles()])
   deptOptions.value = flattenDepts(tree)
   roles.value = roleList
   await loadMembers()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
 })
 </script>
 
@@ -313,5 +367,21 @@ onMounted(async () => {
 .pagination {
   margin-top: 16px;
   justify-content: flex-end;
+}
+
+.member-username {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+@media (max-width: 768px) {
+  .member-manage {
+    padding: 0;
+  }
+
+  .member-manage :deep(.el-card__body) {
+    padding: 12px;
+  }
 }
 </style>

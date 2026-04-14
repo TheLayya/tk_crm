@@ -55,10 +55,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { getDeptTree, createDept, updateDept, deleteDept } from '@/api/team'
+
+// 响应式断点
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value <= 768)
+const onResize = () => { windowWidth.value = window.innerWidth }
 
 const treeData = ref([])
 const dialogVisible = ref(false)
@@ -131,7 +136,14 @@ const handleDelete = async (data) => {
   }
 }
 
-onMounted(loadTree)
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  loadTree()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+})
 </script>
 
 <style scoped>
@@ -160,5 +172,20 @@ onMounted(loadTree)
 .tree-node:hover .tree-actions {
   display: flex;
   gap: 4px;
+}
+
+@media (max-width: 768px) {
+  .dept-manage {
+    padding: 0;
+  }
+
+  .dept-manage :deep(.el-card__body) {
+    padding: 12px;
+  }
+
+  .tree-actions {
+    display: flex;
+    gap: 4px;
+  }
 }
 </style>

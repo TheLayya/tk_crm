@@ -9,7 +9,7 @@
           <el-option label="Instagram" value="instagram" />
           <el-option label="Facebook" value="facebook" />
         </el-select>
-        <el-select v-model="filters.status" placeholder="状态" clearable @change="handleFilterChange" style="width:110px">
+        <el-select v-if="!isMobile" v-model="filters.status" placeholder="状态" clearable @change="handleFilterChange" style="width:110px">
           <el-option label="正常" value="正常" />
           <el-option label="自用" value="自用" />
           <el-option label="封禁" value="封禁" />
@@ -18,12 +18,12 @@
         <el-input v-model="filters.keyword" placeholder="搜索账号/昵称" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:180px">
           <template #append><el-button :icon="Search" @click="handleFilterChange" /></template>
         </el-input>
-        <el-input v-model="filters.purchase_channel" placeholder="采购渠道" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:140px" />
-        <el-input v-model="filters.sale_customer" placeholder="出售客户" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:140px" />
+        <el-input v-if="!isMobile" v-model="filters.purchase_channel" placeholder="采购渠道" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:140px" />
+        <el-input v-if="!isMobile" v-model="filters.sale_customer" placeholder="出售客户" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:140px" />
         <div class="filter-actions">
           <el-button type="primary" @click="handleCreate"><el-icon><Plus /></el-icon>新增账号</el-button>
-          <el-button @click="showImportDialog = true"><el-icon><Upload /></el-icon>批量导入</el-button>
-          <el-dropdown @command="handleExport">
+          <el-button v-if="!isMobile" @click="showImportDialog = true"><el-icon><Upload /></el-icon>批量导入</el-button>
+          <el-dropdown v-if="!isMobile" @command="handleExport">
             <el-button><el-icon><Download /></el-icon>导出<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
             <template #dropdown>
               <el-dropdown-menu>
@@ -32,7 +32,7 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-button @click="showColumnConfig = true"><el-icon><Setting /></el-icon>列配置</el-button>
+          <el-button v-if="!isMobile" @click="showColumnConfig = true"><el-icon><Setting /></el-icon>列配置</el-button>
         </div>
       </div>
 
@@ -58,7 +58,7 @@
 
     <!-- 表格 -->
     <el-card>
-      <el-table :data="accounts" v-loading="loading" @selection-change="handleSelectionChange" @row-dblclick="handleRowDblClick" border size="small">
+      <el-table v-if="!isMobile" :data="accounts" v-loading="loading" @selection-change="handleSelectionChange" @row-dblclick="handleRowDblClick" border size="small">
         <el-table-column type="selection" width="40" fixed="left" />
         <el-table-column label="平台" width="90" fixed="left">
           <template #default="{ row }">
@@ -234,6 +234,60 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 移动端卡片列表 -->
+      <div v-if="isMobile" v-loading="loading" class="ios-card-list">
+        <div v-for="row in accounts" :key="row.id" class="ios-card">
+          <!-- 卡片头部 -->
+          <div class="ios-card-account-header">
+            <el-avatar v-if="row.avatar_url" :src="row.avatar_url" :size="40">
+              <template #error>{{ (row.account||'?')[0].toUpperCase() }}</template>
+            </el-avatar>
+            <el-avatar v-else :size="40">{{ (row.account||'?')[0].toUpperCase() }}</el-avatar>
+            <div class="ios-card-account-info">
+              <div class="ios-card-account-name">{{ row.account }}</div>
+              <div v-if="row.nickname" class="ios-card-account-nickname">{{ row.nickname }}</div>
+            </div>
+            <div class="ios-card-account-tags">
+              <el-tag :type="platformTagType(row.platform)" size="small">{{ row.platform?.toUpperCase() }}</el-tag>
+              <el-tag :type="statusTagType(row.status)" size="small" style="margin-left:4px">{{ row.status }}</el-tag>
+            </div>
+          </div>
+          <!-- 行项 -->
+          <div v-if="row.country" class="ios-card-row">
+            <span class="ios-card-row-label">国家</span>
+            <span class="ios-card-row-value">{{ row.country }}</span>
+          </div>
+          <div v-if="row.follower_count != null" class="ios-card-row">
+            <span class="ios-card-row-label">粉丝数</span>
+            <span class="ios-card-row-value">{{ formatNum(row.follower_count) }}</span>
+          </div>
+          <div v-if="row.following_count != null" class="ios-card-row">
+            <span class="ios-card-row-label">关注数</span>
+            <span class="ios-card-row-value">{{ formatNum(row.following_count) }}</span>
+          </div>
+          <div v-if="row.like_count != null" class="ios-card-row">
+            <span class="ios-card-row-label">点赞数</span>
+            <span class="ios-card-row-value">{{ formatNum(row.like_count) }}</span>
+          </div>
+          <div v-if="row.purchase_channel" class="ios-card-row">
+            <span class="ios-card-row-label">采购渠道</span>
+            <span class="ios-card-row-value">{{ row.purchase_channel }}</span>
+          </div>
+          <div v-if="row.sale_customer" class="ios-card-row">
+            <span class="ios-card-row-label">出售客户</span>
+            <span class="ios-card-row-value">{{ row.sale_customer }}</span>
+          </div>
+          <!-- 操作区 -->
+          <div class="ios-card-actions">
+            <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+            <el-button link type="primary" size="small" @click="handleCollectOne(row)">采集</el-button>
+            <el-button link type="primary" size="small" @click="showLogs(row)">历史</el-button>
+            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          </div>
+        </div>
+        <el-empty v-if="!loading && accounts.length === 0" description="暂无数据" />
+      </div>
 
       <div class="pagination">
         <el-pagination
@@ -562,7 +616,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload, Download, Search, Setting, ArrowDown, View, Hide } from '@element-plus/icons-vue'
 import {
@@ -832,7 +886,13 @@ const showLogs = async (row) => {
   } catch (e) { console.error(e) }
 }
 
+// ===== 响应式断点 =====
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value <= 768)
+const handleResize = () => { windowWidth.value = window.innerWidth }
+
 onMounted(() => {
+  window.addEventListener('resize', handleResize)
   loadAccounts()
   const authStore = useAuthStore()
   if (authStore.hasPermission('team:member:view')) {
@@ -840,6 +900,10 @@ onMounted(() => {
       teamMembers.value = data.items || []
     }).catch(() => {})
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 
@@ -855,4 +919,41 @@ onMounted(() => {
 .collect-progress-card :deep(.el-card__body) { padding: 12px 16px; }
 .collect-progress { display: flex; align-items: center; gap: 12px; }
 .import-result { margin-top: 16px; }
+
+/* 移动端样式 */
+@media (max-width: 768px) {
+  .op-account-list { padding: 12px; gap: 12px; }
+  .filter-row { flex-wrap: wrap; gap: 8px; }
+  .filter-actions { margin-left: 0; width: 100%; }
+}
+.ios-card-account-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.ios-card-account-info {
+  flex: 1;
+  min-width: 0;
+}
+.ios-card-account-name {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ios-card-account-nickname {
+  font-size: 12px;
+  color: #909399;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ios-card-account-tags {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
 </style>

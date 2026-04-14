@@ -1,6 +1,17 @@
 <template>
   <div class="monitor-manage">
-    <el-tabs v-model="activeTab" type="border-card" @tab-change="onTabChange">
+    <!-- 移动端分段控制器 -->
+    <div v-if="isMobile" class="ios-segment-control">
+      <button
+        v-for="seg in mobileTabs"
+        :key="seg.key"
+        class="ios-segment-btn"
+        :class="{ 'is-active': activeTab === seg.key }"
+        @click="handleMobileTabChange(seg.key)"
+      >{{ seg.label }}</button>
+    </div>
+
+    <el-tabs v-if="!isMobile" v-model="activeTab" type="border-card" @tab-change="onTabChange">
       <!-- 项目管理 -->
       <el-tab-pane label="项目管理" name="projects">
         <el-card shadow="never" :body-style="{ padding: '0' }">
@@ -13,7 +24,8 @@
               </el-button>
             </div>
           </template>
-          <el-table :data="projects" v-loading="projectLoading">
+          <!-- 桌面端表格 -->
+          <el-table v-if="!isMobile" :data="projects" v-loading="projectLoading">
             <el-table-column prop="name" label="项目名称" />
             <el-table-column prop="description" label="描述" />
             <el-table-column prop="created_by" label="创建人" width="120">
@@ -32,6 +44,35 @@
               </template>
             </el-table-column>
           </el-table>
+          <!-- 移动端 iOS 卡片列表 -->
+          <div v-else class="ios-card-list" v-loading="projectLoading">
+            <div v-for="row in projects" :key="row.id" class="ios-card">
+              <div class="ios-card-title">{{ row.name }}</div>
+              <div class="ios-card-row" v-if="row.description">
+                <span class="ios-card-row-label">描述</span>
+                <span class="ios-card-row-value">{{ row.description }}</span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">账号数量</span>
+                <span class="ios-card-row-value">{{ row.account_count ?? 0 }}</span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">创建人</span>
+                <span class="ios-card-row-value">{{ row.created_by || '-' }}</span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">创建时间</span>
+                <span class="ios-card-row-value">{{ formatDate(row.created_at) }}</span>
+              </div>
+              <div class="ios-card-actions">
+                <el-button size="small" @click="handleEditProject(row)">编辑</el-button>
+                <el-button size="small" type="primary" @click="viewProjectAccounts(row)">查看账号</el-button>
+                <el-button size="small" type="warning" @click="handleProjectMembers(row)">协作成员</el-button>
+                <el-button size="small" type="danger" @click="handleDeleteProject(row)">删除</el-button>
+              </div>
+            </div>
+            <div v-if="!projects.length" class="ios-empty">暂无项目</div>
+          </div>
         </el-card>
       </el-tab-pane>
 
@@ -89,7 +130,7 @@
             <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
           </div>
 
-          <el-table :data="accounts" v-loading="accountLoading" @selection-change="handleSelectionChange">
+          <el-table v-if="!isMobile" :data="accounts" v-loading="accountLoading" @selection-change="handleSelectionChange">
             <el-table-column type="selection" width="55" />
             <el-table-column label="账号信息" min-width="300">
               <template #default="{ row }">
@@ -193,6 +234,46 @@
             </el-table-column>
           </el-table>
 
+          <!-- 移动端 iOS 卡片列表 -->
+          <div v-if="isMobile" class="ios-card-list" v-loading="accountLoading">
+            <div v-for="row in accounts" :key="row.id" class="ios-card">
+              <div class="ios-card-account-header">
+                <el-avatar :src="row.avatar_url" :size="44" v-if="row.avatar_url">
+                  <template #error><el-icon><User /></el-icon></template>
+                </el-avatar>
+                <el-avatar :size="44" v-else><el-icon><User /></el-icon></el-avatar>
+                <div class="ios-card-account-info">
+                  <span class="ios-card-account-name">@{{ row.username }}</span>
+                  <span v-if="row.nickname" class="ios-card-account-nick">{{ row.nickname }}</span>
+                </div>
+                <el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '激活' : '禁用' }}</el-tag>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">粉丝数</span>
+                <span class="ios-card-row-value">{{ formatNumber(row.follower_count) }}</span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">关注数</span>
+                <span class="ios-card-row-value">{{ formatNumber(row.following_count) }}</span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">点赞数</span>
+                <span class="ios-card-row-value">{{ formatNumber(row.like_count) }}</span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">所属项目</span>
+                <span class="ios-card-row-value">{{ row.project_name || '-' }}</span>
+              </div>
+              <div class="ios-card-actions">
+                <el-button size="small" type="primary" @click="viewAccountDetail(row)">详情</el-button>
+                <el-button size="small" @click="handleCheckAccount(row)">立即检查</el-button>
+                <el-button size="small" @click="handleEditAccount(row)">编辑</el-button>
+                <el-button size="small" type="danger" @click="handleDeleteAccount(row)">删除</el-button>
+              </div>
+            </div>
+            <div v-if="!accounts.length" class="ios-empty">暂无账号</div>
+          </div>
+
           <div class="pagination">
             <el-pagination
               v-model:current-page="accountPagination.page"
@@ -235,7 +316,7 @@
             </div>
           </template>
 
-          <el-table :data="proxies" v-loading="proxyLoading" @selection-change="handleProxySelectionChange">
+          <el-table v-if="!isMobile" :data="proxies" v-loading="proxyLoading" @selection-change="handleProxySelectionChange">
             <el-table-column type="selection" width="55" />
             <el-table-column prop="proxy_type" label="类型" width="100">
               <template #default="{ row }">
@@ -282,9 +363,187 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <!-- 移动端 iOS 卡片列表 -->
+          <div v-if="isMobile" class="ios-card-list" v-loading="proxyLoading">
+            <div v-for="row in proxies" :key="row.id" class="ios-card">
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">类型</span>
+                <span class="ios-card-row-value">
+                  <el-tag size="small">{{ row.proxy_type?.toUpperCase() }}</el-tag>
+                </span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">地址</span>
+                <span class="ios-card-row-value">{{ row.host }}:{{ row.port }}</span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">用户名</span>
+                <span class="ios-card-row-value">{{ row.username || '-' }}</span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">状态</span>
+                <span class="ios-card-row-value">
+                  <el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '启用' : '禁用' }}</el-tag>
+                </span>
+              </div>
+              <div class="ios-card-row">
+                <span class="ios-card-row-label">测试结果</span>
+                <span class="ios-card-row-value">
+                  <el-tag v-if="row.last_test_result" :type="row.last_test_result === 'success' ? 'success' : 'danger'" size="small">
+                    {{ row.last_test_result === 'success' ? '成功' : '失败' }}
+                  </el-tag>
+                  <span v-else>-</span>
+                </span>
+              </div>
+              <div class="ios-card-actions">
+                <el-button size="small" type="primary" @click="handleTestProxy(row)" :loading="testingIds.includes(row.id)">测试</el-button>
+                <el-button size="small" @click="handleEditProxy(row)">编辑</el-button>
+                <el-button size="small" type="danger" @click="handleDeleteProxy(row)">删除</el-button>
+              </div>
+            </div>
+            <div v-if="!proxies.length" class="ios-empty">暂无代理</div>
+          </div>
+
         </el-card>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- ===== 移动端内容区 ===== -->
+    <!-- 移动端项目列表 -->
+    <div v-if="isMobile && activeTab === 'projects'">
+      <div class="mobile-section-header">
+        <span>项目管理</span>
+        <el-button type="primary" size="small" @click="handleCreateProject">
+          <el-icon><Plus /></el-icon>新建
+        </el-button>
+      </div>
+      <div class="ios-card-list" v-loading="projectLoading">
+        <div v-for="row in projects" :key="row.id" class="ios-card">
+          <div class="ios-card-title">{{ row.name }}</div>
+          <div class="ios-card-row" v-if="row.description">
+            <span class="ios-card-row-label">描述</span>
+            <span class="ios-card-row-value">{{ row.description }}</span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">账号数量</span>
+            <span class="ios-card-row-value">{{ row.account_count ?? 0 }}</span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">创建人</span>
+            <span class="ios-card-row-value">{{ row.created_by || '-' }}</span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">创建时间</span>
+            <span class="ios-card-row-value">{{ formatDate(row.created_at) }}</span>
+          </div>
+          <div class="ios-card-actions">
+            <el-button size="small" @click="handleEditProject(row)">编辑</el-button>
+            <el-button size="small" type="primary" @click="viewProjectAccounts(row)">查看账号</el-button>
+            <el-button size="small" type="warning" @click="handleProjectMembers(row)">协作成员</el-button>
+            <el-button size="small" type="danger" @click="handleDeleteProject(row)">删除</el-button>
+          </div>
+        </div>
+        <div v-if="!projects.length" class="ios-empty">暂无项目</div>
+      </div>
+    </div>
+
+    <!-- 移动端账号列表 -->
+    <div v-if="isMobile && activeTab === 'accounts'">
+      <div class="mobile-section-header">
+        <span>账号列表</span>
+        <el-button type="primary" size="small" @click="handleCreateAccount">
+          <el-icon><Plus /></el-icon>添加
+        </el-button>
+      </div>
+      <div class="ios-card-list" v-loading="accountLoading">
+        <div v-for="row in accounts" :key="row.id" class="ios-card">
+          <div class="ios-card-account-header">
+            <el-avatar :src="row.avatar_url" :size="44" v-if="row.avatar_url">
+              <template #error><el-icon><User /></el-icon></template>
+            </el-avatar>
+            <el-avatar :size="44" v-else><el-icon><User /></el-icon></el-avatar>
+            <div class="ios-card-account-info">
+              <span class="ios-card-account-name">@{{ row.username }}</span>
+              <span v-if="row.nickname" class="ios-card-account-nick">{{ row.nickname }}</span>
+            </div>
+            <el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '激活' : '禁用' }}</el-tag>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">粉丝数</span>
+            <span class="ios-card-row-value">{{ formatNumber(row.follower_count) }}</span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">关注数</span>
+            <span class="ios-card-row-value">{{ formatNumber(row.following_count) }}</span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">点赞数</span>
+            <span class="ios-card-row-value">{{ formatNumber(row.like_count) }}</span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">所属项目</span>
+            <span class="ios-card-row-value">{{ row.project_name || '-' }}</span>
+          </div>
+          <div class="ios-card-actions">
+            <el-button size="small" type="primary" @click="viewAccountDetail(row)">详情</el-button>
+            <el-button size="small" @click="handleCheckAccount(row)">立即检查</el-button>
+            <el-button size="small" @click="handleEditAccount(row)">编辑</el-button>
+            <el-button size="small" type="danger" @click="handleDeleteAccount(row)">删除</el-button>
+          </div>
+        </div>
+        <div v-if="!accounts.length" class="ios-empty">暂无账号</div>
+      </div>
+    </div>
+
+    <!-- 移动端代理列表 -->
+    <div v-if="isMobile && activeTab === 'proxies' && authStore.hasPermission('monitor:proxy')">
+      <div class="mobile-section-header">
+        <span>代理管理</span>
+        <el-button type="primary" size="small" @click="handleCreateProxy">
+          <el-icon><Plus /></el-icon>添加
+        </el-button>
+      </div>
+      <div class="ios-card-list" v-loading="proxyLoading">
+        <div v-for="row in proxies" :key="row.id" class="ios-card">
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">类型</span>
+            <span class="ios-card-row-value">
+              <el-tag size="small">{{ row.proxy_type?.toUpperCase() }}</el-tag>
+            </span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">地址</span>
+            <span class="ios-card-row-value">{{ row.host }}:{{ row.port }}</span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">用户名</span>
+            <span class="ios-card-row-value">{{ row.username || '-' }}</span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">状态</span>
+            <span class="ios-card-row-value">
+              <el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '启用' : '禁用' }}</el-tag>
+            </span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">测试结果</span>
+            <span class="ios-card-row-value">
+              <el-tag v-if="row.last_test_result" :type="row.last_test_result === 'success' ? 'success' : 'danger'" size="small">
+                {{ row.last_test_result === 'success' ? '成功' : '失败' }}
+              </el-tag>
+              <span v-else>-</span>
+            </span>
+          </div>
+          <div class="ios-card-actions">
+            <el-button size="small" type="primary" @click="handleTestProxy(row)" :loading="testingIds.includes(row.id)">测试</el-button>
+            <el-button size="small" @click="handleEditProxy(row)">编辑</el-button>
+            <el-button size="small" type="danger" @click="handleDeleteProxy(row)">删除</el-button>
+          </div>
+        </div>
+        <div v-if="!proxies.length" class="ios-empty">暂无代理</div>
+      </div>
+    </div>
 
     <!-- ===== 项目弹窗 ===== -->
     <el-dialog v-model="projectDialogVisible" :title="projectDialogTitle" width="500px">
@@ -443,7 +702,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, DocumentAdd, Upload, Download, Search, User, View, Hide, Delete, Check, Close } from '@element-plus/icons-vue'
@@ -464,6 +723,27 @@ const route = useRoute()
 const authStore = useAuthStore()
 
 const activeTab = ref('projects')
+
+// ===== 响应式断点 =====
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value <= 768)
+const handleResize = () => { windowWidth.value = window.innerWidth }
+
+const mobileTabs = computed(() => {
+  const tabs = [
+    { key: 'projects', label: '项目' },
+    { key: 'accounts', label: '账号' }
+  ]
+  if (authStore.hasPermission('monitor:proxy')) {
+    tabs.push({ key: 'proxies', label: '代理' })
+  }
+  return tabs
+})
+
+const handleMobileTabChange = (tab) => {
+  activeTab.value = tab
+  onTabChange(tab)
+}
 
 // ===== 工具函数 =====
 const formatDate = (dateStr) => {
@@ -920,6 +1200,7 @@ const onTabChange = (tab) => {
 }
 
 onMounted(() => {
+  window.addEventListener('resize', handleResize)
   // 支持从其他页面跳转带 tab 参数
   if (route.query.tab) activeTab.value = route.query.tab
   if (route.query.project_id) accountFilters.value.project_id = parseInt(route.query.project_id)
@@ -927,11 +1208,173 @@ onMounted(() => {
   if (activeTab.value === 'accounts') loadAccounts()
   else if (activeTab.value === 'proxies') loadProxies()
 })
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+})
 </script>
 
 <style scoped>
 .monitor-manage {
   padding: 20px;
+}
+
+/* ===== 移动端分段控制器 ===== */
+.ios-segment-control {
+  display: flex;
+  background: rgba(118, 118, 128, 0.12);
+  border-radius: 9px;
+  padding: 2px;
+  margin: 12px 16px 8px;
+}
+
+.ios-segment-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  padding: 6px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #3C3C43;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+  min-height: 32px;
+}
+
+.ios-segment-btn.is-active {
+  background: #FFFFFF;
+  color: #000000;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* ===== 移动端区块标题 ===== */
+.mobile-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #000;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ===== iOS 卡片列表 ===== */
+.ios-card-list {
+  padding: 8px 12px 12px;
+  background: #F2F2F7;
+  min-height: 100px;
+}
+
+.ios-card {
+  background: #FFFFFF;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.ios-card-title {
+  padding: 14px 16px 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #000;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
+}
+
+.ios-card-row {
+  display: flex;
+  align-items: center;
+  padding: 11px 16px;
+  min-height: 44px;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
+}
+
+.ios-card-row:last-of-type {
+  border-bottom: none;
+}
+
+.ios-card-row-label {
+  font-size: 14px;
+  color: #8E8E93;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  min-width: 72px;
+  flex-shrink: 0;
+}
+
+.ios-card-row-value {
+  font-size: 14px;
+  color: #000000;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  flex: 1;
+  text-align: right;
+}
+
+.ios-card-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 0.5px solid rgba(0, 0, 0, 0.08);
+  background: #FAFAFA;
+  flex-wrap: wrap;
+}
+
+.ios-card-actions .el-button {
+  flex: 1;
+  min-height: 34px;
+  border-radius: 8px;
+  min-width: 60px;
+}
+
+/* 账号卡片头部 */
+.ios-card-account-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
+}
+
+.ios-card-account-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ios-card-account-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #000;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.ios-card-account-nick {
+  font-size: 13px;
+  color: #8E8E93;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-empty {
+  text-align: center;
+  padding: 40px 0;
+  color: #8E8E93;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* 移动端隐藏 el-tabs */
+@media (max-width: 768px) {
+  .monitor-manage {
+    padding: 0;
+  }
 }
 .card-header {
   display: flex;

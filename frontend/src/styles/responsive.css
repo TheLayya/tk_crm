@@ -1,0 +1,142 @@
+/* ===== iOS 设计令牌（CSS 变量）===== */
+:root {
+  --ios-bg: #F2F2F7;
+  --ios-card-bg: #FFFFFF;
+  --ios-blue: #007AFF;
+  --ios-gray: #8E8E93;
+  --ios-separator: rgba(0, 0, 0, 0.12);
+  --ios-radius-card: 12px;
+  --ios-radius-dialog: 16px;
+  --ios-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --ios-touch-target: 44px;
+  --ios-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+}
+
+/* ===== 移动端主内容区偏移（为固定顶部栏和底部 Tab Bar 留空间）===== */
+@media (max-width: 768px) {
+  .main-content {
+    padding-top: 56px; /* fallback */
+    padding-top: calc(44px + env(safe-area-inset-top) + 12px) !important;
+    padding-bottom: 61px; /* fallback */
+    padding-bottom: calc(49px + env(safe-area-inset-bottom) + 12px) !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    background: #F2F2F7;
+  }
+}
+
+/* ===== 平板端及以下表格横向滚动 ===== */
+@media (max-width: 1024px) {
+  .el-table {
+    overflow-x: auto;
+  }
+  .el-table__body-wrapper {
+    overflow-x: auto !important;
+  }
+}
+
+/* ===== 移动端对话框全屏覆盖 ===== */
+@media (max-width: 768px) {
+  .el-dialog {
+    width: 95vw !important;
+    max-height: 90vh !important;
+    overflow-y: auto;
+    margin: 5vh auto !important;
+    border-radius: 16px !important;
+  }
+  .el-dialog__body {
+    overflow-y: auto;
+    max-height: calc(90vh - 120px);
+  }
+  .el-dialog__header {
+    padding: 16px 20px 12px;
+  }
+}
+
+/* ===== iOS 系统字体覆盖 ===== */
+@media (max-width: 768px) {
+  body,
+  .el-button,
+  .el-input,
+  .el-select {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text',
+                 'Helvetica Neue', Arial, sans-serif;
+  }
+}
+
+/* ===== iOS 卡片样式 ===== */
+@media (max-width: 768px) {
+  .ios-card-list {
+    padding: 12px;
+    background: #F2F2F7;
+    min-height: 100%;
+  }
+
+  .ios-card {
+    background: #FFFFFF;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+
+  .ios-card-row {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    min-height: 44px;
+    border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
+  }
+
+  .ios-card-row:last-child {
+    border-bottom: none;
+  }
+
+  .ios-card-row-label {
+    font-size: 14px;
+    color: #8E8E93;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    min-width: 80px;
+    flex-shrink: 0;
+  }
+
+  .ios-card-row-value {
+    font-size: 14px;
+    color: #000000;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    flex: 1;
+    text-align: right;
+  }
+
+  .ios-card-actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 0.5px solid rgba(0, 0, 0, 0.08);
+    background: #FAFAFA;
+  }
+
+  .ios-card-actions .el-button {
+    flex: 1;
+    min-height: 36px;
+    border-radius: 8px;
+  }
+
+  .ios-section-header {
+    font-size: 13px;
+    font-weight: 400;
+    color: #6C6C70;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 16px 16px 6px;
+    background: #F2F2F7;
+  }
+}
+
+/* ===== 安全区域兼容写法 ===== */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .mobile-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

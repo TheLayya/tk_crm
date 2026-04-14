@@ -10,7 +10,8 @@
         </div>
       </template>
 
-      <el-table :data="roles" v-loading="loading" stripe>
+      <!-- 桌面端表格 -->
+      <el-table v-if="!isMobile" :data="roles" v-loading="loading" stripe>
         <el-table-column prop="name" label="角色名称" />
         <el-table-column prop="description" label="描述" />
         <el-table-column label="权限数量">
@@ -30,6 +31,31 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 移动端卡片列表 -->
+      <div v-if="isMobile" class="ios-card-list" v-loading="loading">
+        <div v-for="row in roles" :key="row.id" class="ios-card">
+          <div class="ios-card-row">
+            <span class="role-name">{{ row.name }}</span>
+            <el-tag :type="row.data_scope === 'all' ? 'success' : row.data_scope === 'dept' ? 'primary' : 'warning'" size="small">
+              {{ row.data_scope === 'all' ? '全部数据' : row.data_scope === 'dept' ? '本部门数据' : '本人数据' }}
+            </el-tag>
+          </div>
+          <div v-if="row.description" class="ios-card-row">
+            <span class="ios-card-row-label">描述</span>
+            <span class="ios-card-row-value">{{ row.description }}</span>
+          </div>
+          <div class="ios-card-row">
+            <span class="ios-card-row-label">权限数量</span>
+            <span class="ios-card-row-value">{{ row.permissions?.length || 0 }} 项</span>
+          </div>
+          <div class="ios-card-actions">
+            <el-button v-permission="'team:role:edit'" size="small" type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-permission="'team:role:delete'" size="small" type="danger" @click="handleDelete(row)">删除</el-button>
+          </div>
+        </div>
+        <div v-if="!roles.length && !loading" style="text-align:center;color:#999;padding:32px 0">暂无数据</div>
+      </div>
     </el-card>
 
     <!-- 新增/编辑对话框 -->
@@ -75,10 +101,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { getRoles, createRole, updateRole, deleteRole } from '@/api/team'
+
+// 响应式断点
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value <= 768)
+const onResize = () => { windowWidth.value = window.innerWidth }
 
 const roles = ref([])
 const loading = ref(false)
@@ -216,7 +247,14 @@ const handleDelete = async (row) => {
   }
 }
 
-onMounted(loadRoles)
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  loadRoles()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+})
 </script>
 
 <style scoped>
@@ -250,5 +288,21 @@ onMounted(loadRoles)
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.role-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+@media (max-width: 768px) {
+  .role-manage {
+    padding: 0;
+  }
+
+  .role-manage :deep(.el-card__body) {
+    padding: 12px;
+  }
 }
 </style>
