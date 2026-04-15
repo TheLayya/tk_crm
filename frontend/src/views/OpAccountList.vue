@@ -3,42 +3,46 @@
     <!-- 过滤栏 -->
     <el-card class="filter-card">
       <div class="filter-row">
-        <el-select v-model="filters.platform" placeholder="平台" clearable @change="handleFilterChange" style="width:120px">
-          <el-option label="TikTok" value="tiktok" />
-          <el-option label="YouTube" value="youtube" />
-          <el-option label="Instagram" value="instagram" />
-          <el-option label="Facebook" value="facebook" />
-        </el-select>
-        <el-select v-if="!isMobile" v-model="filters.status" placeholder="状态" clearable @change="handleFilterChange" style="width:110px">
-          <el-option label="正常" value="正常" />
-          <el-option label="自用" value="自用" />
-          <el-option label="封禁" value="封禁" />
-          <el-option label="已售" value="已售" />
-        </el-select>
-        <el-input v-model="filters.keyword" placeholder="搜索账号/昵称" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:180px">
-          <template #append><el-button :icon="Search" @click="handleFilterChange" /></template>
-        </el-input>
-        <el-input v-if="!isMobile" v-model="filters.purchase_channel" placeholder="采购渠道" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:140px" />
-        <el-input v-if="!isMobile" v-model="filters.sale_customer" placeholder="出售客户" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:140px" />
+        <div class="filter-inputs">
+          <el-select v-model="filters.platform" placeholder="平台" clearable @change="handleFilterChange" style="width:120px">
+            <el-option label="TikTok" value="tiktok" />
+            <el-option label="YouTube" value="youtube" />
+            <el-option label="Instagram" value="instagram" />
+            <el-option label="Facebook" value="facebook" />
+          </el-select>
+          <el-select v-if="!isMobile" v-model="filters.status" placeholder="状态" clearable @change="handleFilterChange" style="width:110px">
+            <el-option label="正常" value="正常" />
+            <el-option label="自用" value="自用" />
+            <el-option label="封禁" value="封禁" />
+            <el-option label="已售" value="已售" />
+          </el-select>
+          <el-input v-model="filters.keyword" placeholder="搜索账号/昵称" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:180px">
+            <template #append><el-button :icon="Search" @click="handleFilterChange" /></template>
+          </el-input>
+          <el-input v-if="!isMobile" v-model="filters.purchase_channel" placeholder="采购渠道" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:140px" />
+          <el-input v-if="!isMobile" v-model="filters.sale_customer" placeholder="出售客户" clearable @clear="handleFilterChange" @keyup.enter="handleFilterChange" style="width:140px" />
+        </div>
         <div class="filter-actions">
           <el-button type="primary" @click="handleCreate"><el-icon><Plus /></el-icon>新增账号</el-button>
-          <el-button v-if="!isMobile" @click="showImportDialog = true"><el-icon><Upload /></el-icon>批量导入</el-button>
-          <el-dropdown v-if="!isMobile" @command="handleExport">
-            <el-button><el-icon><Download /></el-icon>导出<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="csv">导出 CSV</el-dropdown-item>
-                <el-dropdown-item command="xlsx">导出 Excel</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <el-button v-if="!isMobile" @click="showColumnConfig = true"><el-icon><Setting /></el-icon>列配置</el-button>
+          <template v-if="!isMobile">
+            <el-button plain @click="showImportDialog = true"><el-icon><Upload /></el-icon>导入</el-button>
+            <el-dropdown @command="handleExport">
+              <el-button plain><el-icon><Download /></el-icon>导出<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="csv">导出 CSV</el-dropdown-item>
+                  <el-dropdown-item command="xlsx">导出 Excel</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-button plain @click="showColumnConfig = true"><el-icon><Setting /></el-icon>列配置</el-button>
+          </template>
         </div>
       </div>
 
       <!-- 批量操作工具栏 -->
-      <div class="batch-toolbar" v-if="selectedIds.length > 0">
-        <span>已选 {{ selectedIds.length }} 项</span>
+      <div class="batch-toolbar-new" v-if="selectedIds.length > 0">
+        <span class="batch-toolbar-new__count">已选 {{ selectedIds.length }} 项</span>
         <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button>
         <el-button size="small" @click="handleBatchCollect" :loading="collectLoading">采集</el-button>
         <el-button size="small" type="danger" @click="handleBatchDelete">批量删除</el-button>
@@ -60,9 +64,9 @@
     <el-card>
       <el-table v-if="!isMobile" :data="accounts" v-loading="loading" @selection-change="handleSelectionChange" @row-dblclick="handleRowDblClick" border size="small">
         <el-table-column type="selection" width="40" fixed="left" />
-        <el-table-column label="平台" width="90" fixed="left">
+        <el-table-column label="平台" width="100" fixed="left">
           <template #default="{ row }">
-            <el-tag :type="platformTagType(row.platform)" size="small">{{ row.platform?.toUpperCase() }}</el-tag>
+            <span :class="['op-platform-badge', `op-platform-badge--${row.platform}`]">{{ row.platform?.toUpperCase() }}</span>
           </template>
         </el-table-column>
         <el-table-column label="账号" min-width="200" fixed="left">
@@ -81,7 +85,7 @@
         </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small">{{ row.status }}</el-tag>
+            <span :class="['op-status-badge', `op-status-badge--${statusKey(row.status)}`]">{{ row.status }}</span>
           </template>
         </el-table-column>
         <el-table-column v-if="colVisible('password')" label="密码" width="120">
@@ -225,12 +229,12 @@
             <span v-else>{{ row.remark || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button link type="primary" size="small" @click="handleCollectOne(row)">采集</el-button>
-            <el-button link type="primary" size="small" @click="showLogs(row)">历史</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            <el-tooltip content="编辑"><el-button link type="primary" size="small" @click="handleEdit(row)"><el-icon><Edit /></el-icon></el-button></el-tooltip>
+            <el-tooltip content="采集"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
+            <el-tooltip content="历史"><el-button link type="primary" size="small" @click="showLogs(row)"><el-icon><Document /></el-icon></el-button></el-tooltip>
+            <el-tooltip content="删除"><el-button link type="danger" size="small" @click="handleDelete(row)"><el-icon><Delete /></el-icon></el-button></el-tooltip>
           </template>
         </el-table-column>
       </el-table>
@@ -249,8 +253,8 @@
               <div v-if="row.nickname" class="ios-card-account-nickname">{{ row.nickname }}</div>
             </div>
             <div class="ios-card-account-tags">
-              <el-tag :type="platformTagType(row.platform)" size="small">{{ row.platform?.toUpperCase() }}</el-tag>
-              <el-tag :type="statusTagType(row.status)" size="small" style="margin-left:4px">{{ row.status }}</el-tag>
+              <span :class="['op-platform-badge', `op-platform-badge--${row.platform}`]">{{ row.platform?.toUpperCase() }}</span>
+              <span :class="['op-status-badge', `op-status-badge--${statusKey(row.status)}`]" style="margin-left:4px">{{ row.status }}</span>
             </div>
           </div>
           <!-- 行项 -->
@@ -280,10 +284,10 @@
           </div>
           <!-- 操作区 -->
           <div class="ios-card-actions">
-            <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button link type="primary" size="small" @click="handleCollectOne(row)">采集</el-button>
-            <el-button link type="primary" size="small" @click="showLogs(row)">历史</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            <el-tooltip content="编辑"><el-button link type="primary" size="small" @click="handleEdit(row)"><el-icon><Edit /></el-icon></el-button></el-tooltip>
+            <el-tooltip content="采集"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
+            <el-tooltip content="历史"><el-button link type="primary" size="small" @click="showLogs(row)"><el-icon><Document /></el-icon></el-button></el-tooltip>
+            <el-tooltip content="删除"><el-button link type="danger" size="small" @click="handleDelete(row)"><el-icon><Delete /></el-icon></el-button></el-tooltip>
           </div>
         </div>
         <el-empty v-if="!loading && accounts.length === 0" description="暂无数据" />
@@ -303,9 +307,13 @@
     </el-card>
 
     <!-- 新增/编辑对话框 -->
-    <el-dialog v-model="formDialog.visible" :title="formDialog.isEdit ? '编辑账号' : '新增账号'" width="700px" top="5vh">
-      <el-form :model="form" ref="formRef" label-width="100px" size="small">
-        <el-divider content-position="left">基础信息</el-divider>
+    <el-dialog v-model="formDialog.visible" :title="formDialog.isEdit ? `编辑账号` : '新增账号'" width="720px" top="5vh">
+      <template #title>
+        <span>{{ formDialog.isEdit ? '编辑账号' : '新增账号' }}</span>
+        <span v-if="formDialog.isEdit && form.account" style="font-size:14px;color:var(--color-text-muted);margin-left:8px">{{ form.account }}</span>
+      </template>
+      <el-form :model="form" ref="formRef" label-width="90px" size="default">
+        <div class="form-section-title">基础信息</div>
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="平台" prop="platform" :rules="[{required:true,message:'请选择平台'}]">
@@ -346,7 +354,7 @@
           </el-col>
         </el-row>
 
-        <el-divider content-position="left">账号凭证</el-divider>
+        <div class="form-section-title">账号凭证</div>
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="密码"><el-input v-model="form.password" show-password /></el-form-item>
@@ -372,16 +380,16 @@
         </el-row>
 
         <template v-if="form.platform === 'tiktok'">
-          <el-divider content-position="left">TikTok 权限</el-divider>
-          <el-row :gutter="16">
-            <el-col :span="6"><el-form-item label="中视频"><el-switch v-model="form.tiktok_mid_video" /></el-form-item></el-col>
-            <el-col :span="6"><el-form-item label="橱窗"><el-switch v-model="form.tiktok_showcase" /></el-form-item></el-col>
-            <el-col :span="6"><el-form-item label="手机直播"><el-switch v-model="form.tiktok_phone_live" /></el-form-item></el-col>
-            <el-col :span="6"><el-form-item label="伴侣直播"><el-switch v-model="form.tiktok_partner_live" /></el-form-item></el-col>
-          </el-row>
+          <div class="form-section-title">TikTok 权限</div>
+          <div class="tiktok-switch-grid">
+            <el-form-item label="中视频"><el-switch v-model="form.tiktok_mid_video" /></el-form-item>
+            <el-form-item label="橱窗"><el-switch v-model="form.tiktok_showcase" /></el-form-item>
+            <el-form-item label="手机直播"><el-switch v-model="form.tiktok_phone_live" /></el-form-item>
+            <el-form-item label="伴侣直播"><el-switch v-model="form.tiktok_partner_live" /></el-form-item>
+          </div>
         </template>
 
-        <el-divider content-position="left">采购信息</el-divider>
+        <div class="form-section-title">采购信息</div>
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="采购渠道"><el-input v-model="form.purchase_channel" /></el-form-item>
@@ -394,20 +402,20 @@
           </el-col>
         </el-row>
 
-        <el-divider content-position="left"><span style="color:#E6A23C">出售信息</span></el-divider>
-          <el-row :gutter="16">
-            <el-col :span="12">
-              <el-form-item label="出售客户"><el-input v-model="form.sale_customer" /></el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="出售金额"><el-input-number v-model="form.sale_price" :precision="2" :min="0" style="width:100%" /></el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="出售日期"><el-date-picker v-model="form.sale_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
-            </el-col>
-          </el-row>
+        <div class="form-section-title">出售信息</div>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="出售客户"><el-input v-model="form.sale_customer" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="出售金额"><el-input-number v-model="form.sale_price" :precision="2" :min="0" style="width:100%" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="出售日期"><el-date-picker v-model="form.sale_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
+          </el-col>
+        </el-row>
 
-        <el-divider content-position="left">其他</el-divider>
+        <div class="form-section-title">其他</div>
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="注册人">
@@ -443,8 +451,8 @@
         </el-row>
       </el-form>
       <template #footer>
-        <el-button @click="formDialog.visible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="formDialog.loading">确定</el-button>
+        <el-button style="min-width:80px" @click="formDialog.visible = false">取消</el-button>
+        <el-button style="min-width:80px" type="primary" @click="handleSubmit" :loading="formDialog.loading">保存</el-button>
       </template>
     </el-dialog>
 
@@ -512,81 +520,103 @@
     </el-dialog>
 
     <!-- 账号详情对话框 -->
-    <el-dialog v-model="detailDialog.visible" :title="`账号详情 - ${detailDialog.row?.account}`" width="760px" top="5vh">
+    <el-dialog v-model="detailDialog.visible" width="680px" top="5vh" class="op-detail-dialog" :show-close="true">
       <template v-if="detailDialog.row">
-        <el-row :gutter="16">
-          <!-- 左侧：头像 + 基础采集信息 -->
-          <el-col :span="6" style="text-align:center">
-            <el-avatar v-if="detailDialog.row.avatar_url" :src="detailDialog.row.avatar_url" :size="80" style="margin-bottom:8px" />
-            <el-avatar v-else :size="80" style="margin-bottom:8px;font-size:28px">{{ (detailDialog.row.account||'?')[0].toUpperCase() }}</el-avatar>
-            <div style="font-weight:600;font-size:15px">{{ detailDialog.row.account }}</div>
-            <div v-if="detailDialog.row.nickname" style="color:#909399;font-size:13px">{{ detailDialog.row.nickname }}</div>
-            <el-tag :type="statusTagType(detailDialog.row.status)" size="small" style="margin-top:6px">{{ detailDialog.row.status }}</el-tag>
-          </el-col>
-          <!-- 右侧：详细信息 -->
-          <el-col :span="18">
-            <el-descriptions :column="2" border size="small">
-              <el-descriptions-item label="平台">{{ detailDialog.row.platform?.toUpperCase() }}</el-descriptions-item>
-              <el-descriptions-item label="国家/地区">{{ detailDialog.row.country || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="平台UID" :span="2">{{ detailDialog.row.platform_user_id || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="SEC UID" :span="2">
-                <el-tooltip v-if="detailDialog.row.platform_sec_uid" :content="detailDialog.row.platform_sec_uid" placement="top">
-                  <span>{{ detailDialog.row.platform_sec_uid?.substring(0,30) }}...</span>
-                </el-tooltip>
-                <span v-else>-</span>
-              </el-descriptions-item>
-              <el-descriptions-item label="粉丝数">{{ formatNum(detailDialog.row.follower_count) }}</el-descriptions-item>
-              <el-descriptions-item label="关注数">{{ formatNum(detailDialog.row.following_count) }}</el-descriptions-item>
-              <el-descriptions-item label="点赞数">{{ formatNum(detailDialog.row.like_count) }}</el-descriptions-item>
-              <el-descriptions-item label="视频数">{{ formatNum(detailDialog.row.video_count) }}</el-descriptions-item>
-              <el-descriptions-item label="注册时间">{{ detailDialog.row.account_created_at ? formatDate(detailDialog.row.account_created_at) : '-' }}</el-descriptions-item>
-              <el-descriptions-item label="最后采集">{{ detailDialog.row.last_collected_at ? formatDate(detailDialog.row.last_collected_at) : '-' }}</el-descriptions-item>
-              <el-descriptions-item label="采集状态">
-                <el-tag :type="collectStatusType(detailDialog.row.collect_status)" size="small">{{ collectStatusLabel(detailDialog.row.collect_status) }}</el-tag>
-              </el-descriptions-item>
-              <el-descriptions-item label="账号来源">{{ detailDialog.row.source || '-' }}</el-descriptions-item>
-            </el-descriptions>
+        <!-- Hero 区域 -->
+        <div class="detail-hero">
+          <el-avatar :src="detailDialog.row.avatar_url" :size="64" class="detail-hero__avatar">
+            {{ (detailDialog.row.account||'?')[0].toUpperCase() }}
+          </el-avatar>
+          <div class="detail-hero__info">
+            <h2 class="detail-hero__name">{{ detailDialog.row.account }}</h2>
+            <p v-if="detailDialog.row.nickname" class="detail-hero__nickname">{{ detailDialog.row.nickname }}</p>
+            <div class="detail-hero__badges">
+              <span :class="['op-platform-badge', `op-platform-badge--${detailDialog.row.platform}`]">{{ detailDialog.row.platform?.toUpperCase() }}</span>
+              <span :class="['op-status-badge', `op-status-badge--${statusKey(detailDialog.row.status)}`]">{{ detailDialog.row.status }}</span>
+            </div>
+          </div>
+        </div>
 
-            <el-divider content-position="left" style="margin:12px 0 8px">账号凭证</el-divider>
-            <el-descriptions :column="2" border size="small">
-              <el-descriptions-item label="密码">{{ detailDialog.row.password ? '••••••' : '-' }}</el-descriptions-item>
-              <el-descriptions-item label="2FA密钥">{{ detailDialog.row.totp_secret ? '••••••' : '-' }}</el-descriptions-item>
-              <el-descriptions-item label="绑定邮箱">{{ detailDialog.row.email || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="邮箱密码">{{ detailDialog.row.email_password ? '••••••' : '-' }}</el-descriptions-item>
-              <el-descriptions-item label="邮箱登录地址" :span="2">{{ detailDialog.row.email_login_url || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="绑定手机">{{ detailDialog.row.phone || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="手机管理链接">{{ detailDialog.row.phone_manage_url || '-' }}</el-descriptions-item>
-            </el-descriptions>
+        <!-- 数据概览 -->
+        <div class="section-group">
+          <div class="section-group__title">数据概览</div>
+          <div class="stats-grid">
+            <div class="stat-item"><div class="stat-item__value">{{ formatNum(detailDialog.row.follower_count) }}</div><div class="stat-item__label">粉丝数</div></div>
+            <div class="stat-item"><div class="stat-item__value">{{ formatNum(detailDialog.row.following_count) }}</div><div class="stat-item__label">关注数</div></div>
+            <div class="stat-item"><div class="stat-item__value">{{ formatNum(detailDialog.row.like_count) }}</div><div class="stat-item__label">点赞数</div></div>
+            <div class="stat-item"><div class="stat-item__value">{{ formatNum(detailDialog.row.video_count) }}</div><div class="stat-item__label">视频数</div></div>
+          </div>
+        </div>
 
-            <template v-if="detailDialog.row.platform === 'tiktok'">
-              <el-divider content-position="left" style="margin:12px 0 8px">TikTok 权限</el-divider>
-              <el-descriptions :column="4" border size="small">
-                <el-descriptions-item label="中视频"><el-tag :type="detailDialog.row.tiktok_mid_video ? 'success':'info'" size="small">{{ detailDialog.row.tiktok_mid_video ? '是':'否' }}</el-tag></el-descriptions-item>
-                <el-descriptions-item label="橱窗"><el-tag :type="detailDialog.row.tiktok_showcase ? 'success':'info'" size="small">{{ detailDialog.row.tiktok_showcase ? '是':'否' }}</el-tag></el-descriptions-item>
-                <el-descriptions-item label="手机直播"><el-tag :type="detailDialog.row.tiktok_phone_live ? 'success':'info'" size="small">{{ detailDialog.row.tiktok_phone_live ? '是':'否' }}</el-tag></el-descriptions-item>
-                <el-descriptions-item label="伴侣直播"><el-tag :type="detailDialog.row.tiktok_partner_live ? 'success':'info'" size="small">{{ detailDialog.row.tiktok_partner_live ? '是':'否' }}</el-tag></el-descriptions-item>
-              </el-descriptions>
-            </template>
+        <!-- 账号凭证 -->
+        <div class="section-group">
+          <div class="section-group__title">账号凭证</div>
+          <div class="section-group__body">
+            <div class="info-row" v-for="field in credentialFields" :key="field.key">
+              <span class="info-row__label">{{ field.label }}</span>
+              <span class="info-row__value">
+                <template v-if="field.sensitive">
+                  <span class="sensitive-text">
+                    {{ visibleFields[detailDialog.row.id]?.[field.key]
+                       ? detailDialog.row[field.key]
+                       : (detailDialog.row[field.key] ? '••••••' : '-') }}
+                  </span>
+                  <el-icon
+                    v-if="detailDialog.row[field.key]"
+                    class="eye-btn"
+                    @click="toggleVisible(detailDialog.row.id, field.key)"
+                  >
+                    <View v-if="!visibleFields[detailDialog.row.id]?.[field.key]" />
+                    <Hide v-else />
+                  </el-icon>
+                </template>
+                <template v-else>
+                  {{ detailDialog.row[field.key] || '-' }}
+                </template>
+              </span>
+            </div>
+          </div>
+        </div>
 
-            <el-divider content-position="left" style="margin:12px 0 8px">采购 / 出售</el-divider>
-            <el-descriptions :column="2" border size="small">
-              <el-descriptions-item label="采购渠道">{{ detailDialog.row.purchase_channel || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="采购金额">{{ detailDialog.row.purchase_price != null ? '¥'+detailDialog.row.purchase_price : '-' }}</el-descriptions-item>
-              <el-descriptions-item label="采购日期">{{ detailDialog.row.purchase_date || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="出售客户">{{ detailDialog.row.sale_customer || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="出售金额">{{ detailDialog.row.sale_price != null ? '¥'+detailDialog.row.sale_price : '-' }}</el-descriptions-item>
-              <el-descriptions-item label="出售日期">{{ detailDialog.row.sale_date || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="-"> </el-descriptions-item>
-            </el-descriptions>
+        <!-- TikTok 权限（条件显示） -->
+        <div v-if="detailDialog.row.platform === 'tiktok'" class="section-group">
+          <div class="section-group__title">TikTok 权限</div>
+          <div class="tiktok-perms-grid">
+            <div class="perm-item" v-for="perm in tiktokPerms" :key="perm.key">
+              <span class="perm-item__icon" :class="detailDialog.row[perm.key] ? 'is-on' : 'is-off'">
+                {{ detailDialog.row[perm.key] ? '✓' : '✗' }}
+              </span>
+              <span class="perm-item__label">{{ perm.label }}</span>
+            </div>
+          </div>
+        </div>
 
-            <el-divider content-position="left" style="margin:12px 0 8px">其他</el-divider>
-            <el-descriptions :column="2" border size="small">
-              <el-descriptions-item label="注册人">{{ detailDialog.row.registrant || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="使用人">{{ detailDialog.row.operator || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="备注" :span="2">{{ detailDialog.row.remark || '-' }}</el-descriptions-item>
-            </el-descriptions>
-          </el-col>
-        </el-row>
+        <!-- 采购 / 出售 -->
+        <div class="section-group">
+          <div class="section-group__title">采购 / 出售</div>
+          <div class="section-group__body two-col">
+            <div class="info-row"><span class="info-row__label">采购渠道</span><span class="info-row__value">{{ detailDialog.row.purchase_channel || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">采购金额</span><span class="info-row__value">{{ detailDialog.row.purchase_price != null ? '¥' + detailDialog.row.purchase_price : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">采购日期</span><span class="info-row__value">{{ detailDialog.row.purchase_date || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">出售客户</span><span class="info-row__value">{{ detailDialog.row.sale_customer || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">出售金额</span><span class="info-row__value">{{ detailDialog.row.sale_price != null ? '¥' + detailDialog.row.sale_price : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">出售日期</span><span class="info-row__value">{{ detailDialog.row.sale_date || '-' }}</span></div>
+          </div>
+        </div>
+
+        <!-- 其他信息 -->
+        <div class="section-group">
+          <div class="section-group__title">其他信息</div>
+          <div class="section-group__body">
+            <div class="info-row"><span class="info-row__label">注册人</span><span class="info-row__value">{{ detailDialog.row.registrant || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">使用人</span><span class="info-row__value">{{ detailDialog.row.operator || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">账号来源</span><span class="info-row__value">{{ detailDialog.row.source || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">注册时间</span><span class="info-row__value">{{ detailDialog.row.account_created_at ? formatDate(detailDialog.row.account_created_at) : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">最后采集</span><span class="info-row__value">{{ detailDialog.row.last_collected_at ? formatDate(detailDialog.row.last_collected_at) : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">采集状态</span><span class="info-row__value">{{ collectStatusLabel(detailDialog.row.collect_status) }}</span></div>
+            <div class="info-row info-row--full"><span class="info-row__label">备注</span><span class="info-row__value">{{ detailDialog.row.remark || '-' }}</span></div>
+          </div>
+        </div>
       </template>
       <template #footer>
         <el-button @click="detailDialog.visible = false">关闭</el-button>
@@ -614,7 +644,7 @@
 <script setup>
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload, Download, Search, Setting, ArrowDown, View, Hide } from '@element-plus/icons-vue'
+import { Plus, Upload, Download, Search, Setting, ArrowDown, View, Hide, Edit, Delete, Refresh, Document } from '@element-plus/icons-vue'
 import {
   listOpAccounts, createOpAccount, updateOpAccount, deleteOpAccount,
   batchUpdateStatus, importOpAccounts, exportOpAccounts,
@@ -630,6 +660,27 @@ const selectedIds = ref([])
 const teamMembers = ref([])
 const selectedRows = ref([])
 const visibleFields = ref({})
+
+// ===== Badge 映射 =====
+const STATUS_KEY_MAP = { '正常': 'normal', '自用': 'self', '封禁': 'banned', '已售': 'sold' }
+const statusKey = (s) => STATUS_KEY_MAP[s] || 'normal'
+
+// ===== 详情弹窗配置 =====
+const credentialFields = [
+  { key: 'password', label: '密码', sensitive: true },
+  { key: 'totp_secret', label: '2FA密钥', sensitive: true },
+  { key: 'email', label: '绑定邮箱', sensitive: false },
+  { key: 'email_password', label: '邮箱密码', sensitive: true },
+  { key: 'email_login_url', label: '邮箱登录地址', sensitive: false },
+  { key: 'phone', label: '绑定手机', sensitive: false },
+  { key: 'phone_manage_url', label: '手机管理链接', sensitive: false },
+]
+const tiktokPerms = [
+  { key: 'tiktok_mid_video', label: '中视频' },
+  { key: 'tiktok_showcase', label: '橱窗' },
+  { key: 'tiktok_phone_live', label: '手机直播' },
+  { key: 'tiktok_partner_live', label: '伴侣直播' },
+]
 
 const filters = reactive({
   platform: null, status: null,
@@ -904,11 +955,47 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.op-account-list { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.op-account-list {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  background: var(--color-bg-page);
+  min-height: 100%;
+}
 .filter-card :deep(.el-card__body) { padding: 16px; }
-.filter-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.filter-actions { display: flex; gap: 8px; margin-left: auto; }
-.batch-toolbar { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 8px 12px; background: #f0f2f5; border-radius: 4px; }
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+.filter-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.filter-actions { display: flex; gap: 8px; align-items: center; }
+
+/* 批量工具栏 */
+.batch-toolbar-new {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-accent-light);
+  border-radius: var(--radius-sm);
+}
+.batch-toolbar-new__count {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-accent);
+  margin-right: var(--space-xs);
+}
+
 .pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
 .secret-cell { display: flex; align-items: center; gap: 6px; }
 .eye-icon { cursor: pointer; color: #409eff; flex-shrink: 0; }
@@ -916,23 +1003,172 @@ onUnmounted(() => {
 .collect-progress { display: flex; align-items: center; gap: 12px; }
 .import-result { margin-top: 16px; }
 
+/* ===== 详情弹窗 ===== */
+.detail-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: 0 0 var(--space-lg);
+  border-bottom: 1px solid var(--color-border-subtle);
+  margin-bottom: var(--space-md);
+}
+.detail-hero__avatar { flex-shrink: 0; font-size: 24px; }
+.detail-hero__name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 2px;
+}
+.detail-hero__nickname {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-sm);
+}
+.detail-hero__badges { display: flex; gap: var(--space-xs); }
+
+/* 分组卡片 */
+.section-group { margin-bottom: var(--space-md); }
+.section-group__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.section-group__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.section-group__body.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px var(--space-md);
+}
+
+/* 信息行 */
+.info-row {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 0;
+}
+.info-row--full { grid-column: 1 / -1; }
+.info-row__label {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  min-width: 90px;
+  flex-shrink: 0;
+}
+.info-row__value {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: 1;
+}
+.sensitive-text {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  letter-spacing: 1px;
+}
+.eye-btn {
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  transition: color 150ms ease;
+}
+.eye-btn:hover { color: var(--color-accent); }
+
+/* 数据概览网格 */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+}
+.stat-item {
+  text-align: center;
+  padding: var(--space-sm);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-sm);
+}
+.stat-item__value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+}
+.stat-item__label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* TikTok 权限网格 */
+.tiktok-perms-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-sm);
+}
+.perm-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+}
+.perm-item__icon {
+  font-size: 14px;
+  font-weight: 700;
+  width: 20px;
+  text-align: center;
+}
+.perm-item__icon.is-on  { color: #166534; }
+.perm-item__icon.is-off { color: #9CA3AF; }
+.perm-item__label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* ===== 表单弹窗 ===== */
+.form-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: var(--space-md) 0 var(--space-sm);
+  border-bottom: 1px solid var(--color-border-subtle);
+  margin-bottom: var(--space-sm);
+}
+.tiktok-switch-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xs) var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
 /* 移动端样式 */
 @media (max-width: 768px) {
   .op-account-list { padding: 12px; gap: 12px; }
   .filter-row { flex-wrap: wrap; gap: 8px; }
+  .filter-inputs { flex-wrap: wrap; gap: 8px; }
   .filter-actions { margin-left: 0; width: 100%; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .tiktok-perms-grid { grid-template-columns: repeat(2, 1fr); }
+  .section-group__body.two-col { grid-template-columns: 1fr; }
 }
 .ios-card-account-header {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 12px 12px 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--color-border-subtle, #f0f0f0);
 }
-.ios-card-account-info {
-  flex: 1;
-  min-width: 0;
-}
+.ios-card-account-info { flex: 1; min-width: 0; }
 .ios-card-account-name {
   font-weight: 600;
   font-size: 14px;
@@ -942,7 +1178,7 @@ onUnmounted(() => {
 }
 .ios-card-account-nickname {
   font-size: 12px;
-  color: #909399;
+  color: var(--color-text-muted, #909399);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -951,5 +1187,6 @@ onUnmounted(() => {
   display: flex;
   flex-shrink: 0;
   align-items: center;
+  gap: 4px;
 }
 </style>

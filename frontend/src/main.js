@@ -5,6 +5,7 @@ import 'element-plus/dist/index.css'
 import router from './router'
 import App from './App.vue'
 import permission from './directives/permission'
+import './styles/op-account-design.css'
 import './styles/responsive.css'
 
 const app = createApp(App)

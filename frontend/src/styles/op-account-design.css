@@ -1,0 +1,134 @@
+/* ===== Op Account UI 设计令牌 ===== */
+:root {
+  /* 颜色 */
+  --color-bg-page:        #F7F8FA;
+  --color-bg-card:        #FFFFFF;
+  --color-bg-hover:       #F5F7FA;
+  --color-border:         #E4E7ED;
+  --color-border-subtle:  rgba(0, 0, 0, 0.06);
+  --color-text-primary:   #1A1A2E;
+  --color-text-secondary: #606266;
+  --color-text-muted:     #909399;
+  --color-accent:         #5B6CF8;
+  --color-accent-light:   #EEF2FF;
+
+  /* 间距 */
+  --space-xs:  4px;
+  --space-sm:  8px;
+  --space-md:  16px;
+  --space-lg:  24px;
+  --space-xl:  32px;
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  /* 阴影 */
+  --shadow-card:   0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-dialog: 0 20px 60px rgba(0,0,0,0.15);
+}
+
+/* ===== Element Plus 变量覆盖 ===== */
+:root {
+  --el-color-primary:        var(--color-accent);
+  --el-border-color:         var(--color-border);
+  --el-border-color-light:   var(--color-border-subtle);
+  --el-fill-color-blank:     var(--color-bg-card);
+  --el-bg-color:             var(--color-bg-card);
+  --el-text-color-primary:   var(--color-text-primary);
+  --el-text-color-regular:   var(--color-text-secondary);
+  --el-text-color-secondary: var(--color-text-muted);
+  --el-border-radius-base:   var(--radius-sm);
+}
+
+/* ===== 弹窗入场动画 ===== */
+.el-dialog {
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-dialog) !important;
+  animation: dialog-enter 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ===== 表格样式覆盖 ===== */
+.el-table {
+  --el-table-border-color: var(--color-border-subtle);
+  --el-table-header-bg-color: #FAFBFC;
+  --el-table-header-text-color: var(--color-text-secondary);
+  --el-table-row-hover-bg-color: var(--color-bg-hover);
+}
+
+/* 去除列间竖线，保留行间分隔线 */
+.el-table--border .el-table__cell {
+  border-right: none !important;
+}
+.el-table .el-table__row td {
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: background-color 150ms ease;
+}
+.el-table th {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ===== 卡片样式覆盖 ===== */
+.el-card {
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-card) !important;
+  border: 1px solid var(--color-border) !important;
+}
+
+/* ===== Status Badge ===== */
+.op-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.op-status-badge--normal  { background: #DCFCE7; color: #166534; }
+.op-status-badge--self    { background: #DBEAFE; color: #1E40AF; }
+.op-status-badge--banned  { background: #FEE2E2; color: #991B1B; }
+.op-status-badge--sold    { background: #F3F4F6; color: #6B7280; }
+
+/* ===== Platform Badge ===== */
+.op-platform-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.op-platform-badge--tiktok    { background: #F0F0F0; color: #1A1A1A; }
+.op-platform-badge--youtube   { background: #FEE2E2; color: #CC0000; }
+.op-platform-badge--instagram { background: #FDF2F8; color: #9333EA; }
+.op-platform-badge--facebook  { background: #EFF6FF; color: #1D4ED8; }
+
+/* ===== 响应式：移动端弹窗 ===== */
+@media (max-width: 768px) {
+  .el-dialog {
+    width: 95vw !important;
+    max-height: 90vh !important;
+    margin: 5vh auto !important;
+  }
+  .el-dialog__body {
+    overflow-y: auto;
+    max-height: calc(90vh - 120px);
+  }
+}
