@@ -401,9 +401,9 @@ def register_scheduler_jobs(scheduler, db_factory: Callable) -> None:
     scheduler.add_job(
         _job,
         trigger="interval",
-        minutes=1,
+        minutes=5,
         id="scheduled_monitor_checks",
         replace_existing=True,
         max_instances=1,
     )
-    logger.info("Registered scheduled monitor check job (every 1 minute)")
+    logger.info("Registered scheduled monitor check job (every 5 minutes)")
