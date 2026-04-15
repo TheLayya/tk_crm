@@ -48,7 +48,6 @@ class OpAccount(Base):
     purchase_channel = Column(String(255), nullable=True)
     purchase_price = Column(Numeric(10, 2), nullable=True)
     purchase_date = Column(Date, nullable=True)
-    maintenance_cost = Column(Numeric(10, 2), nullable=True)
 
     # 出售字段
     sale_customer = Column(String(255), nullable=True)

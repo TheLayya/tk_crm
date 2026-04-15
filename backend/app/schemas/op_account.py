@@ -35,7 +35,6 @@ class OpAccountCreate(BaseModel):
     purchase_channel: Optional[str] = None
     purchase_price: Optional[Decimal] = None
     purchase_date: Optional[date] = None
-    maintenance_cost: Optional[Decimal] = None
 
     # 出售字段
     sale_customer: Optional[str] = None
@@ -73,7 +72,6 @@ class OpAccountUpdate(BaseModel):
     purchase_channel: Optional[str] = None
     purchase_price: Optional[Decimal] = None
     purchase_date: Optional[date] = None
-    maintenance_cost: Optional[Decimal] = None
 
     sale_customer: Optional[str] = None
     sale_price: Optional[Decimal] = None
@@ -111,7 +109,6 @@ class OpAccountResponse(BaseModel):
     purchase_channel: Optional[str] = None
     purchase_price: Optional[Decimal] = None
     purchase_date: Optional[date] = None
-    maintenance_cost: Optional[Decimal] = None
 
     sale_customer: Optional[str] = None
     sale_price: Optional[Decimal] = None

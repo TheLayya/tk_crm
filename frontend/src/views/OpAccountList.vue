@@ -392,9 +392,6 @@
           <el-col :span="12">
             <el-form-item label="采购日期"><el-date-picker v-model="form.purchase_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="养号成本"><el-input-number v-model="form.maintenance_cost" :precision="2" :min="0" style="width:100%" /></el-form-item>
-          </el-col>
         </el-row>
 
         <el-divider content-position="left"><span style="color:#E6A23C">出售信息</span></el-divider>
@@ -576,7 +573,6 @@
               <el-descriptions-item label="采购渠道">{{ detailDialog.row.purchase_channel || '-' }}</el-descriptions-item>
               <el-descriptions-item label="采购金额">{{ detailDialog.row.purchase_price != null ? '¥'+detailDialog.row.purchase_price : '-' }}</el-descriptions-item>
               <el-descriptions-item label="采购日期">{{ detailDialog.row.purchase_date || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="养号成本">{{ detailDialog.row.maintenance_cost != null ? '¥'+detailDialog.row.maintenance_cost : '-' }}</el-descriptions-item>
               <el-descriptions-item label="出售客户">{{ detailDialog.row.sale_customer || '-' }}</el-descriptions-item>
               <el-descriptions-item label="出售金额">{{ detailDialog.row.sale_price != null ? '¥'+detailDialog.row.sale_price : '-' }}</el-descriptions-item>
               <el-descriptions-item label="出售日期">{{ detailDialog.row.sale_date || '-' }}</el-descriptions-item>
@@ -727,7 +723,7 @@ const emptyForm = () => ({
   email: '', email_password: '', email_login_url: '', phone: '', phone_manage_url: '',
   country: '', source: null, tags: '', remark: '', status: '正常', registrant: '', operator: '',
   tiktok_mid_video: false, tiktok_showcase: false, tiktok_phone_live: false, tiktok_partner_live: false,
-  purchase_channel: '', purchase_price: null, purchase_date: null, maintenance_cost: null,
+  purchase_channel: '', purchase_price: null, purchase_date: null,
   sale_customer: '', sale_price: null, sale_date: null,
 })
 const form = ref(emptyForm())

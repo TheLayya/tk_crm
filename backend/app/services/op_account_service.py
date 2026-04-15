@@ -182,7 +182,7 @@ _EXPORT_COLUMNS = [
     "email_login_url", "phone", "phone_manage_url", "country", "source", "tags",
     "remark", "status", "registrant", "operator", "tiktok_mid_video",
     "tiktok_showcase", "tiktok_phone_live", "tiktok_partner_live",
-    "purchase_channel", "purchase_price", "purchase_date", "maintenance_cost",
+    "purchase_channel", "purchase_price", "purchase_date",
     "sale_customer", "sale_price", "sale_date", "platform_user_id",
     "platform_sec_uid", "nickname", "follower_count", "following_count",
     "like_count", "video_count", "last_collected_at", "collect_status",
