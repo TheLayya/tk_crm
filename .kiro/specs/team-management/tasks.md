@@ -155,47 +155,47 @@
   - [x] 13.4 修改 `frontend/src/api/request.js`（axios 实例），添加请求拦截器（自动附加 `Authorization: Bearer token`）和响应拦截器（401 时自动调用 `refreshAccessToken()`，刷新失败则跳转 `/login`）
     - _需求：1.4、6.6_
 
-- [~] 14. 前端路由守卫与权限指令
+- [ ] 14. 前端路由守卫与权限指令
   - [ ] 14.1 修改 `frontend/src/router/index.js`：
     - 新增路由：`/login`、`/403`、`/team/dept`、`/team/member`、`/team/role`、`/team/log`，各路由设置 `meta.requiresAuth` 和 `meta.permission`
     - 添加 `beforeEach` 守卫：未登录跳 `/login`，无权限跳 `/403`
     - _需求：6.2、6.4_
-  - [~] 14.2 创建 `frontend/src/directives/permission.js`，实现 `v-permission` 指令：无权限时从 DOM 移除元素；在 `frontend/src/main.js` 中全局注册
+  - [ ] 14.2 创建 `frontend/src/directives/permission.js`，实现 `v-permission` 指令：无权限时从 DOM 移除元素；在 `frontend/src/main.js` 中全局注册
     - _需求：6.3_
 
-- [~] 15. 前端登录页与 403 页
-  - [~] 15.1 创建 `frontend/src/views/Login.vue`：用户名/密码表单、调用 `authStore.login()`、成功后跳转首页、失败显示错误信息
+- [ ] 15. 前端登录页与 403 页
+  - [ ] 15.1 创建 `frontend/src/views/Login.vue`：用户名/密码表单、调用 `authStore.login()`、成功后跳转首页、失败显示错误信息
     - _需求：1.1、1.2、1.3_
-  - [~] 15.2 创建 `frontend/src/views/Forbidden.vue`：403 提示页，含返回首页按钮
+  - [ ] 15.2 创建 `frontend/src/views/Forbidden.vue`：403 提示页，含返回首页按钮
     - _需求：6.4_
 
-- [~] 16. 修改 Layout.vue — 动态菜单与登出
+- [ ] 16. 修改 Layout.vue — 动态菜单与登出
   - 修改 `frontend/src/components/Layout.vue`：
     - 从 `useAuthStore` 读取 `permissions`，按权限动态渲染菜单项（`v-if="authStore.hasPermission('xxx:view')"`）
     - 新增团队管理子菜单（部门/成员/角色/日志），按对应 `team:*:view` 权限控制显示
     - 右上角新增用户名显示和登出按钮，点击调用 `authStore.logout()` 后跳转 `/login`
     - _需求：6.2、6.5_
 
-- [~] 17. 团队管理前端页面
-  - [~] 17.1 创建 `frontend/src/views/team/DeptManage.vue`：
+- [ ] 17. 团队管理前端页面
+  - [ ] 17.1 创建 `frontend/src/views/team/DeptManage.vue`：
     - 左侧 `el-tree` 展示部门树，支持新增/编辑/删除节点
     - 删除时若有子部门或成员则显示错误提示
     - _需求：2.4、2.6、2.7、2.8_
-  - [~] 17.2 创建 `frontend/src/views/team/MemberManage.vue`：
+  - [ ] 17.2 创建 `frontend/src/views/team/MemberManage.vue`：
     - 顶部部门筛选 + 用户名/状态搜索，分页表格
     - 新增/编辑对话框（含角色多选）
     - 删除和重置密码按钮添加锁形图标，触发二次确认弹窗（输入当前登录密码 → 调用 `verifyPassword` → 携带 `operation_token` 执行操作）
     - _需求：3.9、12.1、12.6_
-  - [~] 17.3 创建 `frontend/src/views/team/RoleManage.vue`：
+  - [ ] 17.3 创建 `frontend/src/views/team/RoleManage.vue`：
     - 角色列表表格，新增/编辑对话框
     - 权限矩阵：按模块分组展示所有预定义权限，复选框勾选
     - _需求：4.1、4.2、4.3_
-  - [~] 17.4 创建 `frontend/src/views/team/LogView.vue`：
+  - [ ] 17.4 创建 `frontend/src/views/team/LogView.vue`：
     - `el-tabs` 切换登录日志/操作日志
     - 各 tab 含时间范围选择器、关键字过滤、分页表格
     - _需求：7.3、8.3_
 
-- [~] 18. 最终检查点 — 全链路验证
+- [ ] 18. 最终检查点 — 全链路验证
   - 确保所有测试通过，验证登录流程、权限控制、加密存储、限流、日志记录端到端正常，向用户确认是否有疑问。
 
 ## 备注
