@@ -32,6 +32,7 @@ class ProxyNodeCreate(BaseModel):
     # 出售信息（全部可选）
     sale_customer: Optional[str] = None
     sale_price: Optional[Decimal] = None
+    sellers: Optional[List[str]] = None  # 出售人 username 列表
 
     # 状态字段
     status: Literal["idle", "active", "sold", "disabled"] = "idle"
@@ -66,6 +67,7 @@ class ProxyNodeUpdate(BaseModel):
     # 出售信息
     sale_customer: Optional[str] = None
     sale_price: Optional[Decimal] = None
+    sellers: Optional[List[str]] = None  # 出售人 username 列表
 
     # 状态字段
     status: Optional[Literal["idle", "active", "sold", "disabled"]] = None
@@ -113,6 +115,7 @@ class ProxyNodeResponse(BaseModel):
     # 出售信息
     sale_customer: Optional[str] = None
     sale_price: Optional[Decimal] = None
+    sellers: List[str] = []  # 出售人 username 列表
 
     # 状态字段
     status: str

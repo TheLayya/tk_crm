@@ -1,9 +1,10 @@
 import csv
 import io
+import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
@@ -17,6 +18,29 @@ from app.schemas.op_account import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Sellers JSON helpers
+# ---------------------------------------------------------------------------
+
+def _serialize_sellers(sellers: Optional[List[str]]) -> Optional[str]:
+    """将 Python 列表序列化为 JSON 字符串存入数据库。None 存为 NULL。"""
+    if sellers is None:
+        return None
+    return json.dumps(sellers, ensure_ascii=False)
+
+
+def _deserialize_sellers(value: Optional[str]) -> List[str]:
+    """将数据库中的 JSON 字符串反序列化为 Python 列表。NULL 或空值返回空列表。"""
+    if not value:
+        return []
+    try:
+        result = json.loads(value)
+        return result if isinstance(result, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
 
 # ---------------------------------------------------------------------------
 # Audit log helper
@@ -47,24 +71,35 @@ def _write_audit_log(
 # ---------------------------------------------------------------------------
 
 def create_op_account(db: Session, data: OpAccountCreate) -> OpAccount:
-    account = OpAccount(**data.model_dump())
+    data_dict = data.model_dump()
+    # 序列化 sellers 列表为 JSON 字符串
+    data_dict['sellers'] = _serialize_sellers(data_dict.get('sellers'))
+    account = OpAccount(**data_dict)
     db.add(account)
     db.commit()
     db.refresh(account)
     _write_audit_log(db, account.id, "create", field_name=None, old_value=None, new_value="created")
     db.commit()
+    # 反序列化 sellers 供返回
+    account.sellers = _deserialize_sellers(account.sellers)
     return account
 
 
 def get_op_account(db: Session, id: int) -> Optional[OpAccount]:
-    return db.query(OpAccount).filter(OpAccount.id == id).first()
+    account = db.query(OpAccount).filter(OpAccount.id == id).first()
+    if account:
+        account.sellers = _deserialize_sellers(account.sellers)
+    return account
 
 
 def update_op_account(db: Session, id: int, data: OpAccountUpdate) -> Optional[OpAccount]:
-    account = get_op_account(db, id)
+    account = db.query(OpAccount).filter(OpAccount.id == id).first()
     if not account:
         return None
     update_data = data.model_dump(exclude_unset=True)
+    # 序列化 sellers
+    if 'sellers' in update_data:
+        update_data['sellers'] = _serialize_sellers(update_data['sellers'])
     for field, new_val in update_data.items():
         old_val = getattr(account, field, None)
         if old_val != new_val:
@@ -77,6 +112,7 @@ def update_op_account(db: Session, id: int, data: OpAccountUpdate) -> Optional[O
             setattr(account, field, new_val)
     db.commit()
     db.refresh(account)
+    account.sellers = _deserialize_sellers(account.sellers)
     return account
 
 
@@ -131,6 +167,9 @@ def list_op_accounts(
         )
     total = query.count()
     items = query.offset(skip).limit(limit).all()
+    # 反序列化每条记录的 sellers
+    for item in items:
+        item.sellers = _deserialize_sellers(item.sellers)
     return items, total
 
 
@@ -194,10 +233,11 @@ def batch_update_status(
     sale_customer: Optional[str] = None,
     sale_price=None,
     sale_date=None,
+    sellers: Optional[List[str]] = None,
 ) -> int:
     count = 0
     for account_id in ids:
-        account = get_op_account(db, account_id)
+        account = db.query(OpAccount).filter(OpAccount.id == account_id).first()
         if not account:
             continue
         old_status = account.status
@@ -217,6 +257,10 @@ def batch_update_status(
                 account.sale_date = sale_date
                 _write_audit_log(db, account.id, "update", field_name="sale_date",
                                  old_value=None, new_value=str(sale_date))
+            if sellers is not None:
+                account.sellers = _serialize_sellers(sellers)
+                _write_audit_log(db, account.id, "update", field_name="sellers",
+                                 old_value=None, new_value=str(sellers))
         count += 1
     db.commit()
     return count

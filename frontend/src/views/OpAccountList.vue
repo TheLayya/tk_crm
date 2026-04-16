@@ -254,6 +254,12 @@
         <el-table-column v-if="colVisible('sale')" label="出售日期" width="100">
           <template #default="{ row }">{{ row.sale_date || '-' }}</template>
         </el-table-column>
+        <el-table-column v-if="colVisible('sale')" label="出售人" width="120">
+          <template #default="{ row }">
+            <span v-if="row.sellers && row.sellers.length">{{ row.sellers.join('、') }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <!-- 人员 -->
         <el-table-column v-if="colVisible('people')" label="注册人" width="90">
           <template #default="{ row }">{{ row.registrant || '-' }}</template>
@@ -453,6 +459,9 @@
           <el-col :span="12">
             <el-form-item label="出售日期"><el-date-picker v-model="form.sale_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
           </el-col>
+          <el-col :span="12">
+            <el-form-item label="出售人"><SellerSelector v-model="form.sellers" /></el-form-item>
+          </el-col>
         </el-row>
 
         <div class="form-section-title">其他</div>
@@ -511,6 +520,7 @@
           <el-form-item label="出售客户"><el-input v-model="batchStatus.sale_customer" /></el-form-item>
           <el-form-item label="出售金额"><el-input-number v-model="batchStatus.sale_price" :precision="2" :min="0" style="width:100%" /></el-form-item>
           <el-form-item label="出售日期"><el-date-picker v-model="batchStatus.sale_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
+          <el-form-item label="出售人"><SellerSelector v-model="batchStatus.sellers" /></el-form-item>
         </template>
       </el-form>
       <template #footer>
@@ -692,6 +702,7 @@ import {
 } from '@/api/op_accounts'
 import { getMembers } from '@/api/team'
 import { useAuthStore } from '@/stores/auth'
+import SellerSelector from '@/components/SellerSelector.vue'
 
 // ===== 统计数据 =====
 const accountStats = ref({
@@ -834,7 +845,7 @@ const emptyForm = () => ({
   country: '', source: null, tags: '', remark: '', status: '正常', registrant: '', operator: '',
   tiktok_mid_video: false, tiktok_showcase: false, tiktok_phone_live: false, tiktok_partner_live: false,
   purchase_channel: '', purchase_price: null, purchase_date: null,
-  sale_customer: '', sale_price: null, sale_date: null,
+  sale_customer: '', sale_price: null, sale_date: null, sellers: [],
 })
 const form = ref(emptyForm())
 const editingId = ref(null)
@@ -851,7 +862,7 @@ const handleRowDblClick = (row) => {
 }
 const handleEdit = (row) => {
   editingId.value = row.id
-  form.value = { ...emptyForm(), ...row }
+  form.value = { ...emptyForm(), ...row, sellers: Array.isArray(row.sellers) ? row.sellers : [] }
   formDialog.isEdit = true
   formDialog.visible = true
 }
@@ -895,7 +906,7 @@ const handleBatchDelete = async () => {
 
 // ===== 批量修改状态 =====
 const showBatchStatusDialog = ref(false)
-const batchStatus = reactive({ status: '正常', sale_customer: '', sale_price: null, sale_date: null, loading: false })
+const batchStatus = reactive({ status: '正常', sale_customer: '', sale_price: null, sale_date: null, sellers: [], loading: false })
 const handleBatchStatus = async () => {
   batchStatus.loading = true
   try {
@@ -905,6 +916,7 @@ const handleBatchStatus = async () => {
       sale_customer: batchStatus.sale_customer || null,
       sale_price: batchStatus.sale_price || null,
       sale_date: batchStatus.sale_date || null,
+      sellers: batchStatus.sellers?.length ? batchStatus.sellers : null,
     })
     ElMessage.success('批量修改状态成功')
     showBatchStatusDialog.value = false

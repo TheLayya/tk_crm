@@ -40,6 +40,7 @@ class ProxyNode(Base):
     # 出售信息（全部可选）
     sale_customer = Column(String(255), nullable=True)
     sale_price = Column(Numeric(10, 2), nullable=True)
+    sellers = Column(Text, nullable=True)  # JSON 数组，存储出售人 username 列表
 
     # 状态字段
     status = Column(

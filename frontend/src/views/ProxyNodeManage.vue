@@ -191,6 +191,12 @@
         <el-table-column prop="sale_customer" label="出售客户" width="120">
           <template #default="{ row }">{{ row.sale_customer || '-' }}</template>
         </el-table-column>
+        <el-table-column label="出售人" width="120">
+          <template #default="{ row }">
+            <span v-if="row.sellers && row.sellers.length">{{ row.sellers.join('、') }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="密码" width="130">
           <template #default="{ row }">
             <div v-if="row.password" style="display: flex; align-items: center; gap: 6px;">
@@ -454,6 +460,11 @@
                   <el-input-number v-model="nodeForm.sale_price" :min="0" :precision="2" :controls="false" style="width: 100%;" placeholder="可选" />
                 </el-form-item>
               </el-col>
+              <el-col :span="24">
+                <el-form-item label="出售人">
+                  <SellerSelector v-model="nodeForm.sellers" />
+                </el-form-item>
+              </el-col>
             </el-row>
           </el-collapse-item>
         </el-collapse>
@@ -566,6 +577,7 @@ import {
   Plus, Upload, Download, Delete, View, Hide,
   Connection, CircleCheck, CircleClose, UploadFilled, Document
 } from '@element-plus/icons-vue'
+import SellerSelector from '@/components/SellerSelector.vue'
 import {
   getProxyNodes,
   createProxyNode,
@@ -840,6 +852,7 @@ const defaultNodeForm = () => ({
   expire_date: null,
   sale_customer: '',
   sale_price: null,
+  sellers: [],
   status: 'idle',
   remark: ''
 })
@@ -900,6 +913,7 @@ const openEdit = (row) => {
     expire_date: row.expire_date || null,
     sale_customer: row.sale_customer || '',
     sale_price: row.sale_price != null ? Number(row.sale_price) : null,
+    sellers: Array.isArray(row.sellers) ? row.sellers : [],
     status: row.status || 'idle',
     remark: row.remark || ''
   }
@@ -907,7 +921,7 @@ const openEdit = (row) => {
   const open = []
   if (row.relay_ip || row.relay_port) open.push('relay')
   if (row.purchase_date || row.purchase_price || row.purchase_channel || row.expire_date) open.push('purchase')
-  if (row.sale_customer || row.sale_price) open.push('sale')
+  if (row.sale_customer || row.sale_price || (row.sellers && row.sellers.length)) open.push('sale')
   activeCollapse.value = open
   nodeDialogVisible.value = true
 }

@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 from decimal import Decimal
@@ -15,6 +16,33 @@ from app.schemas.proxy_node import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Sellers JSON helpers
+# ---------------------------------------------------------------------------
+
+def _serialize_sellers(sellers: Optional[List[str]]) -> Optional[str]:
+    if sellers is None:
+        return None
+    return json.dumps(sellers, ensure_ascii=False)
+
+
+def _deserialize_sellers(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    try:
+        result = json.loads(value)
+        return result if isinstance(result, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _deserialize_node(node: ProxyNode) -> ProxyNode:
+    """反序列化节点的 JSON 字段。"""
+    if node:
+        node.sellers = _deserialize_sellers(node.sellers)
+    return node
 
 
 def _apply_filter(query, filter: ProxyNodeFilter):
@@ -50,6 +78,8 @@ def get_nodes(
 
     total = query.count()
     nodes = query.offset(skip).limit(limit).all()
+    for node in nodes:
+        _deserialize_node(node)
 
     logger.debug(f"get_nodes: total={total}, skip={skip}, limit={limit}, returned={len(nodes)}")
     return nodes, total
@@ -57,28 +87,33 @@ def get_nodes(
 
 def get_node(db: Session, node_id: int) -> Optional[ProxyNode]:
     """按 ID 查询节点，不存在返回 None。"""
-    return db.query(ProxyNode).filter(ProxyNode.id == node_id).first()
+    node = db.query(ProxyNode).filter(ProxyNode.id == node_id).first()
+    return _deserialize_node(node) if node else None
 
 
 def create_node(db: Session, data: ProxyNodeCreate) -> ProxyNode:
     """创建节点，默认值已在 Schema 中定义。"""
-    node = ProxyNode(**data.model_dump())
+    data_dict = data.model_dump()
+    data_dict['sellers'] = _serialize_sellers(data_dict.get('sellers'))
+    node = ProxyNode(**data_dict)
     db.add(node)
     db.commit()
     db.refresh(node)
     logger.info(f"Created proxy node id={node.id} ip={node.ip}:{node.port}")
-    return node
+    return _deserialize_node(node)
 
 
 def update_node(
     db: Session, node_id: int, data: ProxyNodeUpdate
 ) -> Optional[ProxyNode]:
     """部分更新节点，自动刷新 updated_at；节点不存在返回 None。"""
-    node = get_node(db, node_id)
+    node = db.query(ProxyNode).filter(ProxyNode.id == node_id).first()
     if not node:
         return None
 
     update_data = data.get_update_data()
+    if 'sellers' in update_data:
+        update_data['sellers'] = _serialize_sellers(update_data['sellers'])
     for field, value in update_data.items():
         setattr(node, field, value)
 
@@ -86,7 +121,7 @@ def update_node(
     db.commit()
     db.refresh(node)
     logger.info(f"Updated proxy node id={node_id}, fields={list(update_data.keys())}")
-    return node
+    return _deserialize_node(node)
 
 
 def delete_node(db: Session, node_id: int) -> bool:

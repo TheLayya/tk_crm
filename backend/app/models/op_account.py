@@ -53,6 +53,7 @@ class OpAccount(Base):
     sale_customer = Column(String(255), nullable=True)
     sale_price = Column(Numeric(10, 2), nullable=True)
     sale_date = Column(Date, nullable=True)
+    sellers = Column(Text, nullable=True)  # JSON 数组，存储出售人 username 列表
 
     # 采集字段
     platform_user_id = Column(String(255), nullable=True)

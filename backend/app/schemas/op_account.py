@@ -40,6 +40,7 @@ class OpAccountCreate(BaseModel):
     sale_customer: Optional[str] = None
     sale_price: Optional[Decimal] = None
     sale_date: Optional[date] = None
+    sellers: Optional[List[str]] = None  # 出售人 username 列表
 
     class Config:
         from_attributes = True
@@ -76,6 +77,7 @@ class OpAccountUpdate(BaseModel):
     sale_customer: Optional[str] = None
     sale_price: Optional[Decimal] = None
     sale_date: Optional[date] = None
+    sellers: Optional[List[str]] = None  # 出售人 username 列表
 
     class Config:
         from_attributes = True
@@ -113,6 +115,7 @@ class OpAccountResponse(BaseModel):
     sale_customer: Optional[str] = None
     sale_price: Optional[Decimal] = None
     sale_date: Optional[date] = None
+    sellers: List[str] = []  # 出售人 username 列表
 
     platform_user_id: Optional[str] = None
     platform_sec_uid: Optional[str] = None
@@ -160,6 +163,7 @@ class BatchStatusUpdate(BaseModel):
     sale_customer: Optional[str] = None
     sale_price: Optional[Decimal] = None
     sale_date: Optional[date] = None
+    sellers: Optional[List[str]] = None  # 出售人 username 列表
 
 
 class AuditLogResponse(BaseModel):

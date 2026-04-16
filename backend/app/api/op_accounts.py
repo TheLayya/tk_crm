@@ -106,6 +106,7 @@ def batch_update_status(data: BatchStatusUpdate, db: Session = Depends(get_db), 
         sale_customer=data.sale_customer,
         sale_price=data.sale_price,
         sale_date=data.sale_date,
+        sellers=data.sellers,
     )
     return {"updated": count}
 
