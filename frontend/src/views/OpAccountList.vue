@@ -1,5 +1,45 @@
 <template>
   <div class="op-account-list">
+    <!-- 统计面板 -->
+    <div class="stats-panel">
+      <div class="stats-grid">
+        <el-card class="stat-card" shadow="hover">
+          <div class="stat-value">{{ accountStats.total }}</div>
+          <div class="stat-label">账号总数</div>
+        </el-card>
+        <el-card class="stat-card stat-card--success" shadow="hover">
+          <div class="stat-value">{{ accountStats.by_status?.['正常'] ?? 0 }}</div>
+          <div class="stat-label">正常</div>
+        </el-card>
+        <el-card class="stat-card stat-card--primary" shadow="hover">
+          <div class="stat-value">{{ accountStats.by_status?.['自用'] ?? 0 }}</div>
+          <div class="stat-label">自用</div>
+        </el-card>
+        <el-card class="stat-card stat-card--danger" shadow="hover">
+          <div class="stat-value">{{ accountStats.by_status?.['封禁'] ?? 0 }}</div>
+          <div class="stat-label">封禁</div>
+        </el-card>
+        <el-card class="stat-card stat-card--info" shadow="hover">
+          <div class="stat-value">{{ accountStats.by_status?.['已售'] ?? 0 }}</div>
+          <div class="stat-label">已售</div>
+        </el-card>
+        <el-card class="stat-card" shadow="hover">
+          <div class="stat-value">{{ formatCurrency(accountStats.total_purchase_cost) }}</div>
+          <div class="stat-label">总采购成本</div>
+        </el-card>
+        <el-card class="stat-card stat-card--success" shadow="hover">
+          <div class="stat-value">{{ formatCurrency(accountStats.total_sale_revenue) }}</div>
+          <div class="stat-label">总出售收入</div>
+        </el-card>
+        <el-card class="stat-card" shadow="hover">
+          <div class="stat-value" :class="Number(accountStats.net_profit) >= 0 ? 'stat-value--profit' : 'stat-value--loss'">
+            {{ formatCurrency(accountStats.net_profit) }}
+          </div>
+          <div class="stat-label">净收益</div>
+        </el-card>
+      </div>
+    </div>
+
     <!-- 过滤栏 -->
     <el-card class="filter-card">
       <div class="filter-row">
@@ -308,7 +348,7 @@
 
     <!-- 新增/编辑对话框 -->
     <el-dialog v-model="formDialog.visible" :title="formDialog.isEdit ? `编辑账号` : '新增账号'" width="720px" top="5vh">
-      <template #title>
+      <template #header>
         <span>{{ formDialog.isEdit ? '编辑账号' : '新增账号' }}</span>
         <span v-if="formDialog.isEdit && form.account" style="font-size:14px;color:var(--color-text-muted);margin-left:8px">{{ form.account }}</span>
       </template>
@@ -648,10 +688,25 @@ import { Plus, Upload, Download, Search, Setting, ArrowDown, View, Hide, Edit, D
 import {
   listOpAccounts, createOpAccount, updateOpAccount, deleteOpAccount,
   batchUpdateStatus, importOpAccounts, exportOpAccounts,
-  triggerCollect, getCollectTask, getAuditLogs
+  triggerCollect, getCollectTask, getAuditLogs, getOpAccountStats
 } from '@/api/op_accounts'
 import { getMembers } from '@/api/team'
 import { useAuthStore } from '@/stores/auth'
+
+// ===== 统计数据 =====
+const accountStats = ref({
+  total: 0,
+  by_status: { '正常': 0, '自用': 0, '封禁': 0, '已售': 0 },
+  by_platform: {},
+  total_purchase_cost: 0,
+  total_sale_revenue: 0,
+  net_profit: 0,
+})
+const loadStats = async () => {
+  try {
+    accountStats.value = await getOpAccountStats()
+  } catch (e) { console.error(e) }
+}
 
 // ===== 数据 =====
 const accounts = ref([])
@@ -756,6 +811,10 @@ const toggleVisible = (rowId, field) => {
 
 // ===== 格式化 =====
 const formatNum = (n) => n == null ? '-' : n.toLocaleString()
+const formatCurrency = (val) => {
+  if (val == null) return '¥0.00'
+  return `¥${Number(val).toFixed(2)}`
+}
 const formatDate = (s) => {
   if (!s) return '-'
   const d = s.endsWith('Z') ? s : s + 'Z'
@@ -821,6 +880,7 @@ const handleDelete = async (row) => {
     await deleteOpAccount(row.id)
     ElMessage.success('删除成功')
     loadAccounts()
+    loadStats()
   } catch (e) { if (e !== 'cancel') console.error(e) }
 }
 const handleBatchDelete = async () => {
@@ -829,6 +889,7 @@ const handleBatchDelete = async () => {
     await Promise.all(selectedIds.value.map(id => deleteOpAccount(id)))
     ElMessage.success('批量删除成功')
     loadAccounts()
+    loadStats()
   } catch (e) { if (e !== 'cancel') console.error(e) }
 }
 
@@ -848,6 +909,7 @@ const handleBatchStatus = async () => {
     ElMessage.success('批量修改状态成功')
     showBatchStatusDialog.value = false
     loadAccounts()
+    loadStats()
   } catch (e) { console.error(e) }
   finally { batchStatus.loading = false }
 }
@@ -941,6 +1003,7 @@ const handleResize = () => { windowWidth.value = window.innerWidth }
 onMounted(() => {
   window.addEventListener('resize', handleResize)
   loadAccounts()
+  loadStats()
   const authStore = useAuthStore()
   if (authStore.hasPermission('team:member:view')) {
     getMembers({ size: 200 }).then(data => {
@@ -963,6 +1026,60 @@ onUnmounted(() => {
   background: var(--color-bg-page);
   min-height: 100%;
 }
+
+/* ===== 统计面板 ===== */
+.stats-panel {
+  margin-bottom: 4px;
+}
+
+.stats-panel > .stats-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 1024px) {
+  .stats-panel > .stats-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (max-width: 767px) {
+  .stats-panel > .stats-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+.stat-card {
+  text-align: center;
+  cursor: default;
+  height: 100%;
+}
+.stat-card :deep(.el-card__body) {
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+}
+.stat-card--success { border-top: 3px solid #67c23a; }
+.stat-card--primary { border-top: 3px solid #409eff; }
+.stat-card--warning { border-top: 3px solid #e6a23c; }
+.stat-card--info    { border-top: 3px solid #909399; }
+.stat-card--danger  { border-top: 3px solid #f56c6c; }
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #303133;
+  line-height: 1.2;
+  word-break: break-all;
+}
+.stat-value--profit { color: #67c23a; }
+.stat-value--loss   { color: #f56c6c; }
+
+.stat-label {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
 .filter-card :deep(.el-card__body) { padding: 16px; }
 .filter-row {
   display: flex;

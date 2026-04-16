@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["op-accounts"])
 
 
+@router.get("/stats", response_model=dict)
+def get_stats(
+    db: Session = Depends(get_db),
+    _=Depends(require_permission("op_account:view")),
+):
+    """获取运营账号统计数据。"""
+    return op_account_service.get_op_account_stats(db)
+
+
 @router.get("", response_model=dict)
 def list_op_accounts(
     platform: Optional[str] = Query(None),

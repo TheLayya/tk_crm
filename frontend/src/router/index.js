@@ -39,6 +39,12 @@ const router = createRouter({
       meta: { requiresAuth: true, permission: 'op_account:view', breadcrumb: '运营账号' }
     },
     {
+      path: '/proxy-nodes',
+      name: 'ProxyNodeManage',
+      component: () => import('../views/ProxyNodeManage.vue'),
+      meta: { requiresAuth: true, breadcrumb: '节点管理' }
+    },
+    {
       path: '/settings',
       name: 'Settings',
       component: () => import('../views/Settings.vue'),

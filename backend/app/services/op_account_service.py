@@ -135,6 +135,55 @@ def list_op_accounts(
 
 
 # ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
+def get_op_account_stats(db: Session) -> dict:
+    """
+    统计运营账号的汇总数据：总数、各状态数量、总采购成本、总出售收入、净收益。
+    """
+    from decimal import Decimal
+    from sqlalchemy import func
+
+    total = db.query(OpAccount).count()
+
+    # 各状态数量
+    status_rows = (
+        db.query(OpAccount.status, func.count(OpAccount.id))
+        .group_by(OpAccount.status)
+        .all()
+    )
+    by_status = {"正常": 0, "自用": 0, "封禁": 0, "已售": 0}
+    for status_val, cnt in status_rows:
+        if status_val in by_status:
+            by_status[status_val] = cnt
+
+    # 各平台数量
+    platform_rows = (
+        db.query(OpAccount.platform, func.count(OpAccount.id))
+        .group_by(OpAccount.platform)
+        .all()
+    )
+    by_platform = {}
+    for platform_val, cnt in platform_rows:
+        by_platform[platform_val] = cnt
+
+    # 成本与收益
+    purchase_sum = db.query(func.sum(OpAccount.purchase_price)).scalar() or Decimal("0")
+    sale_sum = db.query(func.sum(OpAccount.sale_price)).scalar() or Decimal("0")
+    net_profit = Decimal(str(sale_sum)) - Decimal(str(purchase_sum))
+
+    return {
+        "total": total,
+        "by_status": by_status,
+        "by_platform": by_platform,
+        "total_purchase_cost": float(purchase_sum),
+        "total_sale_revenue": float(sale_sum),
+        "net_profit": float(net_profit),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Batch status update
 # ---------------------------------------------------------------------------
 

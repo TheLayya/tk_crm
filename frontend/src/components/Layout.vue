@@ -25,6 +25,10 @@
           <el-icon><Briefcase /></el-icon>
           <template #title><span>运营账号</span></template>
         </el-menu-item>
+        <el-menu-item index="/proxy-nodes">
+          <el-icon><Connection /></el-icon>
+          <template #title><span>节点管理</span></template>
+        </el-menu-item>
         <el-sub-menu
           v-if="authStore.hasPermission('team:dept:view') || authStore.hasPermission('team:member:view') || authStore.hasPermission('team:role:view') || authStore.hasPermission('team:log:view')"
           index="/team"
@@ -123,7 +127,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Setting, Briefcase, UserFilled, User, Key, Document, OfficeBuilding, SwitchButton } from '@element-plus/icons-vue'
+import { Monitor, Setting, Briefcase, UserFilled, User, Key, Document, OfficeBuilding, SwitchButton, Connection } from '@element-plus/icons-vue'
 import { getSettings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import Breadcrumb from '@/components/Breadcrumb.vue'
@@ -168,6 +172,7 @@ const activeMenu = computed(() => {
   if (path.startsWith('/monitor')) return '/monitor'
   if (path.startsWith('/accounts')) return '/monitor'
   if (path.startsWith('/op-accounts')) return '/op-accounts'
+  if (path.startsWith('/proxy-nodes')) return '/proxy-nodes'
   if (path.startsWith('/settings')) return '/settings'
   if (path.startsWith('/team')) return path
   return path

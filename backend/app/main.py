@@ -11,6 +11,7 @@ from app.models.team import User
 from app.api import projects, accounts, history, proxies, videos, import_export, op_accounts, auth, team
 from app.api import settings as settings_router
 from app.api import backup as backup_router
+from app.api import proxy_nodes
 from app.middleware.rate_limit import limiter
 from app.middleware.operation_log import OperationLogMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -88,6 +89,7 @@ app.include_router(op_accounts.router, prefix="/api/op-accounts", tags=["op-acco
 app.include_router(auth.router, prefix="/api")
 app.include_router(team.router, prefix="/api")
 app.include_router(backup_router.router, prefix="/api")
+app.include_router(proxy_nodes.router, prefix="/api")
 
 
 @app.get("/health")

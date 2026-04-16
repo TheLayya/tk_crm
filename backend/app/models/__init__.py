@@ -6,6 +6,7 @@ from app.models.monitor import (
     MonitorSettings,
 )
 from app.models.video import Video, VideoStats
+from app.models.proxy_node import ProxyNode
 
 __all__ = [
     "Project",
@@ -15,4 +16,5 @@ __all__ = [
     "MonitorSettings",
     "Video",
     "VideoStats",
+    "ProxyNode",
 ]

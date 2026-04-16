@@ -16,7 +16,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Briefcase, UserFilled, Setting } from '@element-plus/icons-vue'
+import { Monitor, Briefcase, UserFilled, Setting, Connection } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
@@ -37,6 +37,12 @@ const tabs = computed(() => [
     permission: 'op_account:view'
   },
   {
+    key: '/proxy-nodes',
+    label: '节点',
+    icon: Connection,
+    permission: 'proxy_node:view'
+  },
+  {
     key: '/team/member',
     label: '团队',
     icon: UserFilled,
@@ -54,6 +60,7 @@ const activeTab = computed(() => {
   const path = route.path
   if (path.startsWith('/monitor') || path.startsWith('/accounts')) return '/monitor'
   if (path.startsWith('/op-accounts')) return '/op-accounts'
+  if (path.startsWith('/proxy-nodes')) return '/proxy-nodes'
   if (path.startsWith('/team')) return '/team/member'
   if (path.startsWith('/settings')) return '/settings'
   return ''

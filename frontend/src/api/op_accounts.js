@@ -4,6 +4,16 @@
 import request from './request'
 
 /**
+ * Get op account stats (total, by_status, by_platform, costs)
+ */
+export function getOpAccountStats() {
+  return request({
+    url: '/op-accounts/stats',
+    method: 'get'
+  })
+}
+
+/**
  * List op accounts with filters
  * @param {Object} params - project_id, platform, status, keyword, tags, purchase_channel, sale_customer, skip, limit
  */
