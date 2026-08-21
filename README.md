@@ -83,3 +83,17 @@ docker compose up -d --build
 ## 许可证
 
 MIT License
+
+## 社区与支持
+
+欢迎加入交流群，获取使用帮助、版本更新和问题排查信息：
+
+![加入交流群](docs/community/group.png)
+
+如果这个项目对你有帮助，欢迎通过微信支持项目维护和持续开发：
+
+![支持作者](docs/community/support.png)
+
+项目交流与作者联系方式：
+
+![作者微信](docs/community/author-wechat.png)
