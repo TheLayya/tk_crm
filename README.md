@@ -10,10 +10,10 @@ TikTok 账号监控与运营管理系统。
 
 ## 本地启动（Windows）
 
-推荐 Python 3.12。
+推荐 Python 3.12。先进入项目根目录（即包含 `backend` 和 `frontend` 的目录）。
 
 ```bat
-cd /d F:\编程相关软件\crm\tk_crm\backend
+cd backend
 python -m venv .venv312
 .\.venv312\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv312\Scripts\python.exe -m alembic upgrade head
@@ -23,7 +23,7 @@ python -m venv .venv312
 另开终端启动前端：
 
 ```bat
-cd /d F:\编程相关软件\crm\tk_crm\frontend
+cd frontend
 npm install
 npm run dev -- --host 0.0.0.0 --port 5174
 ```
