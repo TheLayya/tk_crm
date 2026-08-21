@@ -71,6 +71,14 @@ def _write_audit_log(
 # ---------------------------------------------------------------------------
 
 def create_op_account(db: Session, data: OpAccountCreate) -> OpAccount:
+    # Prevent duplicate operation accounts even when no project is selected
+    existing = db.query(OpAccount).filter(
+        OpAccount.platform == data.platform,
+        OpAccount.account == data.account,
+    ).first()
+    if existing:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=409, detail="该平台账号已存在")
     data_dict = data.model_dump()
     # 序列化 sellers 列表为 JSON 字符串
     data_dict['sellers'] = _serialize_sellers(data_dict.get('sellers'))
@@ -81,14 +89,11 @@ def create_op_account(db: Session, data: OpAccountCreate) -> OpAccount:
     _write_audit_log(db, account.id, "create", field_name=None, old_value=None, new_value="created")
     db.commit()
     # 反序列化 sellers 供返回
-    account.sellers = _deserialize_sellers(account.sellers)
     return account
 
 
 def get_op_account(db: Session, id: int) -> Optional[OpAccount]:
     account = db.query(OpAccount).filter(OpAccount.id == id).first()
-    if account:
-        account.sellers = _deserialize_sellers(account.sellers)
     return account
 
 
@@ -112,7 +117,6 @@ def update_op_account(db: Session, id: int, data: OpAccountUpdate) -> Optional[O
             setattr(account, field, new_val)
     db.commit()
     db.refresh(account)
-    account.sellers = _deserialize_sellers(account.sellers)
     return account
 
 

@@ -305,3 +305,33 @@ MIT License
 ---
 
 â­ å¦‚æœè¿™ä¸ªé¡¹ç›®å¯¹ä½ æœ‰å¸®åŠ©ï¼Œè¯·ç»™ä¸ª Starï¼
+
+## ±¾µØ Windows ¿ª·¢ËµÃ÷
+
+ºó¶ËÊ¹ÓÃ SQLite£¬ÍÆ¼ö Python 3.12£º
+
+``bat
+cd /d F:\±à³ÌÏà¹ØÈí¼ş\crm\tk_crm\backend
+.\.venv312\Scripts\python.exe -m alembic upgrade head
+.\.venv312\Scripts\python.exe run.py
+`` 
+
+Ç°¶Ë£º
+
+``bat
+cd /d F:\±à³ÌÏà¹ØÈí¼ş\crm\tk_crm\frontend
+npm install
+npm run dev -- --host 0.0.0.0 --port 5174
+`` 
+
+·ÃÎÊ http://localhost:5174/£¬Ä¬ÈÏÕËºÅ admin£¬ÃÜÂë admin123456¡£
+
+## ²¿ÊğËµÃ÷
+
+Éú²ú»·¾³Ê¹ÓÃ Docker Compose »ò Nginx£¬ºó¶ËÄ¬ÈÏ¼àÌı 8000£¬Ç°¶Ë¹¹½¨²úÎïÎ»ÓÚ frontend/dist¡£²¿ÊğÇ°Ö´ĞĞ alembic upgrade head£¬²¢ĞŞ¸ÄÃÜÔ¿Óë¹ÜÀíÔ±ÃÜÂë¡£
+
+## ½üÆÚĞŞ¸´
+
+- ÔËÓªÕËºÅÖ§³Ö²»°ó¶¨ÏîÄ¿´´½¨¡£
+- Í¬Ò»Æ½Ì¨½ûÖ¹ÖØ¸´Ìí¼ÓÏàÍ¬ÕËºÅ¡£
+- sellers ×Ö¶Î×Ô¶¯ÔÚ JSON ×Ö·û´®Óë API ÁĞ±í¼ä×ª»»¡£

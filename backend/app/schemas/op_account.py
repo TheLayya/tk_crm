@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class OpAccountCreate(BaseModel):
@@ -116,6 +116,18 @@ class OpAccountResponse(BaseModel):
     sale_price: Optional[Decimal] = None
     sale_date: Optional[date] = None
     sellers: List[str] = []  # 出售人 username 列表
+
+    @field_validator('sellers', mode='before')
+    @classmethod
+    def normalize_sellers(cls, value):
+        if isinstance(value, str):
+            try:
+                import json
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+        return value or []
 
     platform_user_id: Optional[str] = None
     platform_sec_uid: Optional[str] = None

@@ -716,7 +716,10 @@ const accountStats = ref({
 const loadStats = async () => {
   try {
     accountStats.value = await getOpAccountStats()
-  } catch (e) { console.error(e) }
+  } catch (e) {
+    if (e?.response?.status === 409) ElMessage.warning('该平台账号已存在，不能重复添加')
+    else console.error(e)
+  }
 }
 
 // ===== 数据 =====
