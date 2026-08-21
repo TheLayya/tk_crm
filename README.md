@@ -62,6 +62,24 @@ docker compose up -d --build
 - 同一平台禁止重复账号
 - 运营账号可不绑定项目创建
 
+## 界面预览
+
+### 登录
+
+![登录页面](docs/screenshots/login.png)
+
+### 监控账号列表
+
+![监控账号列表](docs/screenshots/monitor-list.png)
+
+### 账号详情与数据趋势
+
+![账号详情](docs/screenshots/account-detail.png)
+
+### 运营账号管理
+
+![运营账号管理](docs/screenshots/op-accounts.png)
+
 ## 许可证
 
 MIT License
