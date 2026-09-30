@@ -9,6 +9,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.device import Device
+from app.models.proxy_node import ProxyNode
 from app.schemas.op_account import (
     AuditLogResponse,
     BatchStatusUpdate,
@@ -17,9 +19,10 @@ from app.schemas.op_account import (
     OpAccountResponse,
     OpAccountUpdate,
     OpImportResult,
+    BatchAssignOperator,
 )
 from app.services import op_account_service
-from app.services.auth_service import require_permission, get_current_user_from_header, get_user_data_scope
+from app.services.auth_service import require_permission, get_current_user_from_header, get_user_data_scope, get_dept_member_usernames
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,7 @@ def list_op_accounts(
     # 数据范围过滤
     data_scope = get_user_data_scope(db, current_user)
     scope_username = current_user.username if data_scope == "self" else None
+    scope_usernames = get_dept_member_usernames(db, current_user) if data_scope == "dept" else None
 
     items, total = op_account_service.list_op_accounts(
         db,
@@ -64,7 +68,13 @@ def list_op_accounts(
         skip=skip,
         limit=limit,
         scope_username=scope_username,
+        scope_usernames=scope_usernames,
     )
+    for item in items:
+        device = db.query(Device).filter(Device.id == item.device_id, Device.is_deleted == False).first() if item.device_id else None
+        node = db.query(ProxyNode).filter(ProxyNode.id == item.node_id).first() if item.node_id else None
+        item.device_name = device.name if device else None
+        item.node_ip = f"{node.ip}:{node.port}" if node else None
     return {
         "items": [OpAccountResponse.model_validate(item).model_dump() for item in items],
         "total": total,
@@ -89,6 +99,8 @@ def create_op_account(
         return OpAccountResponse.model_validate(account)
     except Exception as e:
         logger.error(f"Failed to create op_account: {e}")
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
@@ -97,8 +109,27 @@ def create_op_account(
 
 # 注意：以下固定路径路由必须在 /{id} 之前定义，避免路径冲突
 
+
+@router.get("/import/template")
+def download_import_template(_=Depends(require_permission("op_account:import"))):
+    data = op_account_service.create_import_template()
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="op_accounts_import_template_zh.xlsx"'},
+    )
+
+
 @router.post("/batch-status", response_model=dict)
-def batch_update_status(data: BatchStatusUpdate, db: Session = Depends(get_db), _=Depends(require_permission("op_account:edit"))):
+def batch_update_status(data: BatchStatusUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user_from_header), _=Depends(require_permission("op_account:edit"))):
+    scope = get_user_data_scope(db, current_user)
+    if scope != "all":
+        allowed = set(get_dept_member_usernames(db, current_user)) if scope == "dept" else {current_user.username}
+        accounts = db.query(op_account_service.OpAccount).filter(op_account_service.OpAccount.id.in_(data.ids)).all()
+        if len(accounts) != len(set(data.ids)):
+            raise HTTPException(status_code=404, detail="部分运营账号不存在")
+        if any(not ({a.registrant, a.operator} & allowed) for a in accounts):
+            raise HTTPException(status_code=403, detail="无权批量操作部分运营账号")
     count = op_account_service.batch_update_status(
         db,
         ids=data.ids,
@@ -111,15 +142,45 @@ def batch_update_status(data: BatchStatusUpdate, db: Session = Depends(get_db), 
     return {"updated": count}
 
 
+@router.post("/batch-assign", response_model=dict)
+def batch_assign_operator(
+    data: BatchAssignOperator,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_from_header),
+    _=Depends(require_permission("op_account:edit")),
+    _members=Depends(require_permission("team:member:view")),
+):
+    count = op_account_service.batch_assign_operator(db, data.ids, data.operator, current_user)
+    return {"updated": count}
+
+
 @router.post("/import", response_model=OpImportResult)
 async def import_from_csv(
     file: UploadFile,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(require_permission("op_account:import")),
 ):
     raw = await file.read()
-    content = raw.decode("utf-8-sig")
-    result = op_account_service.import_from_csv(db, csv_content=content)
+    filename = (file.filename or "").lower()
+    try:
+        if filename.endswith(".xlsx"):
+            result = op_account_service.import_from_excel(db, file_content=raw)
+        elif filename.endswith(".csv"):
+            content = raw.decode("utf-8-sig", errors="replace")
+            result = op_account_service.import_from_csv(db, csv_content=content)
+        else:
+            raise HTTPException(status_code=422, detail="仅支持 CSV 或 XLSX 文件")
+    except HTTPException:
+        raise
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=f"导入文件格式错误：{exc}") from exc
+    account_ids = [
+        row.get("_id") for row in result.rows
+        if row.get("_result") == "success" and row.get("_id")
+    ]
+    if account_ids:
+        result.task_id = op_account_service.trigger_collect(db, account_ids, background_tasks)
     return result
 
 
@@ -132,9 +193,12 @@ def export_op_accounts(
     purchase_channel: Optional[str] = Query(None),
     sale_customer: Optional[str] = Query(None),
     format: str = Query("csv"),
+    localized: bool = Query(False, description="是否使用中文表头"),
     db: Session = Depends(get_db),
     _=Depends(require_permission("op_account:export")),
 ):
+    if format not in {"csv", "xlsx"}:
+        raise HTTPException(status_code=422, detail="导出格式仅支持 CSV 或 XLSX")
     filters = {
         "platform": platform,
         "status": status,
@@ -143,7 +207,7 @@ def export_op_accounts(
         "purchase_channel": purchase_channel,
         "sale_customer": sale_customer,
     }
-    data = op_account_service.export_op_accounts(db, filters=filters, format=format)
+    data = op_account_service.export_op_accounts(db, filters=filters, format=format, localized=localized)
 
     if format == "xlsx":
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -187,7 +251,14 @@ def get_collect_task(task_id: str, db: Session = Depends(get_db), _=Depends(requ
 
 
 @router.put("/{id}", response_model=OpAccountResponse)
-def update_op_account(id: int, data: OpAccountUpdate, db: Session = Depends(get_db), _=Depends(require_permission("op_account:edit"))):
+def update_op_account(id: int, data: OpAccountUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user_from_header), _=Depends(require_permission("op_account:edit"))):
+    account = op_account_service.get_op_account(db, id)
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    scope = get_user_data_scope(db, current_user)
+    allowed = {account.registrant, account.operator}
+    if (scope == "self" and current_user.username not in allowed) or (scope == "dept" and not allowed.intersection(get_dept_member_usernames(db, current_user))):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作该运营账号")
     account = op_account_service.update_op_account(db, id, data)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
@@ -195,7 +266,14 @@ def update_op_account(id: int, data: OpAccountUpdate, db: Session = Depends(get_
 
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_op_account(id: int, db: Session = Depends(get_db), _=Depends(require_permission("op_account:delete"))):
+def delete_op_account(id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user_from_header), _=Depends(require_permission("op_account:delete"))):
+    account = op_account_service.get_op_account(db, id)
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    scope = get_user_data_scope(db, current_user)
+    allowed = {account.registrant, account.operator}
+    if (scope == "self" and current_user.username not in allowed) or (scope == "dept" and not allowed.intersection(get_dept_member_usernames(db, current_user))):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作该运营账号")
     ok = op_account_service.delete_op_account(db, id)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")

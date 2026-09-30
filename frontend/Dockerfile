@@ -8,6 +8,8 @@ RUN npm ci
 
 # Copy source and build
 COPY . .
+# Archives copied from Windows can lose executable bits on node binaries.
+RUN chmod +x node_modules/.bin/* 2>/dev/null || true
 RUN npm run build
 
 # Production stage with nginx

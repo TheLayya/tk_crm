@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Tuple
+from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
@@ -129,7 +130,16 @@ def delete_node(db: Session, node_id: int) -> bool:
     node = get_node(db, node_id)
     if not node:
         return False
-
+    # 清理三方关联后再删除，避免外键关闭/旧库下留下悬空关系。
+    from app.models.device import Device
+    from app.models.op_account import OpAccount
+    for device in db.query(Device).filter(Device.is_deleted == False).all():
+        ids = device.node_ids or ([device.node_id] if device.node_id else [])
+        if node_id in ids:
+            ids = [value for value in ids if value != node_id]
+            device.node_ids = ids
+            device.node_id = ids[0] if ids else None
+    db.query(OpAccount).filter(OpAccount.node_id == node_id).update({OpAccount.node_id: None}, synchronize_session=False)
     db.delete(node)
     db.commit()
     logger.info(f"Deleted proxy node id={node_id}")
@@ -138,11 +148,19 @@ def delete_node(db: Session, node_id: int) -> bool:
 
 def batch_delete_nodes(db: Session, node_ids: List[int]) -> int:
     """批量删除节点，返回实际删除数量。"""
-    deleted = (
-        db.query(ProxyNode)
-        .filter(ProxyNode.id.in_(node_ids))
-        .delete(synchronize_session=False)
-    )
+    from app.models.device import Device
+    from app.models.op_account import OpAccount
+    nodes = db.query(ProxyNode).filter(ProxyNode.id.in_(node_ids)).all()
+    for device in db.query(Device).filter(Device.is_deleted == False).all():
+        ids = device.node_ids or ([device.node_id] if device.node_id else [])
+        new_ids = [value for value in ids if value not in set(node_ids)]
+        if new_ids != ids:
+            device.node_ids = new_ids
+            device.node_id = new_ids[0] if new_ids else None
+    db.query(OpAccount).filter(OpAccount.node_id.in_(node_ids)).update({OpAccount.node_id: None}, synchronize_session=False)
+    deleted = len(nodes)
+    for node in nodes:
+        db.delete(node)
     db.commit()
     logger.info(f"Batch deleted {deleted} proxy nodes, requested ids={node_ids}")
     return deleted
@@ -164,7 +182,8 @@ def batch_update_status(db: Session, node_ids: List[int], status: str) -> int:
 
 
 def get_stats(
-    db: Session, filter: Optional[ProxyNodeFilter] = None
+    db: Session, filter: Optional[ProxyNodeFilter] = None,
+    allowed_node_ids: Optional[set[int]] = None,
 ) -> ProxyNodeStats:
     """
     统计计算。支持 filter 参数（purchase_date 时间范围筛选）。
@@ -178,6 +197,8 @@ def get_stats(
             query = query.filter(ProxyNode.expire_date >= filter.expire_date_from)
         if filter.expire_date_to:
             query = query.filter(ProxyNode.expire_date <= filter.expire_date_to)
+    if allowed_node_ids is not None:
+        query = query.filter(ProxyNode.id.in_(allowed_node_ids))
 
     nodes: List[ProxyNode] = query.all()
 
@@ -226,3 +247,50 @@ def get_stats(
         net_profit=net_profit,
         by_channel=by_channel,
     )
+
+
+# ---------------------------------------------------------------------------
+# 代理 URI 构建（节点二维码，仅超管端点使用）
+# ---------------------------------------------------------------------------
+
+URI_PROTOCOLS = ("socks5", "http", "https")
+
+
+def build_node_uri(node: ProxyNode) -> str:
+    """构建代理 URI：中转信息（ip/port/protocol）齐全时用中转，否则直连。
+
+    - 凭据 percent-encode（含 `/` 也转义）；仅当 username 与 password **同时存在**才输出 user:pass@ 段
+    - IPv6 主机加方括号（含 zone 标识原样保留在括号内）；主机含空白/斜杠/@ 等非法字符时拒绝
+    - 协议白名单校验，非法协议直接拒绝（不静默回退产生误导 URI）
+    """
+    protocol = (node.relay_protocol or node.protocol or "socks5").lower()
+    if protocol not in URI_PROTOCOLS:
+        raise ValueError(f"协议无效: {protocol}")
+
+    use_relay = bool(node.relay_ip and node.relay_port and node.relay_protocol)
+    # 中转协议同样必须合法，否则拒绝而非静默回退
+    if use_relay:
+        relay_protocol = (node.relay_protocol or "").lower()
+        if relay_protocol not in URI_PROTOCOLS:
+            raise ValueError(f"中转协议无效: {relay_protocol}")
+
+    host = node.relay_ip if use_relay else node.ip
+    port = node.relay_port if use_relay else node.port
+
+    if not host:
+        raise ValueError("主机地址缺失，无法构建 URI")
+    if port is None:
+        raise ValueError("端口缺失，无法构建 URI")
+    if any(ch in host for ch in (" ", "/", "\\", "@", "#", "?")):
+        raise ValueError(f"主机地址含非法字符: {host}")
+
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+
+    auth = ""
+    if node.username is not None and node.password is not None:
+        user_part = quote(node.username, safe="")
+        pass_part = quote(node.password, safe="")
+        auth = f"{user_part}:{pass_part}@"
+
+    return f"{protocol}://{auth}{host}:{port}"

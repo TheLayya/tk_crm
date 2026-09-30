@@ -8,11 +8,21 @@ from app.models.team import OperationLog
 # Path → (module, action) mapping
 PATH_MODULE_MAP = [
     (r"POST /api/auth/login", None),  # skip login
+    (r"GET /api/proxy-nodes/\d+/uri", ("节点管理", "VIEW_SECRET")),  # 节点二维码 URI（含凭据，审计）
+    (r"POST /api/devices", ("终端资产", "CREATE")),
+    (r"PATCH /api/devices/\d+", ("终端资产", "UPDATE")),
+    (r"PUT /api/devices/\d+/relations", ("终端关联", "UPDATE")),
+    (r"DELETE /api/devices/\d+", ("终端资产", "DELETE")),
     (r"GET /api/op-accounts/export", ("运营账号", "EXPORT")),
     (r"POST /api/op-accounts/import", ("运营账号", "CREATE")),
     (r"POST /api/op-accounts/collect", ("运营账号", "CREATE")),
+    (r"POST /api/op-accounts/batch-assign", ("运营账号", "UPDATE")),
     (r"POST /api/op-accounts", ("运营账号", "CREATE")),
     (r"PUT /api/op-accounts/\d+", ("运营账号", "UPDATE")),
+    (r"PUT /api/proxy-nodes/\d+/relation", ("节点关联", "UPDATE")),
+    (r"POST /api/proxy-nodes", ("节点管理", "CREATE")),
+    (r"PATCH /api/proxy-nodes/\d+", ("节点管理", "UPDATE")),
+    (r"DELETE /api/proxy-nodes/\d+", ("节点管理", "DELETE")),
     (r"DELETE /api/op-accounts/\d+", ("运营账号", "DELETE")),
     (r"POST /api/team/dept", ("部门管理", "CREATE")),
     (r"PUT /api/team/dept/\d+", ("部门管理", "UPDATE")),
@@ -33,8 +43,10 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
         method = request.method
         path = request.url.path
 
-        # Only intercept write methods and export
-        if method not in ("POST", "PUT", "DELETE") and not (method == "GET" and "export" in path):
+        # Only intercept write methods, export and URI (credential view)
+        if method not in ("POST", "PATCH", "PUT", "DELETE") and not (
+            method == "GET" and ("export" in path or "/uri" in path)
+        ):
             return await call_next(request)
 
         # Find matching module/action

@@ -208,3 +208,18 @@ export function getProxyNodeStats(params) {
     params: buildArrayParams(params)
   })
 }
+
+/**
+ * 获取节点代理 URI（二维码数据源，仅超管可用）
+ * @param {number|string} id - 节点 ID
+ */
+export function getNodeUri(id) {
+  return request({
+    url: `/proxy-nodes/${id}/uri`,
+    method: 'get'
+  })
+}
+
+export function updateNodeRelation(id, data) {
+  return request({ url: `/proxy-nodes/${id}/relation`, method: 'put', data })
+}

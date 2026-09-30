@@ -1,5 +1,15 @@
 <template>
   <div class="monitor-manage">
+    <el-alert
+      v-if="batchCheckRunning && !progressDialog.visible"
+      class="batch-check-background"
+      type="info"
+      :closable="false"
+      show-icon
+    >
+      <span>批量检查正在后台运行：{{ progressDialog.success + progressDialog.failed }}/{{ progressDialog.total }} 已完成</span>
+      <el-button link type="primary" @click="progressDialog.visible = true">查看进度</el-button>
+    </el-alert>
     <!-- 移动端分段控制器 -->
     <div v-if="isMobile" class="ios-segment-control">
       <button
@@ -619,7 +629,7 @@
     </el-dialog>
 
     <el-dialog v-model="progressDialog.visible" title="批量检查进度" width="500px"
-      :close-on-click-modal="false" :close-on-press-escape="false" :show-close="progressDialog.completed">
+      :close-on-click-modal="false" :close-on-press-escape="true" :show-close="true">
       <div class="progress-content">
         <el-progress :percentage="progressDialog.percentage" :status="progressDialog.status" :stroke-width="20" />
         <div class="progress-info">
@@ -632,8 +642,9 @@
           <el-text type="info">正在检查: {{ progressDialog.currentAccount }}</el-text>
         </div>
       </div>
-      <template #footer v-if="progressDialog.completed">
-        <el-button type="primary" @click="progressDialog.visible = false">关闭</el-button>
+      <template #footer>
+        <el-button v-if="!progressDialog.completed" @click="progressDialog.visible = false">后台运行</el-button>
+        <el-button v-else type="primary" @click="progressDialog.visible = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -879,6 +890,7 @@ const progressDialog = ref({
   visible: false, total: 0, success: 0, failed: 0, processing: 0,
   percentage: 0, status: '', completed: false, currentAccount: ''
 })
+const batchCheckRunning = ref(false)
 
 const loadAccounts = async (renderCharts = true) => {
   accountLoading.value = true
@@ -964,6 +976,10 @@ const confirmBatchMove = async () => {
   } catch (e) { console.error(e) }
 }
 const batchCheck = async () => {
+  if (batchCheckRunning.value) {
+    ElMessage.info('批量检查正在后台运行')
+    return
+  }
   try {
     await ElMessageBox.confirm(`确定要立即检查选中的 ${selectedIds.value.length} 个账号吗？`, '批量检查', { type: 'info' })
     progressDialog.value = {
@@ -972,45 +988,42 @@ const batchCheck = async () => {
     }
     const accountMap = {}
     accounts.value.forEach(a => { accountMap[a.id] = a.username })
-    const triggerWithRetry = async (id, maxRetries = 3) => {
+    const triggerWithRetry = async (id) => {
       progressDialog.value.processing++
       progressDialog.value.currentAccount = accountMap[id] || `账号${id}`
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          await triggerCheck(id)
-          progressDialog.value.processing--
-          progressDialog.value.success++
-          progressDialog.value.percentage = Math.round(((progressDialog.value.success + progressDialog.value.failed) / progressDialog.value.total) * 100)
-          return { success: true }
-        } catch (e) {
-          if (attempt < maxRetries) await new Promise(r => setTimeout(r, 2000 * attempt))
-          else {
-            progressDialog.value.processing--
-            progressDialog.value.failed++
-            progressDialog.value.percentage = Math.round(((progressDialog.value.success + progressDialog.value.failed) / progressDialog.value.total) * 100)
-            return { success: false }
-          }
-        }
+      try {
+        await triggerCheck(id)
+        progressDialog.value.success++
+        return { success: true }
+      } catch (e) {
+        progressDialog.value.failed++
+        return { success: false }
+      } finally {
+        progressDialog.value.processing--
+        progressDialog.value.percentage = Math.round(((progressDialog.value.success + progressDialog.value.failed) / progressDialog.value.total) * 100)
       }
     }
-    const batchSize = 10
+    batchCheckRunning.value = true
+    const ids = [...selectedIds.value]
+    const workerCount = Math.min(12, ids.length)
+    let cursor = 0
     const results = []
-    for (let i = 0; i < selectedIds.value.length; i += batchSize) {
-      const batch = selectedIds.value.slice(i, i + batchSize)
-      results.push(...await Promise.all(batch.map(id => triggerWithRetry(id))))
-      if (i + batchSize < selectedIds.value.length) await new Promise(r => setTimeout(r, 500))
+    const worker = async () => {
+      while (cursor < ids.length) {
+        const id = ids[cursor++]
+        results.push(await triggerWithRetry(id))
+      }
     }
-    const failCount = results.filter(r => !r.success).length
+    await Promise.all(Array.from({ length: workerCount }, worker))
+    const failCount = progressDialog.value.failed
     progressDialog.value.completed = true
     progressDialog.value.currentAccount = ''
     progressDialog.value.status = failCount > 0 ? 'warning' : 'success'
+    batchCheckRunning.value = false
     ElMessage[failCount > 0 ? 'warning' : 'success'](`已触发 ${results.length - failCount} 个账号检查${failCount > 0 ? `，${failCount} 个失败` : ''}`)
-    let pollCount = 0
-    const pollInterval = setInterval(() => {
-      loadAccounts(false)
-      if (++pollCount >= 15) clearInterval(pollInterval)
-    }, 2000)
+    loadAccounts(false)
   } catch (e) {
+    batchCheckRunning.value = false
     if (e !== 'cancel') console.error(e)
   }
 }

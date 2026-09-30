@@ -152,6 +152,19 @@
             <el-tag size="small" type="info">{{ row.protocol?.toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="绑定终端" min-width="180">
+          <template #default="{ row }">
+            <el-space wrap v-if="row.devices?.length">
+              <el-tag v-for="d in row.devices" :key="d.id" size="small">{{ d.name }}</el-tag>
+            </el-space>
+            <span v-else>未绑定</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="关联账号" min-width="400">
+          <template #default="{ row }">
+            <LinkedAccountCards :accounts="row.accounts || []" empty-text="未关联" />
+          </template>
+        </el-table-column>
         <el-table-column prop="relay_ip" label="中转IP" width="130">
           <template #default="{ row }">{{ row.relay_ip || '-' }}</template>
         </el-table-column>
@@ -209,7 +222,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button
               link
@@ -219,7 +232,15 @@
               @click="handleTest(row)"
             >测试</el-button>
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="success" size="small" @click="openRelation(row)">关联</el-button>
             <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button
+              v-if="authStore.user?.is_super_admin"
+              link
+              type="warning"
+              size="small"
+              @click="showQrDialog(row)"
+            >二维码</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -495,7 +516,7 @@
     </el-dialog>
 
     <!-- 导入对话框 -->
-    <el-dialog v-model="importDialogVisible" title="批量导入节点" width="560px" :close-on-click-modal="false">
+  <el-dialog v-model="importDialogVisible" title="批量导入节点" width="560px" :close-on-click-modal="false">
       <div style="margin-bottom: 12px;">
         <el-link type="primary" :underline="false" @click="handleDownloadTemplate">
           <el-icon><Download /></el-icon>
@@ -546,7 +567,23 @@
           @click="handleImport"
         >开始导入</el-button>
       </template>
-    </el-dialog>
+  </el-dialog>
+
+  <el-dialog v-model="relationDialogVisible" title="节点关联管理" width="520px" :close-on-click-modal="false">
+    <el-form label-width="110px">
+      <el-form-item label="绑定终端">
+        <el-select v-model="relationForm.device_id" filterable clearable placeholder="选择终端（留空解除）" style="width:100%">
+          <el-option v-for="d in relationDevices" :key="d.id" :label="`${d.name} (#${d.id})`" :value="d.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="运营账号">
+        <el-select v-model="relationForm.account_id" filterable clearable placeholder="选择账号（留空解除）" style="width:100%">
+          <el-option v-for="a in relationAccounts" :key="a.id" :label="`${a.account || a.username || '账号'} (#${a.id})`" :value="a.id" />
+        </el-select>
+      </el-form-item>
+    </el-form>
+    <template #footer><el-button @click="relationDialogVisible=false">取消</el-button><el-button type="primary" @click="saveRelation">确认保存</el-button></template>
+  </el-dialog>
 
     <!-- 导出对话框 -->
     <el-dialog v-model="exportDialogVisible" title="导出节点数据" width="360px">
@@ -567,6 +604,14 @@
         <el-button @click="exportDialogVisible = false">取消</el-button>
       </template>
     </el-dialog>
+
+    <!-- 节点二维码对话框（仅超管） -->
+    <QRCodeDialog
+      v-model:visible="qrDialogVisible"
+      :uri="qrUri"
+      :title="qrTitle"
+      @closed="closeQrDialog"
+    />
   </div>
 </template>
 
@@ -578,6 +623,9 @@ import {
   Connection, CircleCheck, CircleClose, UploadFilled, Document
 } from '@element-plus/icons-vue'
 import SellerSelector from '@/components/SellerSelector.vue'
+import QRCodeDialog from '@/components/QRCodeDialog.vue'
+import LinkedAccountCards from '@/components/LinkedAccountCards.vue'
+import { useAuthStore } from '@/stores/auth'
 import {
   getProxyNodes,
   createProxyNode,
@@ -590,9 +638,73 @@ import {
   importProxyNodes,
   downloadImportTemplate,
   exportProxyNodes,
-  getProxyNodeStats
+  getProxyNodeStats,
+  getNodeUri
+  , updateNodeRelation
 } from '@/api/proxy_nodes'
 import { isExpiringSoon } from '@/utils/proxyNodeUtils'
+
+const authStore = useAuthStore()
+
+const relationDialogVisible = ref(false)
+const relationRow = ref(null)
+const relationForm = ref({ device_id: null, account_id: null })
+const relationDevices = ref([])
+const relationAccounts = ref([])
+async function openRelation(row) {
+  try {
+    relationRow.value = row
+    const [{ getDevices }, accountsApi] = await Promise.all([import('@/api/devices'), import('@/api/op_accounts')])
+    const [devices, accounts] = await Promise.all([getDevices({ limit: 200 }), accountsApi.listOpAccounts({ limit: 200 })])
+    relationDevices.value = devices.items || devices || []
+    relationAccounts.value = accounts.items || accounts || []
+    relationForm.value = { device_id: row.devices?.[0]?.id ?? null, account_id: row.accounts?.[0]?.id ?? null }
+    relationDialogVisible.value = true
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '加载关联对象失败')
+  }
+}
+async function saveRelation() {
+  try {
+    await ElMessageBox.confirm(`确认保存终端与运营账号关联吗？`, '确认关联变更', { type: 'warning' })
+    await updateNodeRelation(relationRow.value.id, relationForm.value)
+    relationDialogVisible.value = false
+    ElMessage.success('节点关联已更新')
+    await loadNodes()
+  } catch (err) { if (err !== 'cancel') ElMessage.error(err?.response?.data?.detail || '关联操作失败') }
+}
+
+// ─── 节点二维码 ─────────────────────────────────────────────
+const qrDialogVisible = ref(false)
+const qrUri = ref('')
+const qrTitle = ref('')
+let qrRequestSeq = 0
+
+async function showQrDialog(row) {
+  const seq = ++qrRequestSeq
+  qrTitle.value = `节点二维码 - ${row.ip}:${row.port}`
+  qrUri.value = ''
+  qrDialogVisible.value = true
+  try {
+    const res = await getNodeUri(row.id)
+    // 序号守卫：仅当前点击的节点可写入 URI，防止 A 节点的凭据显示在 B 节点标题下
+    if (seq !== qrRequestSeq) return
+    qrUri.value = res.uri
+  } catch (err) {
+    if (seq !== qrRequestSeq) return
+    qrDialogVisible.value = false
+    qrUri.value = ''
+    ElMessage.error(err?.response?.data?.detail || '获取节点 URI 失败')
+  }
+}
+
+function closeQrDialog() {
+  // 关闭时清空凭据 URI（防残留于响应式状态）
+  qrRequestSeq++
+  qrDialogVisible.value = false
+  qrUri.value = ''
+  qrTitle.value = ''
+}
 
 // ─── 统计数据 ───────────────────────────────────────────────
 const stats = ref({

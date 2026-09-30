@@ -25,7 +25,11 @@
           <el-icon><Briefcase /></el-icon>
           <template #title><span>运营账号</span></template>
         </el-menu-item>
-        <el-menu-item index="/proxy-nodes">
+        <el-menu-item v-if="authStore.hasPermission('device:view')" index="/devices">
+          <el-icon><Iphone /></el-icon>
+          <template #title><span>终端资产</span></template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.hasPermission('proxy_node:view')" index="/proxy-nodes">
           <el-icon><Connection /></el-icon>
           <template #title><span>节点管理</span></template>
         </el-menu-item>
@@ -127,7 +131,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Setting, Briefcase, UserFilled, User, Key, Document, OfficeBuilding, SwitchButton, Connection } from '@element-plus/icons-vue'
+import { Monitor, Setting, Briefcase, UserFilled, User, Key, Document, OfficeBuilding, SwitchButton, Connection, Iphone } from '@element-plus/icons-vue'
 import { getSettings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import Breadcrumb from '@/components/Breadcrumb.vue'

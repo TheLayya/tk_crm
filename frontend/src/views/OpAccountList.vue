@@ -83,6 +83,7 @@
       <!-- 批量操作工具栏 -->
       <div class="batch-toolbar-new" v-if="selectedIds.length > 0">
         <span class="batch-toolbar-new__count">已选 {{ selectedIds.length }} 项</span>
+        <el-button v-if="canBatchAssign" size="small" type="primary" plain @click="openBatchAssign">批量分配</el-button>
         <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button>
         <el-button size="small" @click="handleBatchCollect" :loading="collectLoading">采集</el-button>
         <el-button size="small" type="danger" @click="handleBatchDelete">批量删除</el-button>
@@ -111,17 +112,36 @@
         </el-table-column>
         <el-table-column label="账号" min-width="200" fixed="left">
           <template #default="{ row }">
-            <div style="display:flex;align-items:center;gap:8px">
-              <el-avatar v-if="row.avatar_url" :src="row.avatar_url" :size="32">
+            <div
+              class="account-cell"
+              role="button"
+              tabindex="0"
+              title="点击查看账号详情"
+              @click.stop="handleRowDblClick(row)"
+              @keydown.enter.stop="handleRowDblClick(row)"
+            >
+              <el-avatar v-if="row.avatar_url" :src="row.avatar_url" :size="32" class="op-account-avatar" @click.stop="handleRowDblClick(row)">
                 <template #error>{{ (row.account||'?')[0].toUpperCase() }}</template>
               </el-avatar>
-              <el-avatar v-else :size="32">{{ (row.account||'?')[0].toUpperCase() }}</el-avatar>
+              <el-avatar v-else :size="32" class="op-account-avatar" @click.stop="handleRowDblClick(row)">{{ (row.account||'?')[0].toUpperCase() }}</el-avatar>
               <div>
                 <div style="font-weight:500">{{ row.account }}</div>
                 <div v-if="row.nickname" style="font-size:12px;color:#909399">{{ row.nickname }}</div>
+                <div class="account-metrics" aria-label="账号数据">
+                  <span title="粉丝数">粉丝 {{ formatNum(row.follower_count) }}</span>
+                  <span title="关注数">关注 {{ formatNum(row.following_count) }}</span>
+                  <span title="点赞数">赞 {{ formatNum(row.like_count) }}</span>
+                  <span title="视频数">视频 {{ formatNum(row.video_count) }}</span>
+                </div>
               </div>
             </div>
           </template>
+        </el-table-column>
+        <el-table-column label="绑定终端" width="140">
+          <template #default="{ row }">{{ row.device_name || '未绑定' }}</template>
+        </el-table-column>
+        <el-table-column label="绑定节点" width="140">
+          <template #default="{ row }">{{ row.node_ip || '未绑定' }}</template>
         </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
@@ -207,18 +227,6 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('followers')" label="粉丝数" width="90" align="right">
-          <template #default="{ row }">{{ formatNum(row.follower_count) }}</template>
-        </el-table-column>
-        <el-table-column v-if="colVisible('following')" label="关注数" width="80" align="right">
-          <template #default="{ row }">{{ formatNum(row.following_count) }}</template>
-        </el-table-column>
-        <el-table-column v-if="colVisible('likes')" label="点赞数" width="90" align="right">
-          <template #default="{ row }">{{ formatNum(row.like_count) }}</template>
-        </el-table-column>
-        <el-table-column v-if="colVisible('videos')" label="视频数" width="75" align="right">
-          <template #default="{ row }">{{ formatNum(row.video_count) }}</template>
-        </el-table-column>
         <el-table-column v-if="colVisible('account_created_at')" label="注册时间" width="100">
           <template #default="{ row }">
             <span style="font-size:12px">{{ row.account_created_at ? formatDate(row.account_created_at) : '-' }}</span>
@@ -275,8 +283,9 @@
             <span v-else>{{ row.remark || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
+            <el-button link type="success" size="small" @click="openRelation(row)">关联</el-button>
             <el-tooltip content="编辑"><el-button link type="primary" size="small" @click="handleEdit(row)"><el-icon><Edit /></el-icon></el-button></el-tooltip>
             <el-tooltip content="采集"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
             <el-tooltip content="历史"><el-button link type="primary" size="small" @click="showLogs(row)"><el-icon><Document /></el-icon></el-button></el-tooltip>
@@ -289,11 +298,11 @@
       <div v-if="isMobile" v-loading="loading" class="ios-card-list">
         <div v-for="row in accounts" :key="row.id" class="ios-card">
           <!-- 卡片头部 -->
-          <div class="ios-card-account-header">
-            <el-avatar v-if="row.avatar_url" :src="row.avatar_url" :size="40">
+            <div class="ios-card-account-header account-cell" @click="handleRowDblClick(row)">
+            <el-avatar v-if="row.avatar_url" :src="row.avatar_url" :size="40" class="op-account-avatar" @click.stop="handleRowDblClick(row)">
               <template #error>{{ (row.account||'?')[0].toUpperCase() }}</template>
             </el-avatar>
-            <el-avatar v-else :size="40">{{ (row.account||'?')[0].toUpperCase() }}</el-avatar>
+            <el-avatar v-else :size="40" class="op-account-avatar" @click.stop="handleRowDblClick(row)">{{ (row.account||'?')[0].toUpperCase() }}</el-avatar>
             <div class="ios-card-account-info">
               <div class="ios-card-account-name">{{ row.account }}</div>
               <div v-if="row.nickname" class="ios-card-account-nickname">{{ row.nickname }}</div>
@@ -351,6 +360,22 @@
         />
       </div>
     </el-card>
+
+    <el-dialog v-model="relationVisible" title="关联终端与节点" width="520px">
+      <el-alert title="选择终端后沿用终端的首个节点，节点请在终端中管理；未选终端时可直接关联节点。" type="info" :closable="false" style="margin-bottom:16px" />
+      <el-form v-loading="relationLoading" label-width="90px">
+        <el-form-item label="运营账号"><strong>{{ relationRow?.account }}</strong></el-form-item>
+        <el-form-item label="手机终端"><el-select v-model="relationForm.device_id" clearable filterable style="width:100%" @change="onRelationDeviceChange"><el-option v-for="d in relationDevices" :key="d.id" :label="`${d.name} · ${d.owner_name || ''}`" :value="d.id" /></el-select></el-form-item>
+        <el-form-item label="代理节点">
+          <span v-if="relationForm.device_id">{{ relationDevices.find(d => d.id === relationForm.device_id)?.node_ip || '终端未绑定节点' }}</span>
+          <el-select v-else v-model="relationForm.node_id" clearable filterable style="width:100%">
+            <el-option v-for="n in relationNodes" :key="n.id" :label="`${n.ip}:${n.port} · ${n.protocol}`" :value="n.id" />
+          </el-select>
+          <div v-if="relationForm.device_id" style="font-size:12px;color:var(--el-text-color-secondary);margin-top:4px">已选择终端，节点沿用终端绑定的节点</div>
+        </el-form-item>
+      </el-form>
+      <template #footer><el-button @click="relationVisible=false">取消</el-button><el-button type="primary" :disabled="relationLoading" :loading="relationSaving" @click="saveRelation">保存关联</el-button></template>
+    </el-dialog>
 
     <!-- 新增/编辑对话框 -->
     <el-dialog v-model="formDialog.visible" :title="formDialog.isEdit ? `编辑账号` : '新增账号'" width="720px" top="5vh">
@@ -505,6 +530,22 @@
       </template>
     </el-dialog>
 
+    <!-- 批量分配对话框 -->
+    <el-dialog v-model="showBatchAssignDialog" title="批量分配成员" width="420px" :close-on-click-modal="false" :close-on-press-escape="!batchAssign.loading" :show-close="!batchAssign.loading">
+      <p>将选中的 {{ batchAssign.ids.length }} 个账号交给以下成员使用，原有使用人会被替换。</p>
+      <el-form label-width="80px">
+        <el-form-item label="分配给" required>
+          <el-select v-model="batchAssign.operator" clearable filterable placeholder="搜索并选择成员" :loading="assignMembersLoading" :disabled="batchAssign.loading || assignMembersLoading" style="width:100%">
+            <el-option v-for="m in assignMembers" :key="m.username" :label="m.real_name ? `${m.real_name}（${m.username}）` : m.username" :value="m.username" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="batchAssign.loading" @click="showBatchAssignDialog = false">取消</el-button>
+        <el-button type="primary" :loading="batchAssign.loading" :disabled="!batchAssign.operator || assignMembersLoading" @click="handleBatchAssign">确定分配</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 批量修改状态对话框 -->
     <el-dialog v-model="showBatchStatusDialog" title="批量修改状态" width="420px">
       <el-form label-width="90px">
@@ -532,12 +573,13 @@
     <!-- 批量导入对话框 -->
     <el-dialog v-model="showImportDialog" title="批量导入账号" width="560px">
       <el-alert type="info" :closable="false" style="margin-bottom:12px">
-        <p>上传 CSV 文件，必填列：<strong>account</strong>、<strong>platform</strong>（tiktok/youtube/instagram/facebook）</p>
-        <p>可选列：password, totp_secret, email, email_password, phone, country, status, registrant, operator, purchase_channel, purchase_price, purchase_date, sale_customer, sale_price, sale_date, remark</p>
+        <p>支持 CSV 或 Excel 文件。必填列：<strong>账号</strong>、<strong>平台</strong>（TikTok/YouTube/Instagram/Facebook）</p>
+        <p>其余列可留空；请先下载中文模板，按示例填写后再导入。布尔字段填写“是/否”。</p>
+        <el-button link type="primary" @click="downloadImportTemplate"><el-icon><Download /></el-icon>下载中文示例模板</el-button>
       </el-alert>
       <el-form label-width="80px">
         <el-form-item label="CSV文件">
-          <el-upload ref="uploadRef" :auto-upload="false" :limit="1" accept=".csv" :on-change="handleFileChange" :file-list="importForm.fileList">
+          <el-upload ref="uploadRef" :auto-upload="false" :limit="1" accept=".csv,.xlsx" :on-change="handleFileChange" :file-list="importForm.fileList">
             <el-button type="primary">选择文件</el-button>
           </el-upload>
         </el-form-item>
@@ -549,6 +591,23 @@
           <el-descriptions-item label="重复"><span style="color:#E6A23C">{{ importResult.duplicates }}</span></el-descriptions-item>
           <el-descriptions-item label="失败"><span style="color:#F56C6C">{{ importResult.failed }}</span></el-descriptions-item>
         </el-descriptions>
+        <el-table
+          v-if="importResult.rows?.some(row => row._result === 'failed')"
+          :data="importResult.rows.filter(row => row._result === 'failed')"
+          size="small"
+          border
+          style="margin-top:12px; max-height:240px; overflow:auto"
+        >
+          <el-table-column label="账号" min-width="160">
+            <template #default="scope">{{ scope.row.account || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="平台" width="110">
+            <template #default="scope">{{ scope.row.platform || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="失败原因" min-width="280">
+            <template #default="scope">{{ scope.row._reason || '数据校验失败' }}</template>
+          </el-table-column>
+        </el-table>
       </div>
       <template #footer>
         <el-button @click="showImportDialog = false; importResult = null">关闭</el-button>
@@ -679,9 +738,9 @@
       <el-timeline v-if="logsDialog.logs.length > 0">
         <el-timeline-item v-for="log in logsDialog.logs" :key="log.id" :timestamp="formatDate(log.created_at)" placement="top">
           <el-card shadow="never" style="padding:8px">
-            <el-tag size="small" :type="log.action === 'create' ? 'success' : log.action === 'delete' ? 'danger' : 'warning'">{{ log.action }}</el-tag>
+            <el-tag size="small" :type="log.action === 'create' ? 'success' : log.action === 'delete' ? 'danger' : 'warning'">{{ auditActionLabel(log.action) }}</el-tag>
             <span v-if="log.field_name" style="margin-left:8px;font-size:13px">
-              <strong>{{ log.field_name }}</strong>：{{ log.old_value || '(空)' }} → {{ log.new_value || '(空)' }}
+              <strong>{{ fieldLabel(log.field_name) }}</strong>：{{ log.old_value || '（空）' }} → {{ log.new_value || '（空）' }}
             </span>
           </el-card>
         </el-timeline-item>
@@ -697,12 +756,17 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload, Download, Search, Setting, ArrowDown, View, Hide, Edit, Delete, Refresh, Document } from '@element-plus/icons-vue'
 import {
   listOpAccounts, createOpAccount, updateOpAccount, deleteOpAccount,
-  batchUpdateStatus, importOpAccounts, exportOpAccounts,
+  batchUpdateStatus, batchAssignOperator, importOpAccounts, downloadOpAccountImportTemplate, exportOpAccounts,
   triggerCollect, getCollectTask, getAuditLogs, getOpAccountStats
 } from '@/api/op_accounts'
 import { getMembers } from '@/api/team'
+import { getDevices } from '@/api/devices'
+import { getProxyNodes } from '@/api/proxy_nodes'
 import { useAuthStore } from '@/stores/auth'
 import SellerSelector from '@/components/SellerSelector.vue'
+
+const authStore = useAuthStore()
+const canBatchAssign = computed(() => authStore.hasPermission('op_account:edit') && authStore.hasPermission('team:member:view'))
 
 // ===== 统计数据 =====
 const accountStats = ref({
@@ -727,6 +791,48 @@ const accounts = ref([])
 const loading = ref(false)
 const selectedIds = ref([])
 const teamMembers = ref([])
+const relationDevices = ref([])
+const relationNodes = ref([])
+const relationVisible = ref(false)
+const relationSaving = ref(false)
+const relationLoading = ref(false)
+const relationRow = ref(null)
+const relationForm = reactive({ device_id: null, node_id: null })
+const onRelationDeviceChange = (deviceId) => {
+  const device = relationDevices.value.find((item) => item.id === deviceId)
+  relationForm.node_id = device?.node_ids?.[0] ?? device?.node_id ?? null
+}
+const openRelation = async (row) => {
+  relationRow.value = row
+  relationForm.device_id = row.device_id || null
+  relationForm.node_id = row.node_id || null
+  relationVisible.value = true
+  relationLoading.value = true
+  relationDevices.value = []
+  relationNodes.value = []
+  try {
+    const [devices, nodes] = await Promise.all([getDevices({ skip: 0, limit: 200, device_type: 'phone' }), getProxyNodes({ skip: 0, limit: 500 })])
+    relationDevices.value = (devices.items || []).filter(d => !d.account_id || d.account_id === row.id)
+    relationNodes.value = nodes.items || []
+    if (relationForm.device_id) onRelationDeviceChange(relationForm.device_id)
+  } catch {
+    // 请求拦截器已显示错误，关闭未加载完整的表单，防止误解绑。
+    relationVisible.value = false
+  } finally { relationLoading.value = false }
+}
+const saveRelation = async () => {
+  relationSaving.value = true
+  try {
+    const payload = { device_id: relationForm.device_id || null }
+    if (!payload.device_id) payload.node_id = relationForm.node_id || null
+    await updateOpAccount(relationRow.value.id, payload)
+    ElMessage.success('关联已更新')
+    relationVisible.value = false
+    await loadAccounts()
+  } catch {
+    // 保留表单供重试，错误提示由请求拦截器统一处理。
+  } finally { relationSaving.value = false }
+}
 const selectedRows = ref([])
 const visibleFields = ref({})
 
@@ -768,10 +874,6 @@ const columnOptions = [
   { key: 'country', label: '国家/地区' },
   { key: 'tiktok_perms', label: 'TikTok权限' },
   { key: 'collected_ids', label: '平台UID/SEC' },
-  { key: 'followers', label: '粉丝数' },
-  { key: 'following', label: '关注数' },
-  { key: 'likes', label: '点赞数' },
-  { key: 'videos', label: '视频数' },
   { key: 'account_created_at', label: '账号注册时间' },
   { key: 'last_collected_at', label: '最后采集时间' },
   { key: 'collect_status', label: '采集状态' },
@@ -780,7 +882,7 @@ const columnOptions = [
   { key: 'people', label: '注册人/使用人' },
   { key: 'remark', label: '备注' },
 ]
-const defaultColumns = ['password', 'email', 'phone', 'country', 'collected_ids', 'followers', 'collect_status', 'purchase', 'sale', 'people', 'remark']
+const defaultColumns = ['password', 'email', 'phone', 'country', 'collected_ids', 'collect_status', 'purchase', 'sale', 'people', 'remark']
 const visibleColumns = ref(
   JSON.parse(localStorage.getItem(COLUMN_CONFIG_KEY) || 'null') || defaultColumns
 )
@@ -838,6 +940,14 @@ const platformTagType = (p) => ({ tiktok: '', youtube: 'danger', instagram: 'war
 const statusTagType = (s) => ({ '正常': 'success', '自用': '', '封禁': 'danger', '已售': 'info' }[s] || 'info')
 const collectStatusType = (s) => ({ success: 'success', failed: 'danger', pending: 'info', unsupported: 'warning' }[s] || 'info')
 const collectStatusLabel = (s) => ({ success: '成功', failed: '失败', pending: '待采集', unsupported: '不支持' }[s] || s)
+const auditActionLabel = (action) => ({ create: '新增', update: '修改', delete: '删除' }[action] || action || '-')
+const fieldLabel = (field) => ({
+  account: '账号', platform: '平台', password: '密码', totp_secret: '双重验证码密钥', email: '绑定邮箱',
+  email_password: '邮箱密码', email_login_url: '邮箱登录地址', phone: '绑定手机', phone_manage_url: '手机管理链接',
+  country: '国家/地区', source: '账号来源', tags: '标签', remark: '备注', status: '状态', registrant: '注册人',
+  operator: '使用人', purchase_channel: '采购渠道', purchase_price: '采购金额', purchase_date: '采购日期',
+  sale_customer: '出售客户', sale_price: '出售金额', sale_date: '出售日期', device_id: '绑定终端', node_id: '绑定节点',
+}[field] || field || '-')
 
 // ===== 新增/编辑 =====
 const formRef = ref(null)
@@ -849,6 +959,7 @@ const emptyForm = () => ({
   tiktok_mid_video: false, tiktok_showcase: false, tiktok_phone_live: false, tiktok_partner_live: false,
   purchase_channel: '', purchase_price: null, purchase_date: null,
   sale_customer: '', sale_price: null, sale_date: null, sellers: [],
+  device_id: null, node_id: null,
 })
 const form = ref(emptyForm())
 const editingId = ref(null)
@@ -909,6 +1020,43 @@ const handleBatchDelete = async () => {
 
 // ===== 批量修改状态 =====
 const showBatchStatusDialog = ref(false)
+const showBatchAssignDialog = ref(false)
+const batchAssign = reactive({ ids: [], operator: '', loading: false })
+const assignMembers = ref([])
+const assignMembersLoading = ref(false)
+const openBatchAssign = async () => {
+  if (!canBatchAssign.value || !selectedIds.value.length || assignMembersLoading.value) return
+  batchAssign.ids = [...selectedIds.value]
+  batchAssign.operator = ''
+  assignMembers.value = []
+  showBatchAssignDialog.value = true
+  assignMembersLoading.value = true
+  try {
+    let page = 1
+    let data
+    do {
+      data = await getMembers({ page: page++, size: 500, is_active: true })
+      assignMembers.value.push(...data.items)
+    } while (data.items.length && assignMembers.value.length < data.total)
+  } catch (e) {
+    assignMembers.value = []
+    console.error(e)
+  } finally { assignMembersLoading.value = false }
+}
+const handleBatchAssign = async () => {
+  if (!batchAssign.operator || !batchAssign.ids.length || batchAssign.loading) return
+  batchAssign.loading = true
+  try {
+    const result = await batchAssignOperator({ ids: batchAssign.ids, operator: batchAssign.operator })
+    ElMessage.success(result.updated ? `已将 ${result.updated} 个账号分配给 ${batchAssign.operator}` : '所选账号已由该成员使用')
+    if (detailDialog.value.row && batchAssign.ids.includes(detailDialog.value.row.id)) {
+      detailDialog.value.row.operator = batchAssign.operator
+    }
+    showBatchAssignDialog.value = false
+    await Promise.all([loadAccounts(), loadStats()])
+  } catch (e) { console.error(e) }
+  finally { batchAssign.loading = false }
+}
 const batchStatus = reactive({ status: '正常', sale_customer: '', sale_price: null, sale_date: null, sellers: [], loading: false })
 const handleBatchStatus = async () => {
   batchStatus.loading = true
@@ -953,16 +1101,32 @@ const showImportDialog = ref(false)
 const importResult = ref(null)
 const importForm = reactive({ fileList: [], file: null, loading: false })
 const handleFileChange = (file) => { importForm.file = file.raw }
+const downloadImportTemplate = async () => {
+  try {
+    const blob = await downloadOpAccountImportTemplate()
+    const url = URL.createObjectURL(new Blob([blob]))
+    const a = document.createElement('a'); a.href = url; a.download = '运营账号导入中文示例.xlsx'; a.click(); URL.revokeObjectURL(url)
+  } catch (e) { console.error(e) }
+}
 const handleImport = async () => {
-  if (!importForm.file) { ElMessage.warning('请选择CSV文件'); return }
+  if (!importForm.file) { ElMessage.warning('请选择CSV或Excel文件'); return }
   importForm.loading = true
   try {
     const fd = new FormData()
     fd.append('file', importForm.file)
     importResult.value = await importOpAccounts(fd)
     ElMessage.success(`导入完成：成功 ${importResult.value.success}，重复 ${importResult.value.duplicates}，失败 ${importResult.value.failed}`)
-    loadAccounts()
-  } catch (e) { console.error(e) }
+    await Promise.all([loadAccounts(), loadStats()])
+    if (importResult.value.task_id) {
+      watchCollectTask(importResult.value.task_id, importResult.value.rows
+        .filter(row => row._result === 'success' && row._id)
+        .map(row => row._id))
+    }
+  } catch (e) {
+    console.error(e)
+    const detail = e?.response?.data?.detail || e?.message || '导入失败，请检查文件格式'
+    ElMessage.error(String(detail))
+  }
   finally { importForm.loading = false }
 }
 
@@ -977,24 +1141,28 @@ const startCollect = async (ids) => {
     const res = await triggerCollect(ids)
     const taskId = res.task_id
     Object.assign(collectTask, { visible: true, total: ids.length, completed: 0, success: 0, failed: 0, percentage: 0, status: '', done: false })
-    if (collectPollTimer) clearInterval(collectPollTimer)
-    collectPollTimer = setInterval(async () => {
-      try {
-        const t = await getCollectTask(taskId)
-        collectTask.completed = t.completed
-        collectTask.success = t.success
-        collectTask.failed = t.failed
-        collectTask.percentage = t.total > 0 ? Math.round((t.completed / t.total) * 100) : 0
-        if (t.status === 'completed' || t.status === 'failed') {
-          clearInterval(collectPollTimer)
-          collectTask.done = true
-          collectTask.status = t.failed > 0 ? 'warning' : 'success'
-          loadAccounts()
-        }
-      } catch (e) { clearInterval(collectPollTimer) }
-    }, 2000)
+    watchCollectTask(taskId, ids)
   } catch (e) { console.error(e) }
   finally { collectLoading.value = false }
+}
+const watchCollectTask = (taskId, ids) => {
+  Object.assign(collectTask, { visible: true, total: ids.length, completed: 0, success: 0, failed: 0, percentage: 0, status: '', done: false })
+  if (collectPollTimer) clearInterval(collectPollTimer)
+  collectPollTimer = setInterval(async () => {
+    try {
+      const t = await getCollectTask(taskId)
+      collectTask.completed = t.completed
+      collectTask.success = t.success
+      collectTask.failed = t.failed
+      collectTask.percentage = t.total > 0 ? Math.round((t.completed / t.total) * 100) : 0
+      if (t.status === 'completed' || t.status === 'failed') {
+        clearInterval(collectPollTimer)
+        collectTask.done = true
+        collectTask.status = t.failed > 0 ? 'warning' : 'success'
+        await Promise.all([loadAccounts(), loadStats()])
+      }
+    } catch (e) { clearInterval(collectPollTimer) }
+  }, 2000)
 }
 const handleBatchCollect = () => startCollect(selectedIds.value)
 const handleCollectOne = (row) => startCollect([row.id])
@@ -1019,7 +1187,6 @@ onMounted(() => {
   window.addEventListener('resize', handleResize)
   loadAccounts()
   loadStats()
-  const authStore = useAuthStore()
   if (authStore.hasPermission('team:member:view')) {
     getMembers({ size: 200 }).then(data => {
       teamMembers.value = data.items || []
@@ -1129,6 +1296,27 @@ onUnmounted(() => {
 }
 
 .pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
+.op-account-avatar { cursor: pointer; }
+.op-account-avatar:hover { opacity: .82; }
+.account-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+.account-cell > div { min-width: 0; }
+.account-cell:hover { color: var(--color-accent, #409eff); }
+.ios-card-account-header.account-cell { align-items: center; }
+.account-metrics {
+  display: flex;
+  gap: 7px;
+  margin-top: 3px;
+  color: #909399;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.account-metrics span { display: inline-block; }
 .secret-cell { display: flex; align-items: center; gap: 6px; }
 .eye-icon { cursor: pointer; color: #409eff; flex-shrink: 0; }
 .collect-progress-card :deep(.el-card__body) { padding: 12px 16px; }

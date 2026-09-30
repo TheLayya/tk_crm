@@ -11,6 +11,34 @@ const request = axios.create({
   }
 })
 
+// The API rotates refresh tokens and revokes the old one.  A burst of expired
+// requests must therefore share one refresh request instead of replaying the
+// same refresh token concurrently.
+let refreshPromise = null
+let redirectPromise = null
+
+const requestUrl = (config) => String(config?.url || '')
+const isAuthRequest = (config) => {
+  const url = requestUrl(config)
+  return url.includes('/auth/login') || url.includes('/auth/refresh')
+}
+
+const redirectToLogin = () => {
+  if (redirectPromise) return redirectPromise
+
+  redirectPromise = (async () => {
+    const { useAuthStore } = await import('@/stores/auth')
+    useAuthStore()._clearState()
+    if (router.currentRoute.value.path !== '/login') {
+      await router.replace('/login')
+    }
+  })().finally(() => {
+    redirectPromise = null
+  })
+
+  return redirectPromise
+}
+
 // 请求拦截器
 request.interceptors.request.use(
   (config) => {
@@ -41,20 +69,30 @@ request.interceptors.response.use(
     const { status, data } = error.response
     const originalRequest = error.config
 
+    const authRequest = isAuthRequest(originalRequest)
+
     // 401: 尝试刷新 token，刷新失败则跳转登录页
-    // 登录接口的 401 不触发刷新（密码错误）
-    if (status === 401 && !originalRequest._retry && !originalRequest.url.includes('/auth/refresh') && !originalRequest.url.includes('/auth/login')) {
+    // 登录/刷新接口的 401 不触发再次刷新。
+    if (status === 401 && !originalRequest._retry && !authRequest) {
       originalRequest._retry = true
       try {
-        const { useAuthStore } = await import('@/stores/auth')
-        const authStore = useAuthStore()
-        await authStore.refreshAccessToken()
-        originalRequest.headers['Authorization'] = `Bearer ${localStorage.getItem('token')}`
+        if (!refreshPromise) {
+          refreshPromise = (async () => {
+            const { useAuthStore } = await import('@/stores/auth')
+            await useAuthStore().refreshAccessToken()
+            return localStorage.getItem('token')
+          })().finally(() => {
+            refreshPromise = null
+          })
+        }
+
+        const token = await refreshPromise
+        if (!token) throw new Error('Refresh did not return an access token')
+        originalRequest.headers = originalRequest.headers || {}
+        originalRequest.headers['Authorization'] = `Bearer ${token}`
         return request(originalRequest)
       } catch (refreshError) {
-        const { useAuthStore } = await import('@/stores/auth')
-        useAuthStore()._clearState()
-        router.push('/login')
+        await redirectToLogin()
         return Promise.reject(refreshError)
       }
     }
@@ -65,8 +103,9 @@ request.interceptors.response.use(
         ElMessage.error(data?.detail || '请求参数错误')
         break
       case 401:
-        // 登录接口的 401 由页面自己处理，不弹全局提示
-        if (!originalRequest.url.includes('/auth/login')) {
+        // Login/refresh failures are handled by their callers.  In particular,
+        // do not show a second “unauthorized” toast for a failed refresh.
+        if (!authRequest) {
           ElMessage.error('未授权，请重新登录')
         }
         break

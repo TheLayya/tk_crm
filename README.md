@@ -51,6 +51,16 @@ DATABASE_URL=sqlite:///./data/monitor.db
 docker compose up -d --build
 ```
 
+升级已有服务器时，保留服务器上的 `backend/.env` 和 `data/` 目录，不要用本地空配置覆盖；Compose 会加载 `backend/.env`，后端容器启动时自动执行 `alembic upgrade head`，随后启动 API。升级建议：
+
+```bash
+docker compose up -d --build
+curl http://127.0.0.1:8000/health
+docker compose ps
+```
+
+SQLite 数据库位于 `data/` 持久化目录，代码更新不会删除该目录。
+
 ## 功能
 
 - TikTok、YouTube、Instagram、Facebook 运营账号管理

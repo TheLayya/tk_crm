@@ -42,7 +42,19 @@ const router = createRouter({
       path: '/proxy-nodes',
       name: 'ProxyNodeManage',
       component: () => import('../views/ProxyNodeManage.vue'),
-      meta: { requiresAuth: true, breadcrumb: '节点管理' }
+      meta: { requiresAuth: true, permission: 'proxy_node:view', breadcrumb: '节点管理' }
+    },
+    {
+      path: '/devices',
+      name: 'DeviceList',
+      component: () => import('../views/devices/DeviceList.vue'),
+      meta: { requiresAuth: true, permission: 'device:view', breadcrumb: '终端资产' }
+    },
+    {
+      path: '/devices/:id',
+      name: 'DeviceDetail',
+      component: () => import('../views/devices/DeviceDetail.vue'),
+      meta: { requiresAuth: true, permission: 'device:view', breadcrumb: '设备详情' }
     },
     {
       path: '/settings',

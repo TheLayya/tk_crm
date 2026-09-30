@@ -146,6 +146,20 @@ const permissionGroups = [
     ]
   },
   {
+    module: 'device', label: '终端资产',
+    perms: [
+      { value: 'device:view', label: '查看' },
+      { value: 'device:manage', label: '管理' }
+    ]
+  },
+  {
+    module: 'proxy_node', label: '节点管理',
+    perms: [
+      { value: 'proxy_node:view', label: '查看' },
+      { value: 'proxy_node:manage', label: '管理' }
+    ]
+  },
+  {
     module: 'settings', label: '系统设置',
     perms: [
       { value: 'settings:view', label: '查看' },

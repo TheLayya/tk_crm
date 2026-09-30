@@ -1,13 +1,15 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, PositiveInt, field_validator
 
 
 class OpAccountCreate(BaseModel):
     # 必填
     platform: str
     account: str
+    device_id: Optional[int] = None
+    node_id: Optional[int] = None
 
     # 手动维护字段（可选）
     password: Optional[str] = None
@@ -49,6 +51,8 @@ class OpAccountCreate(BaseModel):
 class OpAccountUpdate(BaseModel):
     platform: Optional[str] = None
     account: Optional[str] = None
+    device_id: Optional[int] = None
+    node_id: Optional[int] = None
 
     password: Optional[str] = None
     totp_secret: Optional[str] = None
@@ -88,6 +92,10 @@ class OpAccountResponse(BaseModel):
     platform: str
 
     account: str
+    device_id: Optional[int] = None
+    node_id: Optional[int] = None
+    device_name: Optional[str] = None
+    node_ip: Optional[str] = None
     password: Optional[str] = None
     totp_secret: Optional[str] = None
     email: Optional[str] = None
@@ -155,6 +163,7 @@ class OpImportResult(BaseModel):
     duplicates: int
     failed: int
     rows: List[Dict[str, Any]] = []
+    task_id: Optional[str] = None
 
 
 class CollectTaskResponse(BaseModel):
@@ -176,6 +185,19 @@ class BatchStatusUpdate(BaseModel):
     sale_price: Optional[Decimal] = None
     sale_date: Optional[date] = None
     sellers: Optional[List[str]] = None  # 出售人 username 列表
+
+
+class BatchAssignOperator(BaseModel):
+    ids: List[PositiveInt] = Field(min_length=1)
+    operator: str = Field(min_length=1, max_length=64)
+
+    @field_validator('operator')
+    @classmethod
+    def validate_operator(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError('请选择成员')
+        return value
 
 
 class AuditLogResponse(BaseModel):

@@ -46,7 +46,7 @@ class ProxyNodeCreate(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ProxyNodeUpdate(BaseModel):
-    # 原始节点信息
+    # 原始节点信息（兼容旧模型字段，关联接口不使用）
     ip: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
     username: Optional[str] = None
@@ -93,13 +93,46 @@ class ProxyNodeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    ip: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    protocol: Optional[str] = None
+    relay_ip: Optional[str] = None
+    relay_port: Optional[int] = None
+    relay_protocol: Optional[str] = None
+    purchase_date: Optional[date] = None
+    purchase_price: Optional[Decimal] = None
+    purchase_channel: Optional[str] = None
+    expire_date: Optional[date] = None
+    sale_customer: Optional[str] = None
+    sale_price: Optional[Decimal] = None
+    sellers: List[str] = []
+    status: Optional[str] = None
+    last_test_at: Optional[datetime] = None
+    last_test_result: Optional[str] = None
+    last_test_latency: Optional[int] = None
+    remark: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    device_id: Optional[int] = None
+    device_name: Optional[str] = None
+    account_count: int = 0
+    account_ids: List[int] = []
+    devices: List[dict] = []
+    accounts: List[dict] = []
+
+class ProxyNodeLegacyFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device_id: Optional[int] = None
+    account_id: Optional[int] = None
 
     # 原始节点信息
-    ip: str
-    port: int
+    ip: Optional[str] = None
+    port: Optional[int] = None
     username: Optional[str] = None
     password: Optional[str] = None  # 返回原始值，前端负责掩码显示
-    protocol: str
+    protocol: Optional[str] = None
 
     # 中转节点信息
     relay_ip: Optional[str] = None
@@ -118,7 +151,7 @@ class ProxyNodeResponse(BaseModel):
     sellers: List[str] = []  # 出售人 username 列表
 
     # 状态字段
-    status: str
+    status: Optional[str] = None
 
     # 测试字段
     last_test_at: Optional[datetime] = None
@@ -129,11 +162,17 @@ class ProxyNodeResponse(BaseModel):
     remark: Optional[str] = None
 
     # 系统字段
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 # ---------------------------------------------------------------------------
+# 关联接口严格只允许两个关系字段。
+class ProxyNodeRelationUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device_id: Optional[int] = None
+    account_id: Optional[int] = None
+
 # 筛选参数
 # ---------------------------------------------------------------------------
 

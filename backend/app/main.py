@@ -8,10 +8,13 @@ from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.core.config import settings
 from app.models.team import User
+# 显式导入确保 Base.metadata.create_all 建出 devices/device_logs 表
+from app.models import device  # noqa: F401
 from app.api import projects, accounts, history, proxies, videos, import_export, op_accounts, auth, team
 from app.api import settings as settings_router
 from app.api import backup as backup_router
 from app.api import proxy_nodes
+from app.api import devices
 from app.middleware.rate_limit import limiter
 from app.middleware.operation_log import OperationLogMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -63,7 +66,8 @@ app = FastAPI(
 )
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# slowapi 的处理器签名与 Starlette 类型标注不完全一致（既有代码，运行时正常）
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,6 +94,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(team.router, prefix="/api")
 app.include_router(backup_router.router, prefix="/api")
 app.include_router(proxy_nodes.router, prefix="/api")
+app.include_router(devices.router, prefix="/api")
 
 
 @app.get("/health")

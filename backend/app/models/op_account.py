@@ -14,6 +14,9 @@ class OpAccount(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    # 一个手机终端可以同时绑定多个运营账号；唯一性由账号与终端的关联业务处理。
+    device_id = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True, index=True)
+    node_id = Column(Integer, ForeignKey("proxy_nodes.id", ondelete="SET NULL"), nullable=True, index=True)
     platform = Column(SAEnum("tiktok", "youtube", "instagram", "facebook", name="op_platform_enum"), nullable=False)
 
     # 手动维护字段

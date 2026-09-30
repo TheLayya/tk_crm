@@ -6,11 +6,14 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.database import SessionLocal
 from app.models.op_account import OpAccount, OpAuditLog, OpCollectTask
+from app.models.team import User
+from app.services.auth_service import get_user_data_scope, get_dept_member_usernames
 from app.schemas.op_account import (
     OpAccountCreate,
     OpAccountUpdate,
@@ -70,6 +73,51 @@ def _write_audit_log(
 # CRUD
 # ---------------------------------------------------------------------------
 
+def normalize_account_relation(db: Session, values: dict, account: Optional[OpAccount] = None) -> None:
+    """账号节点随终端绑定，账号操作不修改终端节点。"""
+    from fastapi import HTTPException
+    from app.models.device import Device
+    from app.models.proxy_node import ProxyNode
+
+    device_id = values.get('device_id', account.device_id if account else None)
+    node_id = values.get('node_id', account.node_id if account else None)
+    if device_id is not None:
+        device = db.query(Device).filter(Device.id == device_id, Device.is_deleted == False).first()
+        if not device:
+            raise HTTPException(404, "终端不存在或已删除")
+        if device.device_type != "phone":
+            raise HTTPException(409, "运营账号只能绑定手机终端")
+        # 一个手机终端允许绑定多个运营账号；保留同一账号自身的关联校验即可。
+        ids = device.node_ids or ([device.node_id] if device.node_id else [])
+        primary = ids[0] if ids else None
+        if values.get('node_id') is not None and values['node_id'] != primary:
+            raise HTTPException(409, "账号节点由终端管理，请在终端中修改节点")
+        values['node_id'] = primary
+    else:
+        # 解除终端时不保留原本继承的节点。
+        if account and account.device_id and 'node_id' not in values:
+            node_id = None
+            values['node_id'] = None
+        if node_id is not None:
+            node = db.query(ProxyNode).filter(ProxyNode.id == node_id).first()
+            if not node:
+                raise HTTPException(404, "代理节点不存在")
+            if node.status not in ("idle", "active"):
+                raise HTTPException(409, "代理节点当前状态不可绑定")
+
+
+def sync_device_account_nodes(db: Session, device) -> None:
+    """终端关系变更后同步账号的节点摘要。"""
+    ids = device.node_ids or ([device.node_id] if device.node_id else [])
+    primary = ids[0] if ids else None
+    for account in db.query(OpAccount).filter(OpAccount.device_id == device.id).all():
+        if account.device_id != device.id:
+            continue
+        if account.node_id != primary:
+            _write_audit_log(db, account.id, "update", "node_id", str(account.node_id) if account.node_id else None, str(primary) if primary else None)
+            account.node_id = primary
+
+
 def create_op_account(db: Session, data: OpAccountCreate) -> OpAccount:
     # Prevent duplicate operation accounts even when no project is selected
     existing = db.query(OpAccount).filter(
@@ -80,6 +128,7 @@ def create_op_account(db: Session, data: OpAccountCreate) -> OpAccount:
         from fastapi import HTTPException
         raise HTTPException(status_code=409, detail="该平台账号已存在")
     data_dict = data.model_dump()
+    normalize_account_relation(db, data_dict)
     # 序列化 sellers 列表为 JSON 字符串
     data_dict['sellers'] = _serialize_sellers(data_dict.get('sellers'))
     account = OpAccount(**data_dict)
@@ -102,7 +151,8 @@ def update_op_account(db: Session, id: int, data: OpAccountUpdate) -> Optional[O
     if not account:
         return None
     update_data = data.model_dump(exclude_unset=True)
-    # 序列化 sellers
+    if {'device_id', 'node_id'} & update_data.keys():
+        normalize_account_relation(db, update_data, account)
     if 'sellers' in update_data:
         update_data['sellers'] = _serialize_sellers(update_data['sellers'])
     for field, new_val in update_data.items():
@@ -141,6 +191,7 @@ def list_op_accounts(
     skip: int = 0,
     limit: int = 50,
     scope_username: Optional[str] = None,
+    scope_usernames: Optional[List[str]] = None,
 ) -> tuple:
     query = db.query(OpAccount)
     if project_id is not None:
@@ -169,11 +220,16 @@ def list_op_accounts(
                 OpAccount.operator == scope_username,
             )
         )
+    elif scope_usernames is not None:
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(OpAccount.registrant.in_(scope_usernames), OpAccount.operator.in_(scope_usernames))
+        )
     total = query.count()
     items = query.offset(skip).limit(limit).all()
     # 反序列化每条记录的 sellers
     for item in items:
-        item.sellers = _deserialize_sellers(item.sellers)
+        set_committed_value(item, "sellers", _deserialize_sellers(item.sellers))
     return items, total
 
 
@@ -270,6 +326,38 @@ def batch_update_status(
     return count
 
 
+def batch_assign_operator(db: Session, ids: list, operator: str, current_user: User) -> int:
+    member = db.query(User).filter(User.username == operator, User.is_active == True).first()
+    if not member:
+        raise HTTPException(status_code=422, detail="请选择存在且已启用的成员")
+    account_ids = set(ids)
+    accounts = db.query(OpAccount).filter(OpAccount.id.in_(account_ids)).all()
+    if not account_ids or len(accounts) != len(account_ids):
+        raise HTTPException(status_code=404, detail="部分运营账号不存在，请刷新后重试")
+    scope = get_user_data_scope(db, current_user)
+    if scope != "all":
+        allowed = set(get_dept_member_usernames(db, current_user)) if scope == "dept" else {current_user.username}
+        if any(not ({a.registrant, a.operator} & allowed) for a in accounts):
+            raise HTTPException(status_code=403, detail="无权批量分配部分运营账号")
+
+    count = 0
+    for account in accounts:
+        if account.operator == member.username:
+            continue
+        old_operator = account.operator
+        account.operator = member.username
+        _write_audit_log(db, account.id, "update", field_name="operator",
+                         old_value=old_operator, new_value=member.username,
+                         operator=current_user.username)
+        count += 1
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return count
+
+
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
@@ -285,9 +373,83 @@ _EXPORT_COLUMNS = [
     "like_count", "video_count", "last_collected_at", "collect_status",
 ]
 
+# 对外文件使用中文表头；导入同时兼容这些中文表头和历史英文表头。
+_COLUMN_LABELS = {
+    "account": "账号", "platform": "平台", "password": "密码", "totp_secret": "双重验证码密钥",
+    "email": "绑定邮箱", "email_password": "邮箱密码", "email_login_url": "邮箱登录地址",
+    "phone": "绑定手机", "phone_manage_url": "手机管理链接", "country": "国家/地区",
+    "source": "账号来源", "tags": "标签", "remark": "备注", "status": "状态",
+    "registrant": "注册人", "operator": "使用人", "tiktok_mid_video": "中视频",
+    "tiktok_showcase": "橱窗", "tiktok_phone_live": "手机直播", "tiktok_partner_live": "伴侣直播",
+    "purchase_channel": "采购渠道", "purchase_price": "采购金额", "purchase_date": "采购日期",
+    "sale_customer": "出售客户", "sale_price": "出售金额", "sale_date": "出售日期",
+    "platform_user_id": "平台用户ID", "platform_sec_uid": "平台SEC_UID", "nickname": "昵称",
+    "follower_count": "粉丝数", "following_count": "关注数", "like_count": "点赞数",
+    "video_count": "视频数", "last_collected_at": "最后采集时间", "collect_status": "采集状态",
+}
+_IMPORT_ALIASES = {label: key for key, label in _COLUMN_LABELS.items()}
+_IMPORT_ALIASES.update({key: key for key in _EXPORT_COLUMNS})
 
-def export_op_accounts(db: Session, filters: dict, format: str = "csv") -> bytes:
+_IMPORT_COLUMNS = [
+    "account", "platform", "password", "totp_secret", "email", "email_password", "email_login_url",
+    "phone", "phone_manage_url", "country", "source", "tags", "remark", "status", "registrant", "operator",
+    "tiktok_mid_video", "tiktok_showcase", "tiktok_phone_live", "tiktok_partner_live",
+    "purchase_channel", "purchase_price", "purchase_date", "sale_customer", "sale_price", "sale_date",
+]
+
+
+def create_import_template() -> bytes:
+    """生成面向中文用户的 Excel 导入示例模板。"""
+    try:
+        import openpyxl
+        from openpyxl.styles import Alignment, Font, PatternFill
+    except ImportError as exc:
+        raise RuntimeError("生成 Excel 模板需要安装 openpyxl") from exc
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "运营账号导入"
+    headers = [_COLUMN_LABELS[column] for column in _IMPORT_COLUMNS]
+    sample = {
+        "account": "demo_account", "platform": "TikTok", "country": "美国", "source": "示例",
+        "remark": "这是示例行，导入前请删除或替换", "status": "正常", "tiktok_mid_video": "否",
+        "tiktok_showcase": "否", "tiktok_phone_live": "否", "tiktok_partner_live": "否",
+    }
+    sheet.append(headers)
+    sheet.append([sample.get(column, "") for column in _IMPORT_COLUMNS])
+    sheet.freeze_panes = "A2"
+    header_fill = PatternFill("solid", fgColor="409EFF")
+    for cell in sheet[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+    for index, header in enumerate(headers, 1):
+        sheet.column_dimensions[openpyxl.utils.get_column_letter(index)].width = max(12, min(24, len(header) * 2 + 4))
+
+    notes = workbook.create_sheet("填写说明")
+    notes.append(["字段", "是否必填", "填写说明"])
+    notes.append(["账号", "是", "平台账号名，例如 demo_account"])
+    notes.append(["平台", "是", "TikTok、YouTube、Instagram 或 Facebook"])
+    notes.append(["状态", "否", "正常、自用、封禁或已售；不填默认为正常"])
+    notes.append(["中视频/橱窗/手机直播/伴侣直播", "否", "填写“是”或“否”"])
+    notes.append(["采购日期/出售日期", "否", "格式：YYYY-MM-DD，例如 2026-09-14"])
+    notes.append(["其他字段", "否", "没有内容时保持空白；不要修改第一行字段名"])
+    notes.freeze_panes = "A2"
+    notes.column_dimensions["A"].width = 34
+    notes.column_dimensions["B"].width = 12
+    notes.column_dimensions["C"].width = 64
+    for cell in notes[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def export_op_accounts(db: Session, filters: dict, format: str = "csv", localized: bool = False) -> bytes:
     items, _ = list_op_accounts(db, **filters, skip=0, limit=999999)
+    columns = [_COLUMN_LABELS.get(col, col) for col in _EXPORT_COLUMNS] if localized else _EXPORT_COLUMNS
 
     if format == "xlsx":
         try:
@@ -296,7 +458,7 @@ def export_op_accounts(db: Session, filters: dict, format: str = "csv") -> bytes
             raise RuntimeError("openpyxl is required for xlsx export")
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.append(_EXPORT_COLUMNS)
+        ws.append(columns)
         for acc in items:
             ws.append([str(getattr(acc, col, "") or "") for col in _EXPORT_COLUMNS])
         buf = io.BytesIO()
@@ -306,7 +468,7 @@ def export_op_accounts(db: Session, filters: dict, format: str = "csv") -> bytes
     # Default: CSV with UTF-8 BOM
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(_EXPORT_COLUMNS)
+    writer.writerow(columns)
     for acc in items:
         writer.writerow([str(getattr(acc, col, "") or "") for col in _EXPORT_COLUMNS])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
@@ -316,6 +478,13 @@ def export_op_accounts(db: Session, filters: dict, format: str = "csv") -> bytes
 # CSV Import
 # ---------------------------------------------------------------------------
 
+def _parse_import_bool(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "是", "有"}
+
 def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
     reader = csv.DictReader(io.StringIO(csv_content))
     rows = []
@@ -323,11 +492,14 @@ def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
 
     for row in reader:
         total += 1
+        # 将中文表头转换为内部字段名，保留未知列以便在结果中提示。
+        row = {_IMPORT_ALIASES.get(str(key).strip(), str(key).strip()): value for key, value in row.items()}
         account_val = (row.get("account") or "").strip()
         platform_val = (row.get("platform") or "").strip()
+        platform_val = {"TikTok": "tiktok", "YouTube": "youtube", "Instagram": "instagram", "Facebook": "facebook"}.get(platform_val, platform_val.lower())
 
         if not account_val or not platform_val:
-            rows.append({**row, "_result": "failed", "_reason": "missing account or platform"})
+            rows.append({**row, "_result": "failed", "_reason": "缺少账号或平台"})
             failed += 1
             continue
 
@@ -368,6 +540,10 @@ def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
                 sale_customer=row.get("sale_customer") or None,
                 sale_price=row.get("sale_price") or None,
                 sale_date=row.get("sale_date") or None,
+                tiktok_mid_video=_parse_import_bool(row.get("tiktok_mid_video")),
+                tiktok_showcase=_parse_import_bool(row.get("tiktok_showcase")),
+                tiktok_phone_live=_parse_import_bool(row.get("tiktok_phone_live")),
+                tiktok_partner_live=_parse_import_bool(row.get("tiktok_partner_live")),
             )
             acc = create_op_account(db, create_data)
             rows.append({**row, "_result": "success", "_id": acc.id})
@@ -378,6 +554,35 @@ def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
             failed += 1
 
     return OpImportResult(total=total, success=success, duplicates=duplicates, failed=failed, rows=rows)
+
+
+def import_from_excel(db: Session, file_content: bytes) -> OpImportResult:
+    """Import the same columns produced by export_op_accounts from an Excel file."""
+    try:
+        import openpyxl
+    except ImportError as exc:
+        raise RuntimeError("openpyxl is required for Excel import") from exc
+
+    workbook = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
+    try:
+        sheet = workbook.active
+        rows = list(sheet.iter_rows(values_only=True))
+    finally:
+        workbook.close()
+    if not rows:
+        raise ValueError("Excel file appears to be empty")
+
+    headers = [str(value).strip() if value is not None else "" for value in rows[0]]
+    headers = [_IMPORT_ALIASES.get(header, header) for header in headers]
+    if "account" not in headers or "platform" not in headers:
+        raise ValueError("Excel 文件必须包含“账号（account）”和“平台（platform）”列")
+    csv_buffer = io.StringIO()
+    writer = csv.DictWriter(csv_buffer, fieldnames=headers)
+    writer.writeheader()
+    for values in rows[1:]:
+        writer.writerow({header: (values[index] if index < len(values) and values[index] is not None else "")
+                         for index, header in enumerate(headers)})
+    return import_from_csv(db, csv_content=csv_buffer.getvalue())
 
 
 # ---------------------------------------------------------------------------

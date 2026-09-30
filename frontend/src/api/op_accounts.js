@@ -83,16 +83,32 @@ export function importOpAccounts(formData) {
   })
 }
 
+export function batchAssignOperator(data) {
+  return request({
+    url: '/op-accounts/batch-assign',
+    method: 'post',
+    data
+  })
+}
+
+export function downloadOpAccountImportTemplate() {
+  return request({
+    url: '/op-accounts/import/template',
+    method: 'get',
+    responseType: 'blob'
+  })
+}
+
 /**
  * Export op accounts to file
  * @param {Object} params - filter conditions + format
  * @param {string} format - 'csv' | 'xlsx'
  */
-export function exportOpAccounts(params, format) {
+export function exportOpAccounts(params, format, localized = true) {
   return request({
     url: '/op-accounts/export',
     method: 'get',
-    params: { ...params, format },
+    params: { ...params, format, localized },
     responseType: 'blob'
   })
 }

@@ -299,6 +299,8 @@ PREDEFINED_PERMISSIONS = {
     "monitor:view", "monitor:check", "monitor:proxy",
     "op_account:view", "op_account:create", "op_account:edit", "op_account:delete",
     "op_account:import", "op_account:export", "op_account:collect",
+    "device:view", "device:manage",
+    "proxy_node:view", "proxy_node:manage",
     "settings:view", "settings:edit",
     "team:dept:view", "team:dept:create", "team:dept:edit", "team:dept:delete",
     "team:member:view", "team:member:create", "team:member:edit", "team:member:delete",
