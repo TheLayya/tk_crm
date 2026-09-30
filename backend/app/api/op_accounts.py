@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
+from app.services.account_summary_service import enrich_monitor_summaries
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -21,7 +22,8 @@ from app.schemas.op_account import (
     OpImportResult,
     BatchAssignOperator,
 )
-from app.services import op_account_service
+from app.services import op_account_service, video_service
+
 from app.services.auth_service import require_permission, get_current_user_from_header, get_user_data_scope, get_dept_member_usernames
 
 logger = logging.getLogger(__name__)
@@ -70,6 +72,7 @@ def list_op_accounts(
         scope_username=scope_username,
         scope_usernames=scope_usernames,
     )
+    enrich_monitor_summaries(db, items, current_user)
     for item in items:
         device = db.query(Device).filter(Device.id == item.device_id, Device.is_deleted == False).first() if item.device_id else None
         node = db.query(ProxyNode).filter(ProxyNode.id == item.node_id).first() if item.node_id else None
@@ -93,7 +96,7 @@ def create_op_account(
         # 如果未填 registrant，自动设为当前用户，确保数据范围过滤能匹配到自己
         if not data.registrant:
             data = data.model_copy(update={"registrant": current_user.username})
-        account = op_account_service.create_op_account(db, data)
+        account = op_account_service.create_op_account(db, data, actor=current_user.username)
         # 创建后触发采集
         op_account_service.trigger_collect(db, [account.id], background_tasks)
         return OpAccountResponse.model_validate(account)
@@ -138,6 +141,7 @@ def batch_update_status(data: BatchStatusUpdate, db: Session = Depends(get_db), 
         sale_price=data.sale_price,
         sale_date=data.sale_date,
         sellers=data.sellers,
+        actor=current_user.username,
     )
     return {"updated": count}
 
@@ -259,7 +263,7 @@ def update_op_account(id: int, data: OpAccountUpdate, db: Session = Depends(get_
     allowed = {account.registrant, account.operator}
     if (scope == "self" and current_user.username not in allowed) or (scope == "dept" and not allowed.intersection(get_dept_member_usernames(db, current_user))):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作该运营账号")
-    account = op_account_service.update_op_account(db, id, data)
+    account = op_account_service.update_op_account(db, id, data, actor=current_user.username)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
     return OpAccountResponse.model_validate(account)
@@ -301,10 +305,19 @@ async def proxy_avatar(url: str = Query(...), _=Depends(require_permission("op_a
         raise HTTPException(status_code=502, detail="Failed to fetch avatar")
 
 
+@router.get("/{resource_id}/association-history", response_model=dict)
+def get_association_history(resource_id: int, db: Session = Depends(get_db), current_user=Depends(require_permission("op_account:view"))):
+    from app.services.relation_history_service import relation_overview
+    return relation_overview(db, "account", resource_id, current_user)
+
+
 @router.get("/{id}/logs", response_model=List[AuditLogResponse])
-def get_audit_logs(id: int, db: Session = Depends(get_db), _=Depends(require_permission("op_account:view"))):
+def get_audit_logs(id: int, db: Session = Depends(get_db), current_user=Depends(require_permission("op_account:view"))):
     account = op_account_service.get_op_account(db, id)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    from app.services.relation_history_service import relation_overview, readable_account_log
+    relation_overview(db, "account", id, current_user)
     logs = op_account_service.get_audit_logs(db, account_id=id)
-    return [AuditLogResponse.model_validate(log) for log in logs]
+    return [AuditLogResponse.model_validate(log).model_copy(update=readable_account_log(db, log))
+            for log in logs if log.field_name != "relation_snapshot"]

@@ -1,5 +1,5 @@
 <template>
-  <div ref="containerRef" class="linked-accounts" @click.stop>
+  <div ref="containerRef" class="linked-accounts" :class="{ 'linked-accounts--expanded': showAllAccounts }" @click.stop>
     <button
       v-for="account in visibleAccounts"
       :key="account.id"
@@ -11,14 +11,22 @@
       @click.stop="openAccount(account)"
       :style="chipStyle"
     >
-      <el-avatar :size="16" :src="account.avatar_url || undefined" class="account-avatar">
-        {{ accountName(account).slice(0, 1).toUpperCase() }}
-      </el-avatar>
-      <span class="account-name" :title="accountName(account)">{{ accountName(account) }}</span>
-      <span class="account-inline-stats" :title="inlineStats(account)">{{ inlineStats(account) }}</span>
+      <span class="account-identity">
+        <el-avatar :size="16" :src="account.avatar_url || undefined" class="account-avatar">
+          {{ accountName(account).slice(0, 1).toUpperCase() }}
+        </el-avatar>
+        <span class="account-name" :title="accountName(account)">{{ accountName(account) }}</span>
+        <span v-if="account.nickname" class="account-nickname" :title="account.nickname">{{ account.nickname }}</span>
+      </span>
+      <span class="account-data-row">
+        <span class="account-inline-stats" :title="inlineStats(account)">{{ inlineStats(account) }}</span>
+        <span class="account-indicator" :class="deltaClass(account.followers_change)" :title="'粉丝变化（较上次采集）：' + formatDelta(account.followers_change)"><el-icon aria-hidden="true"><component :is="account.followers_change < 0 ? Bottom : Top" /></el-icon>{{ account.followers_change == null ? '—' : compactCount(Math.abs(account.followers_change)) }}</span>
+        <span class="account-indicator" :title="'昨日更新（北京时间）：' + yesterdayLabel(account)"><el-icon aria-hidden="true"><Refresh /></el-icon>{{ account.yesterday_video_count == null ? '—' : account.yesterday_video_count }}</span>
+        <span class="account-indicator account-indicator--traffic" :title="'昨日视频流量：' + yesterdayPlays(account)"><el-icon aria-hidden="true"><VideoPlay /></el-icon><span>{{ account.yesterday_video_count == null ? '—' : yesterdayPlays(account) }}</span></span>
+      </span>
     </button>
     <button
-      v-if="accounts.length > visibleCount"
+      v-if="!showAllAccounts && accounts.length > visibleCount"
       type="button"
       class="account-more"
       :aria-label="`查看全部 ${accounts.length} 个账号`"
@@ -51,6 +59,8 @@
           <span class="account-all-info">
             <strong>{{ accountName(account) }}</strong>
             <span>{{ account.nickname || '暂无昵称' }}</span>
+            <span>粉丝变化 <strong :class="deltaClass(account.followers_change)">{{ formatDelta(account.followers_change) }}</strong> · 昨日更新（北京时间） {{ yesterdayLabel(account) }}</span>
+            <span>昨日视频流量 {{ yesterdayPlays(account) }}</span>
             <span class="account-all-metrics">
               <span v-for="metric in metrics" :key="metric.key">{{ metric.label }} {{ formatCount(account[metric.key]) }}</span>
             </span>
@@ -73,6 +83,9 @@
         </el-avatar>
         <h3>{{ accountName(selectedAccount) }}</h3>
         <p>{{ selectedAccount.nickname || '暂无昵称' }}</p>
+        <p>粉丝变化 <strong :class="deltaClass(selectedAccount.followers_change)">{{ formatDelta(selectedAccount.followers_change) }}</strong></p>
+        <p>昨日更新（北京时间） {{ yesterdayLabel(selectedAccount) }}</p>
+        <p>昨日视频流量 {{ yesterdayPlays(selectedAccount) }}</p>
         <div class="account-metrics">
           <div v-for="metric in metrics" :key="metric.key" class="account-metric">
             <strong>{{ formatCount(selectedAccount[metric.key]) }}</strong>
@@ -86,10 +99,12 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Top, Bottom, Refresh, VideoPlay } from '@element-plus/icons-vue'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
   emptyText: { type: String, default: '未绑定' },
+  showAllAccounts: { type: Boolean, default: false },
 })
 
 const metrics = [
@@ -110,11 +125,16 @@ const formatCount = (value) => value == null || value === '' ? '—' : Number(va
 const compactNumber = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1, useGrouping: false })
 const compactCount = (value) => value == null || value === '' ? '—' : compactNumber.format(Number(value))
 const inlineStats = (account) => `粉${compactCount(account.follower_count)} 关${compactCount(account.following_count)} 赞${compactCount(account.like_count)} 视${compactCount(account.video_count)}`
-const visibleAccounts = computed(() => props.accounts.slice(0, visibleCount.value))
+const formatDelta = (value) => value == null ? '—' : value > 0 ? '+' + formatCount(value) : formatCount(value)
+const deltaClass = (value) => value > 0 ? 'delta-up' : value < 0 ? 'delta-down' : ''
+const yesterdayLabel = (account) => account.yesterday_video_count == null ? '待采集' : account.yesterday_video_count > 0 ? account.yesterday_video_count + '条' : '未更新'
+const yesterdayPlays = (account) => account.yesterday_video_count == null ? '暂无可靠数据' : account.yesterday_video_count === 0 ? '—' : (account.yesterday_video_plays || []).join(' / ') || '暂无可靠数据'
+const visibleAccounts = computed(() => props.showAllAccounts ? props.accounts : props.accounts.slice(0, visibleCount.value))
 const chipStyle = computed(() => {
+  if (props.showAllAccounts) return { width: '320px', flexBasis: '320px' }
   const count = visibleCount.value || 1
   const extra = props.accounts.length > count ? 34 : 0
-  const width = Math.max(155, Math.floor((containerWidth.value - extra - (count - 1) * 4) / count))
+  const width = Math.max(260, Math.floor((containerWidth.value - extra - (count - 1) * 4) / count))
   return { width: `${width}px`, flexBasis: `${width}px` }
 })
 function updateVisibleCount() {
@@ -122,7 +142,7 @@ function updateVisibleCount() {
   if (!total || !containerWidth.value) { visibleCount.value = total ? 1 : 0; return }
   for (let count = Math.min(3, total); count >= 1; count -= 1) {
     const extra = total > count ? 34 : 0
-    if (count * 155 + (count - 1) * 4 + extra <= containerWidth.value) {
+    if (count * 260 + (count - 1) * 4 + extra <= containerWidth.value) {
       visibleCount.value = count
       return
     }
@@ -156,21 +176,23 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
-  height: 23px;
+  min-height: 46px;
   min-width: 0;
   overflow: hidden;
 }
+.linked-accounts--expanded { flex-wrap: wrap; gap: 6px; align-items: flex-start; }
 .account-chip {
   box-sizing: border-box;
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
   flex: 0 0 188px;
   width: 188px;
-  max-width: 188px;
+  max-width: 100%;
   min-width: 0;
-  height: 22px;
-  padding: 0 5px;
+  min-height: 44px;
+  padding: 3px 6px;
   border: 1px solid #e1e6ef;
   border-radius: 4px;
   background: #f2f5ff;
@@ -190,9 +212,11 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   outline-offset: 2px;
 }
 .account-avatar { flex-shrink: 0; background: #e5e9f3; color: #626d85; }
+.account-identity { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.account-nickname { flex: 1 1 0; min-width: 0; font-size: 11px; color: #737d8c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-name {
-  flex: 0 1 72px;
-  max-width: 72px;
+  flex: 0 1 auto;
+  max-width: 70%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -200,14 +224,22 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 }
 .account-name { font-size: 12px; }
 .account-chip .account-avatar { font-size: 10px; }
+.account-data-row { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 11px; color: #737d8c; line-height: 18px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .account-inline-stats {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: #737d8c;
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
 }
+.account-indicator { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.account-indicator--traffic { min-width: 0; flex-shrink: 1; }
+.account-indicator--traffic > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.delta-up { color: #169b62; }
+.delta-down { color: #e5484d; }
 .account-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

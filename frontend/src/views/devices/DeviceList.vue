@@ -64,13 +64,41 @@
     <!-- 桌面端：表格 -->
     <el-card class="desktop-table">
       <el-table
+        ref="deviceTable"
+        row-key="id"
+        size="small"
+        @expand-change="loadExpandedDevice"
         :data="devices"
         v-loading="loading"
         :empty-text="emptyDescription"
         element-loading-text="正在加载设备"
         stripe
       >
-        <el-table-column prop="name" label="名称" min-width="120" />
+        <el-table-column type="expand" width="36">
+          <template #default="{ row }">
+            <div class="device-inline-details resource-state-grid">
+              <section>
+                <strong>当前状态</strong>
+                <div class="inline-detail-fields"><span><b>使用情况</b>{{ row.accounts?.length ? '已关联 ' + row.accounts.length + ' 个账号' : '未关联账号' }}</span><span><b>所属人</b>{{ row.owner_name || '-' }}</span><span><b>类型</b>{{ row.device_type === 'phone' ? '手机' : '电脑' }}</span></div>
+                <div class="inline-detail-section" v-loading="expandedDeviceLoading[row.id]">
+                  <b>当前节点</b><el-tag v-for="node in expandedDeviceDetails[row.id]?.nodes || []" :key="node.id" size="small">{{ node.ip }}:{{ node.port }} · {{ node.protocol }}</el-tag>
+                  <span v-if="!expandedDeviceDetails[row.id]">{{ row.node_ip || '未绑定' }}</span><span v-else-if="!expandedDeviceDetails[row.id].nodes?.length">未绑定</span>
+                </div>
+                <div class="inline-detail-section"><b>当前账号</b><span>{{ (row.accounts || []).map(account => account.account).join(' / ') || '未关联' }}</span></div>
+                <div class="inline-detail-section"><b>最近更新</b>{{ formatTime(row.updated_at) }}</div>
+                <div v-if="row.remark" class="inline-detail-section"><b>备注</b><span>{{ row.remark }}</span></div>
+                <div class="state-note">使用情况基于关联关系，不代表设备在线状态。</div>
+              <AssociationOverview kind="device" :resource-id="row.id" />
+              </section>
+              <ResourceActivity :logs="deviceActivity[row.id]?.items || []" :total="deviceActivity[row.id]?.total || 0" :page="deviceActivityPage[row.id] || 1" :loading="deviceActivityLoading[row.id]" :error="deviceActivityError[row.id]" @page-change="loadDeviceActivity(row.id, $event)" />
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="名称" width="110">
+          <template #default="{ row }">
+            <button type="button" class="resource-expand-trigger" :aria-expanded="expandedDeviceIds.includes(row.id)" :title="expandedDeviceIds.includes(row.id) ? '点击收起终端详情' : '点击展开终端详情'" @click="deviceTable.toggleRowExpansion(row)">{{ row.name }}</button>
+          </template>
+        </el-table-column>
         <el-table-column prop="device_type" label="类型" width="100">
           <template #default="{ row }">
             {{ row.device_type === 'pc' ? '💻 电脑' : '📱 手机' }}
@@ -93,10 +121,10 @@
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <el-button v-if="authStore.hasPermission('device:manage')" type="success" link @click="openRelations(row)">关联</el-button>
-            <el-button type="primary" link @click="$router.push(`/devices/${row.id}`)">详情</el-button>
+            <el-button type="primary" link @click="$router.push(`/devices/${row.id}`)">管理</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -148,7 +176,7 @@
         <el-form-item label="名称">
           <el-input v-model="createForm.name" placeholder="如: 01电脑" maxlength="100" />
         </el-form-item>
-        <el-form-item label="类型">
+        <el-form-item label="类型" required>
           <el-radio-group v-model="createForm.device_type">
             <el-radio value="pc">💻 电脑</el-radio>
             <el-radio value="phone">📱 手机</el-radio>
@@ -167,7 +195,7 @@
         <el-form-item label="绑定节点">
           <el-select
             v-model="createForm.node_id"
-            placeholder="可选，绑定后该节点不可被其他设备使用"
+            placeholder="可选，同一节点可关联多台终端"
             style="width:100%"
             clearable
             filterable
@@ -209,16 +237,43 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
-import { getDevices, createDevice, getBindableNodes, updateDeviceRelations } from '@/api/devices'
+import { getDevices, getDevice, getDeviceLogs, createDevice, getBindableNodes, updateDeviceRelations } from '@/api/devices'
 import { listOpAccounts } from '@/api/op_accounts'
 import { getProxyNodes } from '@/api/proxy_nodes'
 import { getMembers } from '@/api/team'
 import LinkedAccountCards from '@/components/LinkedAccountCards.vue'
+import AssociationOverview from '@/components/AssociationOverview.vue'
+import ResourceActivity from '@/components/ResourceActivity.vue'
 
 const authStore = useAuthStore()
 const isSuperAdmin = computed(() => !!authStore.user?.is_super_admin)
 
 /** 列表状态 */
+const deviceTable = ref(null)
+const expandedDeviceIds = ref([])
+const deviceActivity = ref({})
+const deviceActivityPage = ref({})
+const deviceActivityLoading = ref({})
+const deviceActivityError = ref({})
+async function loadDeviceActivity(id, page = 1) {
+  deviceActivityPage.value[id] = page
+  deviceActivityLoading.value[id] = true
+  deviceActivityError.value[id] = ''
+  try { deviceActivity.value[id] = await getDeviceLogs(id, { skip: (page - 1) * 5, limit: 5 }) }
+  catch { deviceActivityError.value[id] = '轨迹加载失败，收起后重新展开重试' }
+  finally { deviceActivityLoading.value[id] = false }
+}
+const expandedDeviceDetails = ref({})
+const expandedDeviceLoading = ref({})
+async function loadExpandedDevice(row, expandedRows) {
+  expandedDeviceIds.value = expandedRows.map(item => item.id)
+  if (!expandedRows.some((item) => item.id === row.id) || expandedDeviceLoading.value[row.id]) return
+  loadDeviceActivity(row.id)
+  expandedDeviceLoading.value[row.id] = true
+  try { expandedDeviceDetails.value[row.id] = await getDevice(row.id) }
+  catch { ElMessage.error('加载终端节点详情失败，请重新展开重试') }
+  finally { expandedDeviceLoading.value[row.id] = false }
+}
 const devices = ref([])
 const total = ref(0)
 const loading = ref(false)
@@ -244,7 +299,7 @@ const resultSummary = computed(() => {
 /** 新增对话框 */
 const createVisible = ref(false)
 const createLoading = ref(false)
-const createForm = reactive({ name: '', device_type: 'pc', owner_id: '', node_id: null, remark: '' })
+const createForm = reactive({ name: '', device_type: '', owner_id: '', node_id: null, remark: '' })
 const members = ref([])
 const bindableNodes = ref([])
 const nodesLoading = ref(false)
@@ -358,7 +413,7 @@ async function searchNodes(q = '') {
 /** 打开新增对话框 */
 function showCreateDialog() {
   createForm.name = ''
-  createForm.device_type = 'pc'
+  createForm.device_type = query.device_type || ''
   createForm.owner_id = ''
   createForm.node_id = null
   createForm.remark = ''
@@ -370,6 +425,10 @@ function showCreateDialog() {
 async function handleCreate() {
   if (!createForm.name.trim()) {
     ElMessage.warning('请输入设备名称')
+    return
+  }
+  if (!['pc', 'phone'].includes(createForm.device_type)) {
+    ElMessage.warning('请选择设备类型：电脑或手机')
     return
   }
   createLoading.value = true
@@ -394,7 +453,7 @@ async function handleCreate() {
     createVisible.value = false
     loadDevices()
   } catch (err) {
-    // 透出服务端业务错误（如 409 节点已被占用）
+    // 透出服务端业务错误
     ElMessage.error(err?.response?.data?.detail || '设备创建失败')
   } finally {
     createLoading.value = false
@@ -412,6 +471,17 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.resource-expand-trigger { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; line-height: inherit; overflow-wrap: anywhere; }
+.resource-expand-trigger:hover { color: var(--el-color-primary); }
+.resource-expand-trigger:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.resource-state-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; }
+.resource-state-grid > section { min-width: 0; }
+.state-note { margin-top: 5px; font-size: 11px; color: #909399; }
+@media (max-width: 1100px) { .resource-state-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
+.device-inline-details { box-sizing: border-box; padding: 10px 16px; background: #f8fafc; font-size: 12px; }
+.inline-detail-fields, .inline-detail-section { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; line-height: 22px; }
+.inline-detail-fields b, .inline-detail-section b { margin-right: 8px; color: #909399; font-weight: 500; }
+.inline-detail-section { margin-top: 6px; overflow-wrap: anywhere; }
 .page-toolbar {
   display: flex;
   align-items: center;

@@ -248,13 +248,13 @@ def test_bind_node_rules(client, db, super_admin, make_node):
     assert resp.json()["node_ip"] == "1.2.3.4:1080"
     device_id = resp.json()["id"]
 
-    # 重复绑定其他设备 → 409
+    # 节点支持被第二台设备共享
     resp = client.post(
         "/api/devices",
         json=_create_payload(name="第二台", owner_id=super_admin.id, node_id=node.id),
         headers=headers,
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 201
 
     # 保留原节点 PATCH 不误判 409
     resp = client.patch(f"/api/devices/{device_id}", json={"remark": "x"}, headers=headers)
@@ -325,21 +325,13 @@ def test_bindable_nodes_filters(client, db, super_admin, make_node):
     assert ids == {free.id, active.id}
     assert sold.id not in ids
 
-    # 绑定后从可绑列表消失
+    # 节点可被多台设备共享，已绑定节点仍可选择
     client.post(
         "/api/devices",
         json=_create_payload(owner_id=super_admin.id, node_id=free.id),
         headers=headers,
     )
     resp = client.get("/api/devices/bindable-nodes", headers=headers)
-    ids = {item["id"] for item in resp.json()["items"]}
-    assert free.id not in ids
-
-    # exclude_device_id 放行自身已绑定节点
-    device_id = db.query(Device).filter(Device.node_id == free.id).first().id
-    resp = client.get(
-        f"/api/devices/bindable-nodes?exclude_device_id={device_id}", headers=headers
-    )
     ids = {item["id"] for item in resp.json()["items"]}
     assert free.id in ids
 
@@ -419,7 +411,7 @@ def test_device_responses_never_expose_node_credentials(client, db, super_admin,
 
 
 def test_cross_owner_node_binding_conflict(client, db, super_admin, normal_user, make_node):
-    """非超管绑定被他人设备占用的节点 → 409（唯一性检查跨 owner 生效）。"""
+    """非超管可以共享其他设备已绑定的节点。"""
     node = make_node(status="idle")
     # 超管为 alice 建一台绑定该节点的设备
     client.post(
@@ -427,13 +419,87 @@ def test_cross_owner_node_binding_conflict(client, db, super_admin, normal_user,
         json=_create_payload(name="alice 的", owner_id=normal_user.id, node_id=node.id),
         headers=auth_headers(super_admin),
     )
-    # alice 自己再建设备绑同一节点 → 409
+    # alice 可以再次绑定同一节点
     resp = client.post(
         "/api/devices",
         json=_create_payload(name="alice 第二台", node_id=node.id),
         headers=auth_headers(normal_user),
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 201
+
+
+def test_shared_node_relations_preserve_other_devices(client, db, super_admin, make_node):
+    headers = auth_headers(super_admin)
+    node = make_node(status="active")
+    devices = []
+    for index in range(3):
+        response = client.post("/api/devices", json=_create_payload(
+            name=f"shared-{index}", owner_id=super_admin.id,
+            node_id=node.id if index == 0 else None,
+        ), headers=headers)
+        assert response.status_code == 201, response.text
+        devices.append(response.json()["id"])
+    response = client.patch(f"/api/devices/{devices[1]}", json={"node_id": node.id}, headers=headers)
+    assert response.status_code == 200, response.text
+    response = client.put(f"/api/devices/{devices[2]}/relations", json={"node_ids": [node.id]}, headers=headers)
+    assert response.status_code == 200, response.text
+    response = client.put(f"/api/proxy-nodes/{node.id}/relation", json={"device_id": devices[2]}, headers=headers)
+    assert response.status_code == 200, response.text
+    response = client.get("/api/proxy-nodes", headers=headers)
+    linked = next(item for item in response.json()["items"] if item["id"] == node.id)
+    assert {item["id"] for item in linked["devices"]} == set(devices)
+    response = client.put(f"/api/devices/{devices[2]}/relations", json={"node_ids": []}, headers=headers)
+    assert response.status_code == 200, response.text
+    for device_id in devices[:2]:
+        response = client.get(f"/api/devices/{device_id}", headers=headers)
+        assert response.json()["node_id"] == node.id
+
+
+def test_node_activity_matches_exact_node_and_enforces_scope(client, db, super_admin, normal_user, make_node):
+    node = make_node()
+    db.add_all([
+        OperationLog(username=super_admin.username, module="节点管理", action="UPDATE",
+                     summary=f"UPDATE /api/proxy-nodes/{node.id}", result="success"),
+        OperationLog(username=super_admin.username, module="节点关联", action="UPDATE",
+                     summary=f"UPDATE /api/proxy-nodes/{node.id}/relation", result="failed"),
+        OperationLog(username=super_admin.username, module="节点管理", action="UPDATE",
+                     summary=f"UPDATE /api/proxy-nodes/{node.id}0", result="success"),
+    ])
+    db.commit()
+    url = f"/api/proxy-nodes/{node.id}/logs"
+    response = client.get(url, headers=auth_headers(super_admin))
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 2
+    assert {item["summary"] for item in response.json()["items"]} == {"修改节点资料", "调整关联"}
+    assert {item["result"] for item in response.json()["items"]} == {"success", "failed"}
+    assert client.get(url, headers=auth_headers(normal_user)).status_code == 403
+    assert client.get("/api/proxy-nodes/99999/logs", headers=auth_headers(super_admin)).status_code == 404
+
+
+def test_device_activity_uses_readable_names_and_omits_empty_changes(client, db, super_admin, make_node):
+    from app.services.device_service import readable_device_log
+
+    node = make_node(ip="186.233.6.246", port=44000)
+    headers = auth_headers(super_admin)
+    response = client.post("/api/devices", json=_create_payload(
+        name="天05", device_type="phone", owner_id=super_admin.id, node_id=node.id,
+    ), headers=headers)
+    assert response.status_code == 201, response.text
+    device_id = response.json()["id"]
+    response = client.get(f"/api/devices/{device_id}/logs", headers=headers)
+    assert response.status_code == 200, response.text
+    log = response.json()["items"][0]
+    assert log["summary"] == "新增手机 天05"
+    assert "关联节点：186.233.6.246:44000" in log["details"]
+    assert all("ID" not in detail and "未设置 → 未设置" not in detail for detail in log["details"])
+    account = OpAccount(platform="tiktok", account="visible-account")
+    db.add(account)
+    db.commit()
+    changes = {"relations": {"old": {"account_ids": [], "node_ids": [node.id]},
+                              "new": {"account_ids": [account.id], "node_ids": []}}}
+    summary = readable_device_log(db, DeviceLog(action="UPDATE", changes=json.dumps(changes)))
+    assert summary["summary"] == "调整终端关联"
+    assert set(summary["details"]) == {"解除节点：186.233.6.246:44000", "关联账号：visible-account"}
 
 
 def test_owner_reassignment(client, db, super_admin, other_user):
@@ -578,7 +644,7 @@ def test_proxy_node_list_returns_relation_fields(client, super_admin, make_node)
     assert item["accounts"] == []
 
 def test_concurrent_node_binding_single_winner(client, super_admin, make_node, monkeypatch):
-    """并发绑定同一节点：恰好一个 201 + 一个 409，最终只有一行绑定（文件型 SQLite 模拟生产并发）。"""
+    """并发绑定同一节点允许多台设备共享。"""
     import threading
     import tempfile
     import pathlib
@@ -649,12 +715,12 @@ def test_concurrent_node_binding_single_winner(client, super_admin, make_node, m
     for t in threads:
         t.join(timeout=30)
 
-    assert sorted(results) == [201, 409], results
+    assert sorted(results) == [201, 201], results
 
     check = race_factory()
     from app.models.device import Device as DeviceModel
     bound = check.query(DeviceModel).filter(
         DeviceModel.node_id == node_id, DeviceModel.is_deleted == False
     ).count()
-    assert bound == 1
+    assert bound == 2
     check.close()

@@ -59,7 +59,7 @@
     </el-card>
 
     <!-- 新增/编辑对话框 -->
-    <el-dialog v-model="dialogVisible" :title="editId ? '编辑角色' : '新增角色'" width="700px">
+    <el-dialog v-model="dialogVisible" :title="editId ? '编辑角色' : '新增角色'" width="min(700px, 94vw)" append-to-body>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
         <el-form-item label="角色名称" prop="name">
           <el-input v-model="form.name" />

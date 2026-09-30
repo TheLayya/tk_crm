@@ -51,7 +51,9 @@ async def lifespan(app: FastAPI):
         db.close()
     # 注册并启动定时监控任务
     from app.services.monitor_service import register_scheduler_jobs
+    from app.services.op_account_service import register_scheduler_job as register_op_account_scheduler_job
     register_scheduler_jobs(scheduler, SessionLocal)
+    register_op_account_scheduler_job(scheduler, SessionLocal)
     start_scheduler()
     from app.services.backup_service import register_backup_job
     register_backup_job(scheduler, SessionLocal)

@@ -84,6 +84,18 @@ class MonitorAccount(Base):
     videos = relationship("Video", back_populates="account", cascade="all, delete-orphan")
 
 
+def latest_check_summary(history):
+    if history is None:
+        return {"latest_check_status": "pending", "latest_check_error": None}
+    error = history.error_message
+    state = history.check_status
+    if error and error.startswith("ACCOUNT_NOT_FOUND:"):
+        state = "not_found"
+    elif error and "VERIFICATION_REQUIRED:" in error:
+        state = "verification_required"
+    return {"latest_check_status": state, "latest_check_error": error}
+
+
 class MonitorHistory(Base):
     __tablename__ = "monitor_history"
 

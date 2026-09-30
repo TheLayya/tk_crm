@@ -3,8 +3,8 @@ import io
 import json
 import logging
 import uuid
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timedelta
+from typing import Callable, List, Optional
 
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
@@ -67,6 +67,17 @@ def _write_audit_log(
         operator=operator,
     )
     db.add(log)
+    if field_name == "status" and new_value == "封禁" and old_value != new_value:
+        account = db.get(OpAccount, account_id)
+        if account:
+            record_relation_snapshot(db, account, operator, "ban_snapshot")
+
+
+def record_relation_snapshot(db: Session, account: OpAccount, operator=None, field_name="relation_snapshot"):
+    from app.services.relation_history_service import account_relation_snapshot
+
+    _write_audit_log(db, account.id, "snapshot", field_name, None,
+                     json.dumps(account_relation_snapshot(db, account), ensure_ascii=False), operator)
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +117,7 @@ def normalize_account_relation(db: Session, values: dict, account: Optional[OpAc
                 raise HTTPException(409, "代理节点当前状态不可绑定")
 
 
-def sync_device_account_nodes(db: Session, device) -> None:
+def sync_device_account_nodes(db: Session, device, operator=None) -> None:
     """终端关系变更后同步账号的节点摘要。"""
     ids = device.node_ids or ([device.node_id] if device.node_id else [])
     primary = ids[0] if ids else None
@@ -114,11 +125,12 @@ def sync_device_account_nodes(db: Session, device) -> None:
         if account.device_id != device.id:
             continue
         if account.node_id != primary:
-            _write_audit_log(db, account.id, "update", "node_id", str(account.node_id) if account.node_id else None, str(primary) if primary else None)
+            _write_audit_log(db, account.id, "update", "node_id", str(account.node_id) if account.node_id else None, str(primary) if primary else None, operator)
             account.node_id = primary
+        record_relation_snapshot(db, account, operator)
 
 
-def create_op_account(db: Session, data: OpAccountCreate) -> OpAccount:
+def create_op_account(db: Session, data: OpAccountCreate, actor=None) -> OpAccount:
     # Prevent duplicate operation accounts even when no project is selected
     existing = db.query(OpAccount).filter(
         OpAccount.platform == data.platform,
@@ -135,7 +147,13 @@ def create_op_account(db: Session, data: OpAccountCreate) -> OpAccount:
     db.add(account)
     db.commit()
     db.refresh(account)
-    _write_audit_log(db, account.id, "create", field_name=None, old_value=None, new_value="created")
+    _write_audit_log(db, account.id, "create", field_name=None, old_value=None, new_value="created", operator=actor)
+    for field in ("device_id", "node_id"):
+        if getattr(account, field) is not None:
+            _write_audit_log(db, account.id, "update", field, None, str(getattr(account, field)), actor)
+    record_relation_snapshot(db, account, actor)
+    if account.status == "封禁":
+        record_relation_snapshot(db, account, actor, "ban_snapshot")
     db.commit()
     # 反序列化 sellers 供返回
     return account
@@ -146,7 +164,7 @@ def get_op_account(db: Session, id: int) -> Optional[OpAccount]:
     return account
 
 
-def update_op_account(db: Session, id: int, data: OpAccountUpdate) -> Optional[OpAccount]:
+def update_op_account(db: Session, id: int, data: OpAccountUpdate, actor=None) -> Optional[OpAccount]:
     account = db.query(OpAccount).filter(OpAccount.id == id).first()
     if not account:
         return None
@@ -155,7 +173,7 @@ def update_op_account(db: Session, id: int, data: OpAccountUpdate) -> Optional[O
         normalize_account_relation(db, update_data, account)
     if 'sellers' in update_data:
         update_data['sellers'] = _serialize_sellers(update_data['sellers'])
-    for field, new_val in update_data.items():
+    for field, new_val in sorted(update_data.items(), key=lambda item: item[0] == "status"):
         old_val = getattr(account, field, None)
         if old_val != new_val:
             _write_audit_log(
@@ -163,8 +181,11 @@ def update_op_account(db: Session, id: int, data: OpAccountUpdate) -> Optional[O
                 field_name=field,
                 old_value=str(old_val) if old_val is not None else None,
                 new_value=str(new_val) if new_val is not None else None,
+                operator=actor,
             )
             setattr(account, field, new_val)
+    if {'device_id', 'node_id'} & update_data.keys():
+        record_relation_snapshot(db, account, actor)
     db.commit()
     db.refresh(account)
     return account
@@ -294,6 +315,7 @@ def batch_update_status(
     sale_price=None,
     sale_date=None,
     sellers: Optional[List[str]] = None,
+    actor=None,
 ) -> int:
     count = 0
     for account_id in ids:
@@ -303,7 +325,7 @@ def batch_update_status(
         old_status = account.status
         account.status = status
         _write_audit_log(db, account.id, "update", field_name="status",
-                         old_value=str(old_status), new_value=str(status))
+                         old_value=str(old_status), new_value=str(status), operator=actor)
         if status == "已售":
             if sale_customer is not None:
                 account.sale_customer = sale_customer
@@ -588,6 +610,58 @@ def import_from_excel(db: Session, file_content: bytes) -> OpImportResult:
 # ---------------------------------------------------------------------------
 # Collect task scheduling
 # ---------------------------------------------------------------------------
+
+async def run_scheduled_collections(db_factory: Callable) -> None:
+    """定时采集到期的运营账号；间隔使用系统 MonitorSettings.default_interval。"""
+    from app.models.monitor import MonitorSettings
+    from app.services.op_collector_service import collect_account, select_proxy
+
+    db: Session = db_factory()
+    try:
+        settings = db.query(MonitorSettings).filter(MonitorSettings.id == 1).first()
+        interval = settings.default_interval if settings else 14400
+        now = datetime.utcnow()
+        accounts = (
+            db.query(OpAccount)
+            .filter(OpAccount.platform == "tiktok", OpAccount.status.notin_(["已售", "封禁"]))
+            .all()
+        )
+        due_accounts = []
+        for account in accounts:
+            last_attempt = account.updated_at if account.collect_status == "failed" else account.last_collected_at
+            if last_attempt is None or now >= last_attempt + timedelta(seconds=interval):
+                due_accounts.append(account)
+        if not due_accounts:
+            return
+
+        proxy = select_proxy(db)
+        logger.info("Scheduled op-account collection: %d accounts due", len(due_accounts))
+        for account in due_accounts:
+            account_id = account.id
+            try:
+                await collect_account(db, account, proxy)
+            except Exception:
+                db.rollback()
+                logger.exception("Scheduled collection failed for op account %s", account_id)
+    finally:
+        db.close()
+
+
+def register_scheduler_job(scheduler, db_factory: Callable) -> None:
+    """每分钟触发一次，到期账号才真正执行采集。"""
+    async def _job():
+        await run_scheduled_collections(db_factory)
+
+    scheduler.add_job(
+        _job,
+        trigger="interval",
+        minutes=1,
+        id="scheduled_op_account_collections",
+        replace_existing=True,
+        max_instances=1,
+    )
+    logger.info("Registered scheduled op-account collection job (every minute)")
+
 
 def trigger_collect(db: Session, account_ids: list, background_tasks: BackgroundTasks) -> str:
     task_id = str(uuid.uuid4())

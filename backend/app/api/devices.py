@@ -31,6 +31,7 @@ from app.schemas.device import (
     DeviceAccountSummary,
 )
 from app.services import device_service
+from app.services.account_summary_service import enrich_monitor_summaries
 from app.services.auth_service import require_permission, get_user_data_scope, get_dept_member_usernames
 
 class DeviceRelationsBody(BaseModel):
@@ -78,12 +79,13 @@ def _node_ip(node: Optional[ProxyNode]) -> Optional[str]:
 
 
 def _device_to_out(
-    db: Session, device: Device, owner_map: dict, node_map: dict
+    db: Session, device: Device, owner_map: dict, node_map: dict, current_user: User
 ) -> DeviceOut:
     owner = owner_map.get(device.owner_id)
     linked_node_ids = device.node_ids or ([device.node_id] if device.node_id else [])
     node = node_map.get(linked_node_ids[0]) if linked_node_ids else None
     accounts = db.query(OpAccount).filter(OpAccount.device_id == device.id).order_by(OpAccount.id).all()
+    enrich_monitor_summaries(db, accounts, current_user)
     return DeviceOut(
         id=device.id,
         name=device.name,
@@ -106,6 +108,9 @@ def _device_to_out(
             following_count=a.following_count,
             like_count=a.like_count,
             video_count=a.video_count,
+            followers_change=a.followers_change,
+            yesterday_video_count=a.yesterday_video_count,
+            yesterday_video_plays=a.yesterday_video_plays,
         ) for a in accounts],
         remark=device.remark,
         created_at=device.created_at,
@@ -169,7 +174,7 @@ def list_devices(
         )
         owner_map = _build_owner_map(db, devices)
         node_map = _build_node_map(db, devices)
-        items = [_device_to_out(db, d, owner_map, node_map) for d in devices]
+        items = [_device_to_out(db, d, owner_map, node_map, current_user) for d in devices]
         return {"items": items, "total": total}
     except device_service.DeviceServiceError as e:
         # 服务层业务校验（如缺少用户上下文）保留原状态码，不吞成 500
@@ -190,7 +195,7 @@ def bindable_nodes(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:manage")),
 ):
-    """可绑定节点（仅 idle/active 且未被其他设备占用；编辑时传 exclude_device_id 放行自身）。
+    """可绑定节点（idle/active 节点允许多台设备共享）。
 
     exclude_device_id 归属校验：非超管仅可放行自己所属的设备（防借他人设备 ID 探测其绑定节点）。
     """
@@ -244,7 +249,7 @@ def create_device(
 
     owner_map = _build_owner_map(db, [device])
     node_map = _build_node_map(db, [device])
-    return _device_to_out(db, device, owner_map, node_map)
+    return _device_to_out(db, device, owner_map, node_map, current_user)
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +275,7 @@ def get_device(
 
     owner_map = _build_owner_map(db, [device])
     node_map = _build_node_map(db, [device])
-    out = _device_to_out(db, device, owner_map, node_map)
+    out = _device_to_out(db, device, owner_map, node_map, current_user)
     return DeviceDetail(
         **out.model_dump(),
         node=_node_summary(node_map.get(device.node_id) if device.node_id else None),
@@ -307,7 +312,7 @@ def update_device(
 
     owner_map = _build_owner_map(db, [device])
     node_map = _build_node_map(db, [device])
-    return _device_to_out(db, device, owner_map, node_map)
+    return _device_to_out(db, device, owner_map, node_map, current_user)
 
 @router.put("/{device_id}/relations", response_model=DeviceOut)
 def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Session = Depends(get_db), current_user: User = Depends(require_permission("device:manage"))):
@@ -321,15 +326,10 @@ def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Sessi
     invalid = [n for n in nodes if n.status not in ("idle", "active")]
     if invalid:
         raise HTTPException(status_code=409, detail=f"节点 {invalid[0].ip}:{invalid[0].port} 当前状态不可绑定")
-    # 终端节点关系以 node_ids 为准；检查其他终端的 JSON 关系，避免资源被悄悄抢占。
-    for other in db.query(Device).filter(Device.id != device.id, Device.is_deleted == False).all():
-        occupied = set(other.node_ids or ([other.node_id] if other.node_id else []))
-        conflict = occupied.intersection(node_ids)
-        if conflict:
-            raise HTTPException(status_code=409, detail=f"节点 {sorted(conflict)[0]} 已绑定终端 {other.name}")
+
     # 新客户端传 account_ids；旧客户端传 account_id，统一转换为列表。
     account_ids = list(dict.fromkeys(body.account_ids if body.account_ids is not None else ([body.account_id] if body.account_id else [])))
-    from app.services.op_account_service import _write_audit_log
+    from app.services.op_account_service import _write_audit_log, record_relation_snapshot
     selected_accounts = []
     if account_ids:
         if device.device_type != "phone":
@@ -346,8 +346,10 @@ def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Sessi
     selected_ids = {a.id for a in selected_accounts}
     for item in db.query(OpAccount).filter(OpAccount.device_id == device.id).all():
         if item.id not in selected_ids:
+            _write_audit_log(db, item.id, "update", "node_id", str(item.node_id) if item.node_id else None, None, current_user.username)
             item.device_id = None
             item.node_id = None
+            record_relation_snapshot(db, item, current_user.username)
             _write_audit_log(db, item.id, "update", "device_id", str(device.id), None, current_user.username)
     for account in selected_accounts:
         if account.device_id != device.id:
@@ -358,11 +360,14 @@ def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Sessi
     device.node_ids = node_ids
     device.node_id = node_ids[0] if node_ids else None
     for account in selected_accounts:
+        if account.node_id != device.node_id:
+            _write_audit_log(db, account.id, "update", "node_id", str(account.node_id) if account.node_id else None, str(device.node_id) if device.node_id else None, current_user.username)
         account.node_id = device.node_id
+        record_relation_snapshot(db, account, current_user.username)
     db.add(DeviceLog(device_id=device.id, user_id=current_user.id, username=current_user.username,
                      action="UPDATE", changes=json.dumps({"relations": {"old": {"account_id": old_account.id if old_account else None, "node_ids": old_nodes}, "new": {"account_ids": sorted(selected_ids), "node_ids": node_ids}}}, ensure_ascii=False)))
     db.commit(); db.refresh(device)
-    return _device_to_out(db, device, _build_owner_map(db, [device]), _build_node_map(db, [device]))
+    return _device_to_out(db, device, _build_owner_map(db, [device]), _build_node_map(db, [device]), current_user)
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +401,12 @@ def delete_device(
 # GET /{device_id}/logs  — 设备历史轨迹
 # ---------------------------------------------------------------------------
 
+@router.get("/{resource_id}/association-history", response_model=dict)
+def get_association_history(resource_id: int, db: Session = Depends(get_db), current_user=Depends(require_permission("device:view"))):
+    from app.services.relation_history_service import relation_overview
+    return relation_overview(db, "device", resource_id, current_user)
+
+
 @router.get("/{device_id}/logs", response_model=dict)
 def get_device_logs(
     device_id: int,
@@ -416,6 +427,7 @@ def get_device_logs(
                 username=log.username,
                 action=log.action,
                 changes=device_service.parse_log_changes(log.changes),
+                **device_service.readable_device_log(db, log),
                 created_at=log.created_at,
             )
             for log in logs

@@ -5,6 +5,7 @@ import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -18,14 +19,15 @@ from app.schemas.account import (
     BatchAccountResultItem,
     BatchActionRequest,
 )
-from app.services import monitor_service
+from app.services import monitor_service, video_service
 from app.services.auth_service import (
     require_permission,
     get_current_user_from_header,
     get_user_data_scope,
     get_dept_member_usernames,
 )
-from app.models.monitor import Project
+from app.models.monitor import Project, MonitorHistory, latest_check_summary
+from app.models.video import Video
 from app.services.project_service import get_visible_project_ids
 
 logger = logging.getLogger(__name__)
@@ -67,10 +69,23 @@ def get_accounts(
             allowed_project_ids=allowed_project_ids,
         )
 
+        account_ids = [account.id for account in accounts]
+        yesterday_counts = video_service.get_yesterday_video_counts(db, account_ids)
+        yesterday_plays = video_service.get_yesterday_video_plays(db, account_ids)
+        video_updated_at = dict(
+            db.query(Video.account_id, func.max(Video.updated_at))
+            .filter(Video.account_id.in_(account_ids))
+            .group_by(Video.account_id).all()
+        )
         result = []
         for account in accounts:
             account_dict = AccountResponse.model_validate(account).model_dump()
+            latest = db.query(MonitorHistory).filter(MonitorHistory.account_id == account.id).order_by(MonitorHistory.checked_at.desc(), MonitorHistory.id.desc()).first()
+            account_dict.update(latest_check_summary(latest))
             account_dict['project_name'] = account.project.name if account.project else None
+            account_dict['yesterday_video_count'] = yesterday_counts.get(account.id)
+            account_dict['yesterday_video_plays'] = yesterday_plays.get(account.id, []) if yesterday_counts.get(account.id) is not None else None
+            account_dict['video_data_updated_at'] = video_updated_at.get(account.id)
             result.append(account_dict)
 
         return {"items": result, "total": total}

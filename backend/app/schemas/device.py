@@ -47,6 +47,9 @@ class DeviceAccountSummary(BaseModel):
     following_count: Optional[int] = None
     like_count: Optional[int] = None
     video_count: Optional[int] = None
+    followers_change: Optional[int] = None
+    yesterday_video_count: Optional[int] = None
+    yesterday_video_plays: Optional[list[int]] = None
 
 
 class DeviceOut(BaseModel):
@@ -94,4 +97,6 @@ class DeviceLogOut(BaseModel):
     username: str
     action: str
     changes: Optional[dict] = None
+    summary: Optional[str] = None
+    details: list[str] = Field(default_factory=list)
     created_at: datetime

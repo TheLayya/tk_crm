@@ -103,8 +103,96 @@
 
     <!-- 表格 -->
     <el-card>
-      <el-table v-if="!isMobile" :data="accounts" v-loading="loading" @selection-change="handleSelectionChange" @row-dblclick="handleRowDblClick" border size="small">
+      <el-table ref="opAccountTable" row-key="id" v-if="!isMobile" :data="accounts" v-loading="loading" @selection-change="handleSelectionChange" @row-dblclick="handleRowDblClick" border size="small">
         <el-table-column type="selection" width="40" fixed="left" />
+        <el-table-column type="expand" width="36" fixed="left">
+          <template #default="{ row }">
+            <div class="op-inline-details">
+              <el-alert v-if="row.collect_status === 'failed'" :title="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号已不可访问：TikTok 提示找不到此账号' : '采集未完成，当前账号状态尚未确认'" description="下方粉丝和视频仅为历史记录，不代表当前数据；请打开 TikTok 主页核实。" :type="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'error' : 'warning'" :closable="false" show-icon />
+              <div class="inline-summary">
+                <strong>{{ row.account }}</strong>
+                <span v-if="row.nickname && row.nickname !== row.account">{{ row.nickname }}</span>
+                <span>粉丝 {{ formatNum(row.follower_count) }}</span>
+                <span>关注 {{ formatNum(row.following_count) }}</span>
+                <span>点赞 {{ formatNum(row.like_count) }}</span>
+                <span>视频 {{ formatNum(row.video_count) }}</span>
+              </div>
+              <AssociationOverview kind="account" :resource-id="row.id" />
+              <InlineAccountVideos v-if="row.monitor_account_id" :account-id="row.monitor_account_id" />
+
+        <!-- 账号凭证 -->
+        <div class="section-group">
+          <div class="section-group__title">账号凭证</div>
+          <div class="section-group__body">
+            <div class="info-row" v-for="field in credentialFields" :key="field.key">
+              <span class="info-row__label">{{ field.label }}</span>
+              <span class="info-row__value">
+                <template v-if="field.sensitive">
+                  <span class="sensitive-text">
+                    {{ visibleFields[row.id]?.[field.key]
+                       ? row[field.key]
+                       : (row[field.key] ? '••••••' : '-') }}
+                  </span>
+                  <el-icon
+                    v-if="row[field.key]"
+                    class="eye-btn"
+                    @click="toggleVisible(row.id, field.key)"
+                  >
+                    <View v-if="!visibleFields[row.id]?.[field.key]" />
+                    <Hide v-else />
+                  </el-icon>
+                </template>
+                <template v-else>
+                  {{ row[field.key] || '-' }}
+                </template>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- TikTok 权限（条件显示） -->
+        <div v-if="row.platform === 'tiktok'" class="section-group">
+          <div class="section-group__title">TikTok 权限</div>
+          <div class="tiktok-perms-grid">
+            <div class="perm-item" v-for="perm in tiktokPerms" :key="perm.key">
+              <span class="perm-item__icon" :class="row[perm.key] ? 'is-on' : 'is-off'">
+                {{ row[perm.key] ? '✓' : '✗' }}
+              </span>
+              <span class="perm-item__label">{{ perm.label }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 采购 / 出售 -->
+        <div class="section-group">
+          <div class="section-group__title">采购 / 出售</div>
+          <div class="section-group__body two-col">
+            <div class="info-row"><span class="info-row__label">采购渠道</span><span class="info-row__value">{{ row.purchase_channel || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">采购金额</span><span class="info-row__value">{{ row.purchase_price != null ? '¥' + row.purchase_price : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">采购日期</span><span class="info-row__value">{{ row.purchase_date || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">出售客户</span><span class="info-row__value">{{ row.sale_customer || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">出售金额</span><span class="info-row__value">{{ row.sale_price != null ? '¥' + row.sale_price : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">出售日期</span><span class="info-row__value">{{ row.sale_date || '-' }}</span></div>
+          </div>
+        </div>
+
+        <!-- 其他信息 -->
+        <div class="section-group">
+          <div class="section-group__title">其他信息</div>
+          <div class="section-group__body">
+            <div class="info-row"><span class="info-row__label">注册人</span><span class="info-row__value">{{ row.registrant || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">使用人</span><span class="info-row__value">{{ row.operator || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">账号来源</span><span class="info-row__value">{{ row.source || '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">注册时间</span><span class="info-row__value">{{ row.account_created_at ? formatDate(row.account_created_at) : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">最后采集</span><span class="info-row__value">{{ row.last_collected_at ? formatDate(row.last_collected_at) : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">采集状态</span><span class="info-row__value">{{ collectStatusLabel(row.collect_status) }}</span></div>
+<div class="info-row info-row--full"><span class="info-row__label">备注</span><div class="info-row__value"><details v-if="row.remark" class="inline-remark"><summary :title="row.remark">{{ row.remark }}</summary><div>{{ row.remark }}</div></details><span v-else>-</span></div></div>
+          </div>
+        </div>
+
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="平台" width="100" fixed="left">
           <template #default="{ row }">
             <span :class="['op-platform-badge', `op-platform-badge--${row.platform}`]">{{ row.platform?.toUpperCase() }}</span>
@@ -137,6 +225,10 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="粉丝数" width="100" align="right"><template #default="{ row }">{{ formatNum(row.follower_count) }}</template></el-table-column>
+        <el-table-column label="粉丝变化" width="110" align="right"><template #default="{ row }"><el-tooltip content="关联监控账号最近两次成功检查的粉丝变化"><span :class="row.followers_change > 0 ? 'op-delta-up' : row.followers_change < 0 ? 'op-delta-down' : 'op-delta-neutral'">{{ row.followers_change == null ? '暂无对比' : (row.followers_change > 0 ? '+' : '') + row.followers_change }}</span></el-tooltip></template></el-table-column>
+        <el-table-column label="昨日更新（北京时间）" width="170"><template #default="{ row }">{{ !row.monitor_account_id ? '未关联监控' : row.yesterday_video_count == null ? '视频数据待刷新' : row.yesterday_video_count > 0 ? '已更新 ' + row.yesterday_video_count + ' 条' : '未发现更新' }}</template></el-table-column>
+        <el-table-column label="昨日视频流量" min-width="170"><template #default="{ row }"><el-tooltip content="昨日发布视频的最新累计播放量，不是昨日新增播放；按发布时间从新到旧排列。"><span>{{ row.yesterday_video_plays == null ? '暂无可靠数据' : row.yesterday_video_plays.join(' / ') || '—' }}</span></el-tooltip></template></el-table-column>
         <el-table-column label="绑定终端" width="140">
           <template #default="{ row }">{{ row.device_name || '未绑定' }}</template>
         </el-table-column>
@@ -239,7 +331,7 @@
         </el-table-column>
         <el-table-column v-if="colVisible('collect_status')" label="采集状态" width="90">
           <template #default="{ row }">
-            <el-tag :type="collectStatusType(row.collect_status)" size="small">{{ collectStatusLabel(row.collect_status) }}</el-tag>
+<el-tooltip :content="row.collect_error || '最近基础数据采集结果'"><el-tag :type="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'danger' : collectStatusType(row.collect_status)" size="small">{{ row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号不存在' : collectStatusLabel(row.collect_status) }}</el-tag></el-tooltip>
           </template>
         </el-table-column>
         <!-- 采购 -->
@@ -735,16 +827,12 @@
 
     <!-- 操作历史对话框 -->
     <el-dialog v-model="logsDialog.visible" :title="`操作历史 - ${logsDialog.account}`" width="600px">
-      <el-timeline v-if="logsDialog.logs.length > 0">
-        <el-timeline-item v-for="log in logsDialog.logs" :key="log.id" :timestamp="formatDate(log.created_at)" placement="top">
-          <el-card shadow="never" style="padding:8px">
-            <el-tag size="small" :type="log.action === 'create' ? 'success' : log.action === 'delete' ? 'danger' : 'warning'">{{ auditActionLabel(log.action) }}</el-tag>
-            <span v-if="log.field_name" style="margin-left:8px;font-size:13px">
-              <strong>{{ fieldLabel(log.field_name) }}</strong>：{{ log.old_value || '（空）' }} → {{ log.new_value || '（空）' }}
-            </span>
-          </el-card>
-        </el-timeline-item>
-      </el-timeline>
+      <div class="account-audit-list" v-if="logsDialog.logs.length">
+        <div v-for="log in logsDialog.logs" :key="log.id" class="account-audit-row">
+          <div class="account-audit-meta"><time>{{ formatDate(log.created_at) }}</time><span>{{ log.operator || '操作人未记录' }}</span></div>
+          <div><strong>{{ log.summary || auditActionLabel(log.action) }}</strong><div v-for="(detail, index) in log.details || []" :key="index">{{ detail }}</div></div>
+        </div>
+      </div>
       <el-empty v-else description="暂无操作记录" />
     </el-dialog>
   </div>
@@ -764,6 +852,8 @@ import { getDevices } from '@/api/devices'
 import { getProxyNodes } from '@/api/proxy_nodes'
 import { useAuthStore } from '@/stores/auth'
 import SellerSelector from '@/components/SellerSelector.vue'
+import InlineAccountVideos from '@/components/InlineAccountVideos.vue'
+import AssociationOverview from '@/components/AssociationOverview.vue'
 
 const authStore = useAuthStore()
 const canBatchAssign = computed(() => authStore.hasPermission('op_account:edit') && authStore.hasPermission('team:member:view'))
@@ -812,7 +902,7 @@ const openRelation = async (row) => {
   relationNodes.value = []
   try {
     const [devices, nodes] = await Promise.all([getDevices({ skip: 0, limit: 200, device_type: 'phone' }), getProxyNodes({ skip: 0, limit: 500 })])
-    relationDevices.value = (devices.items || []).filter(d => !d.account_id || d.account_id === row.id)
+    relationDevices.value = devices.items || []
     relationNodes.value = nodes.items || []
     if (relationForm.device_id) onRelationDeviceChange(relationForm.device_id)
   } catch {
@@ -864,7 +954,7 @@ const filters = reactive({
 const pagination = reactive({ page: 1, limit: 50, total: 0 })
 
 // ===== 列配置 =====
-const COLUMN_CONFIG_KEY = 'op_accounts_column_config'
+const COLUMN_CONFIG_KEY = 'op_accounts_column_config_compact'
 const columnOptions = [
   { key: 'password', label: '密码' },
   { key: 'totp_secret', label: '2FA密钥' },
@@ -882,7 +972,7 @@ const columnOptions = [
   { key: 'people', label: '注册人/使用人' },
   { key: 'remark', label: '备注' },
 ]
-const defaultColumns = ['password', 'email', 'phone', 'country', 'collected_ids', 'collect_status', 'purchase', 'sale', 'people', 'remark']
+const defaultColumns = ['country', 'collect_status', 'people']
 const visibleColumns = ref(
   JSON.parse(localStorage.getItem(COLUMN_CONFIG_KEY) || 'null') || defaultColumns
 )
@@ -963,6 +1053,7 @@ const emptyForm = () => ({
 })
 const form = ref(emptyForm())
 const editingId = ref(null)
+const opAccountTable = ref(null)
 const detailDialog = ref({ visible: false, row: null })
 
 const handleCreate = () => {
@@ -972,7 +1063,8 @@ const handleCreate = () => {
   formDialog.visible = true
 }
 const handleRowDblClick = (row) => {
-  detailDialog.value = { visible: true, row }
+  if (!isMobile.value) opAccountTable.value?.toggleRowExpansion(row)
+  else detailDialog.value = { visible: true, row }
 }
 const handleEdit = (row) => {
   editingId.value = row.id
@@ -1200,6 +1292,41 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.account-audit-list { max-height: 60vh; overflow: auto; }
+.account-audit-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid #edf0f5; font-size: 12px; line-height: 22px; overflow-wrap: anywhere; }
+.account-audit-meta { display: flex; flex-direction: column; color: #909399; }
+.account-audit-row strong { font-weight: 500; }
+.op-inline-details { padding: 10px 14px; background: #f8fafc; overflow-wrap: anywhere; }
+.inline-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-bottom: 10px; font-size: 13px; }
+.inline-summary > span { color: #606266; }
+.op-inline-details .section-group { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; margin-bottom: 0; padding: 5px 0; border-top: 1px solid var(--color-border-subtle); }
+.op-inline-details .section-group__title { font-size: 12px; margin: 0; padding: 1px 0; border: 0; line-height: 22px; letter-spacing: 0; }
+.op-inline-details .section-group__body,
+.op-inline-details .section-group__body.two-col { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 12px; }
+.op-inline-details .info-row { align-items: flex-start; min-height: 22px; padding: 0; line-height: 22px; min-width: 0; }
+.op-inline-details .info-row__label { min-width: 70px; font-size: 13px; }
+.op-inline-details .info-row__value { min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.op-inline-details .info-row--full .info-row__value { display: block; }
+.inline-remark { min-width: 0; width: 100%; }
+.inline-remark summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.inline-remark[open] > div { max-height: 100px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (min-width: 1101px) and (max-width: 1450px) {
+  .op-inline-details .section-group__body,
+  .op-inline-details .section-group__body.two-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.op-inline-details .tiktok-perms-grid { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.op-inline-details .perm-item { padding: 0; }
+@media (max-width: 1100px) {
+  .op-inline-details .section-group__body,
+  .op-inline-details .section-group__body.two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 768px) {
+  .op-inline-details .section-group__body,
+  .op-inline-details .section-group__body.two-col { grid-template-columns: 1fr; }
+}
+.op-delta-up { color: #169b62; font-weight: 600; }
+.op-delta-down { color: #e5484d; font-weight: 600; }
+.op-delta-neutral { color: #909399; }
 .op-account-list {
   padding: 20px;
   display: flex;

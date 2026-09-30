@@ -382,7 +382,7 @@ async function handleEdit() {
     loadDevice()
     loadLogs(true)
   } catch (err) {
-    // 透出服务端业务错误（如 409 节点占用），而非笼统"编辑失败"
+    // 透出服务端业务错误，而非笼统"编辑失败"
     ElMessage.error(err?.response?.data?.detail || '编辑失败')
   } finally {
     editLoading.value = false

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db, SessionLocal
 from app.core.scheduler import scheduler
 from app.schemas.settings import SettingsUpdate, SettingsResponse
-from app.models.monitor import MonitorSettings
+from app.models.monitor import MonitorAccount, MonitorSettings
 from app.services.auth_service import require_permission
 from app.services.backup_service import reschedule_backup_job
 
@@ -101,6 +101,11 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db), _=Depen
                     detail="default_interval must be positive"
                 )
             settings.default_interval = data.default_interval
+
+            db.query(MonitorAccount).update(
+                {MonitorAccount.monitor_interval: data.default_interval},
+                synchronize_session=False,
+            )
         
         if data.max_concurrent_checks is not None:
             if data.max_concurrent_checks <= 0:

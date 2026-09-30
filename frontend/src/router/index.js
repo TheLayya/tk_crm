@@ -64,31 +64,34 @@ const router = createRouter({
     },
     {
       path: '/team',
+      redirect: '/team/manage',
       meta: { breadcrumb: '团队管理' },
       children: [
         {
+          path: 'manage',
+          name: 'TeamManage',
+          component: () => import('@/views/team/TeamManage.vue'),
+          meta: { requiresAuth: true, teamAccess: true, breadcrumb: '成员管理' }
+        },
+        {
           path: 'dept',
           name: 'DeptManage',
-          component: () => import('@/views/team/DeptManage.vue'),
-          meta: { requiresAuth: true, permission: 'team:dept:view', breadcrumb: '部门管理' }
+          redirect: to => ({ path: '/team/manage', query: { ...to.query, panel: 'dept' } })
         },
         {
           path: 'member',
           name: 'MemberManage',
-          component: () => import('@/views/team/MemberManage.vue'),
-          meta: { requiresAuth: true, permission: 'team:member:view', breadcrumb: '成员管理' }
+          redirect: to => ({ path: '/team/manage', query: to.query })
         },
         {
           path: 'role',
           name: 'RoleManage',
-          component: () => import('@/views/team/RoleManage.vue'),
-          meta: { requiresAuth: true, permission: 'team:role:view', breadcrumb: '角色管理' }
+          redirect: to => ({ path: '/team/manage', query: { ...to.query, panel: 'role' } })
         },
         {
           path: 'log',
           name: 'LogView',
-          component: () => import('@/views/team/LogView.vue'),
-          meta: { requiresAuth: true, permission: 'team:log:view', breadcrumb: '操作日志' }
+          redirect: to => ({ path: '/team/manage', query: { ...to.query, panel: 'log' } })
         }
       ]
     }
@@ -102,6 +105,12 @@ router.beforeEach((to, _from, next) => {
   }
   if (to.meta.permission && !authStore.hasPermission(to.meta.permission)) {
     return next('/403')
+  }
+  if (to.meta.teamAccess) {
+    const permissions = ['team:member:view', 'team:dept:view', 'team:role:view', 'team:log:view']
+    if (!permissions.some(permission => authStore.hasPermission(permission))) return next('/403')
+    const panelPermission = { dept: 'team:dept:view', role: 'team:role:view', log: 'team:log:view' }[to.query.panel]
+    if (panelPermission && !authStore.hasPermission(panelPermission)) return next('/403')
   }
   next()
 })

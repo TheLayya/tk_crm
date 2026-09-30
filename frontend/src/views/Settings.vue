@@ -2,18 +2,27 @@
   <div class="settings">
     <el-card>
       <template #header>
-        <span>系统设置</span>
+        <div class="settings-header">
+          <span>系统设置</span>
+          <div class="settings-actions">
+            <el-button @click="loadSettings" :disabled="loading || submitting">重新加载</el-button>
+            <el-button type="primary" @click="handleSubmit" :loading="submitting" :disabled="loading">保存设置</el-button>
+          </div>
+        </div>
       </template>
 
       <el-form
         :model="form"
         :rules="rules"
         ref="formRef"
-        label-width="180px"
+        label-width="160px"
         v-loading="loading"
-        style="max-width: 600px"
+        class="settings-form"
       >
-        <el-divider content-position="left">监控调度设置</el-divider>
+        <div class="settings-grid">
+        <div class="settings-column">
+        <section class="settings-section">
+        <h3>监控调度</h3>
 
         <el-form-item label="默认监控间隔" prop="default_interval">
           <el-input-number
@@ -22,7 +31,7 @@
             :max="1440"
             :step="5"
           />
-          <span class="hint">分钟（新建账号时的默认值）</span>
+          <span class="hint">分钟（监控账号与运营账号周期采集；保存后同步已有监控账号）</span>
         </el-form-item>
 
         <el-form-item label="最大并发检查数" prop="max_concurrent_checks">
@@ -53,7 +62,9 @@
           <span class="hint">个（每次检查时获取的最新视频数量）</span>
         </el-form-item>
 
-        <el-divider content-position="left">界面设置</el-divider>
+        </section>
+        <section class="settings-section">
+        <h3>界面设置</h3>
 
         <el-form-item label="网站名称" prop="site_name">
           <el-input
@@ -85,7 +96,68 @@
           </div>
         </el-form-item>
 
-        <el-divider content-position="left">数据备份</el-divider>
+        </section>
+        <section class="settings-section restore-section">
+        <h3>备份恢复</h3>
+        <p class="section-note">恢复会覆盖现有数据，请确认备份文件来源和恢复范围。</p>
+
+        <el-form-item label="选择备份文件">
+          <el-upload
+            accept=".zip"
+            :auto-upload="false"
+            :limit="1"
+            :on-change="(file) => { restoreFile = file }"
+            :on-remove="() => { restoreFile = null }"
+            :file-list="restoreFile ? [restoreFile] : []"
+          >
+            <el-button size="small">选择 .zip 文件</el-button>
+          </el-upload>
+        </el-form-item>
+
+        <el-form-item label="恢复数据库">
+          <el-button
+            type="danger"
+            :loading="restoreLoading"
+            :disabled="restoreLoading || backupLoading || !restoreFile"
+            @click="handleRestore"
+          >
+            恢复数据库
+          </el-button>
+        </el-form-item>
+
+        <el-form-item v-if="restoreResult">
+          <el-alert
+            type="success"
+            :closable="false"
+            show-icon
+            :title="`恢复成功：${restoreResult.filename}`"
+          />
+          <el-alert
+            type="warning"
+            :closable="false"
+            show-icon
+            title="需要重启应用才能使恢复的数据生效，请刷新页面或重启服务。"
+            style="margin-top: 8px"
+          />
+          <div v-if="restoreResult.pre_restore_backup" class="hint" style="margin-top: 8px">
+            恢复前自动备份：{{ restoreResult.pre_restore_backup.filename }}（{{ (restoreResult.pre_restore_backup.file_size / 1024).toFixed(1) }} KB）
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="restoreError">
+          <el-alert
+            type="error"
+            :closable="false"
+            show-icon
+            :title="restoreError"
+          />
+        </el-form-item>
+
+        </section>
+        </div>
+        <div class="settings-column">
+        <section class="settings-section">
+        <h3>数据备份</h3>
 
         <el-form-item label="启用自动备份">
           <el-switch v-model="form.backup_enabled" />
@@ -100,6 +172,8 @@
           <span class="hint">1–168 小时（最长7天）</span>
         </el-form-item>
 
+        <details class="notification-settings" :open="form.telegram_enabled">
+        <summary>Telegram 通知 <span>{{ form.telegram_enabled ? '已启用' : '未启用' }}</span></summary>
         <el-form-item label="启用 Telegram 通知">
           <el-switch v-model="form.telegram_enabled" :disabled="!form.backup_enabled" />
         </el-form-item>
@@ -121,6 +195,9 @@
           />
         </el-form-item>
 
+        </details>
+        <details class="notification-settings" :open="form.email_enabled">
+        <summary>邮件通知 <span>{{ form.email_enabled ? '已启用' : '未启用' }}</span></summary>
         <el-form-item label="启用邮件通知">
           <el-switch v-model="form.email_enabled" :disabled="!form.backup_enabled" />
         </el-form-item>
@@ -178,6 +255,7 @@
           <el-switch v-model="form.smtp_use_tls" :disabled="!form.backup_enabled || !form.email_enabled" />
         </el-form-item>
 
+        </details>
         <el-form-item label="立即备份">
           <el-button
             type="warning"
@@ -195,70 +273,17 @@
           </span>
         </el-form-item>
 
-        <el-divider content-position="left">备份恢复</el-divider>
+        </section>
 
-        <el-form-item label="选择备份文件">
-          <el-upload
-            accept=".zip"
-            :auto-upload="false"
-            :limit="1"
-            :on-change="(file) => { restoreFile = file }"
-            :on-remove="() => { restoreFile = null }"
-            :file-list="restoreFile ? [restoreFile] : []"
-          >
-            <el-button size="small">选择 .zip 文件</el-button>
-          </el-upload>
-        </el-form-item>
+        </div>
+        </div>
 
-        <el-form-item label="恢复数据库">
-          <el-button
-            type="danger"
-            :loading="restoreLoading"
-            :disabled="restoreLoading || backupLoading || !restoreFile"
-            @click="handleRestore"
-          >
-            恢复数据库
-          </el-button>
-        </el-form-item>
-
-        <el-form-item v-if="restoreResult">
-          <el-alert
-            type="success"
-            :closable="false"
-            show-icon
-            :title="`恢复成功：${restoreResult.filename}`"
-          />
-          <el-alert
-            type="warning"
-            :closable="false"
-            show-icon
-            title="需要重启应用才能使恢复的数据生效，请刷新页面或重启服务。"
-            style="margin-top: 8px"
-          />
-          <div v-if="restoreResult.pre_restore_backup" class="hint" style="margin-top: 8px">
-            恢复前自动备份：{{ restoreResult.pre_restore_backup.filename }}（{{ (restoreResult.pre_restore_backup.file_size / 1024).toFixed(1) }} KB）
-          </div>
-        </el-form-item>
-
-        <el-form-item v-if="restoreError">
-          <el-alert
-            type="error"
-            :closable="false"
-            show-icon
-            :title="restoreError"
-          />
-        </el-form-item>
-
-        <el-divider />
-
-        <el-form-item>
-          <el-button type="primary" @click="handleSubmit" :loading="submitting">
+        <div class="settings-footer">
+          <span>修改后统一保存；立即备份与恢复为独立操作。</span>
+          <el-button type="primary" @click="handleSubmit" :loading="submitting" :disabled="loading">
             保存设置
           </el-button>
-          <el-button @click="loadSettings">
-            重置
-          </el-button>
-        </el-form-item>
+        </div>
 
         <el-alert
           title="提示"
@@ -267,7 +292,7 @@
           show-icon
         >
           <p>设置更改后将在下一个调度周期生效。</p>
-          <p>已创建的账号不会自动更新监控间隔，需要手动编辑。</p>
+          <p>监控间隔会同步应用到已有账号；账号单独编辑后也会继续遵循下一次全局设置。</p>
         </el-alert>
       </el-form>
     </el-card>
@@ -511,11 +536,38 @@ onMounted(() => {
 
 <style scoped>
 .settings {
-  padding: 20px;
+  padding: 0;
+}
+
+.settings-header, .settings-actions, .settings-footer { display: flex; align-items: center; gap: 8px; }
+.settings-header { justify-content: space-between; flex-wrap: wrap; }
+.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.settings-column { display: grid; gap: 16px; min-width: 0; }
+.settings-section { padding: 16px; border: 1px solid #e9edf3; border-radius: 8px; min-width: 0; }
+.settings-section h3 { font-size: 14px; margin: 0 0 16px; color: #303133; }
+.settings-form :deep(.el-form-item) { margin-bottom: 14px; }
+.settings-form :deep(.el-form-item:last-child) { margin-bottom: 0; }
+.settings-form :deep(.el-form-item__content) { gap: 4px 8px; min-width: 0; }
+.settings-form :deep(.el-input-number) { width: 148px; }
+.settings-footer { margin-top: 16px; justify-content: space-between; flex-wrap: wrap; padding: 12px 0 0; border-top: 1px solid #edf0f5; }
+.settings-footer > span, .section-note { color: #909399; font-size: 12px; }
+.section-note { margin: -6px 0 14px; line-height: 18px; }
+.notification-settings { border-top: 1px solid #edf0f5; margin-bottom: 14px; }
+.notification-settings summary { cursor: pointer; padding: 10px 0; font-size: 13px; color: #606266; }
+.notification-settings summary span { margin-left: 8px; font-size: 12px; color: #909399; }
+@media (max-width: 1100px) {
+  .settings-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .settings-section { padding: 12px; }
+  .settings-form :deep(.el-form-item) { display: block; }
+  .settings-form :deep(.el-form-item__label) { width: auto !important; justify-content: flex-start; height: auto; line-height: 26px; }
+  .settings-form :deep(.el-form-item__content) { margin-left: 0 !important; }
+  .logo-upload { flex-wrap: wrap; }
 }
 
 .hint {
-  margin-left: 10px;
+  margin-left: 0;
   font-size: 12px;
   color: #909399;
 }
@@ -550,16 +602,16 @@ onMounted(() => {
 .logo-uploader-icon {
   font-size: 28px;
   color: #8c939d;
-  width: 200px;
-  height: 100px;
+  width: 140px;
+  height: 70px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .logo-preview {
-  width: 200px;
-  height: 100px;
+  width: 140px;
+  height: 70px;
   object-fit: contain;
   display: block;
 }

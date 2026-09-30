@@ -80,7 +80,7 @@ export function getDeviceLogs(id, params) {
 }
 
 /**
- * 获取可绑定节点（仅空闲/使用中且未被占用；编辑时传 exclude_device_id 放行自身）
+ * 获取可绑定节点（空闲/使用中节点均可由多台终端共享）
  * @param {Object} [params] - q, exclude_device_id
  */
 export function getBindableNodes(params) {

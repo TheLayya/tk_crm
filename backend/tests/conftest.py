@@ -11,7 +11,7 @@ from app.main import app
 from app.models.device import Device, DeviceLog  # noqa: F401  确保建表
 from app.models.proxy_node import ProxyNode
 from app.models.team import (
-    OperationLog, Role, RolePermission, User, UserRole,
+    Department, OperationLog, Role, RolePermission, User, UserRole,
 )
 
 import app.middleware.operation_log as op_log_module
@@ -60,6 +60,7 @@ def clean_tables(db):
     for model in (
         DeviceLog, Device, ProxyNode, OperationLog,
         UserRole, RolePermission, Role, User,
+        Department,
     ):
         db.query(model).delete()
     db.commit()

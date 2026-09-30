@@ -93,33 +93,7 @@ def _require_bindable_node(db: Session, node_id: int) -> ProxyNode:
     return node
 
 
-def _check_node_duplicate(
-    db: Session, node_id: int, exclude_device_id: Optional[int] = None
-) -> None:
-    """节点唯一性预检查：排除当前设备自身（编辑保留原节点时放行）。"""
-    query = db.query(Device).filter(
-        Device.node_id == node_id,
-        Device.is_deleted == False,
-    )
-    if exclude_device_id is not None:
-        query = query.filter(Device.id != exclude_device_id)
-    if query.first() is not None:
-        raise DeviceServiceError(409, "该节点已绑定其他设备")
 
-
-def _is_node_unique_error(exc: IntegrityError) -> bool:
-    """仅当完整性冲突来自节点唯一约束时才返回 True，避免误分类其他约束错误。
-
-    优先用结构化错误码（sqlite3 SQLITE_CONSTRAINT_UNIQUE），消息子串作跨驱动兜底。
-    """
-    orig = getattr(exc, "orig", None)
-    if orig is None:
-        return False
-    error_code = getattr(orig, "sqlite_errorcode", None)
-    if error_code is not None:
-        return error_code == 2067 and "node_id" in str(orig)  # SQLITE_CONSTRAINT_UNIQUE
-    message = str(orig)
-    return "node_id" in message or "uq_devices_node_id" in message
 
 
 def _recheck_node_bindable(db: Session, node_id: int) -> None:
@@ -242,7 +216,7 @@ def _create_device_locked(db: Session, data: dict, user: User) -> Device:
     node_id = data.get("node_id")
     if node_id is not None:
         _require_bindable_node(db, node_id)
-        _check_node_duplicate(db, node_id)
+
 
     device = Device(
         name=data["name"],
@@ -258,9 +232,7 @@ def _create_device_locked(db: Session, data: dict, user: User) -> Device:
         db.flush()
     except IntegrityError as e:
         db.rollback()
-        if _is_node_unique_error(e):
-            logger.warning("create_device: node %s unique conflict", node_id)
-            raise DeviceServiceError(409, "该节点已绑定其他设备")
+
         logger.exception("create_device: unexpected integrity error")
         raise
 
@@ -320,11 +292,7 @@ def update_device(db: Session, device: Device, data: dict, user: User) -> Tuple[
         new_node_id = data["node_id"]
         if new_node_id is not None and new_node_id != device.node_id:
             _require_bindable_node(db, new_node_id)
-            _check_node_duplicate(db, new_node_id, exclude_device_id=device.id)
-            for other in db.query(Device).filter(Device.id != device.id, Device.is_deleted == False).all():
-                occupied = set(other.node_ids or ([other.node_id] if other.node_id else []))
-                if new_node_id in occupied:
-                    raise DeviceServiceError(409, "该节点已绑定其他设备")
+
             target_node_id = new_node_id
 
     # 应用变更并记录差异
@@ -346,15 +314,13 @@ def update_device(db: Session, device: Device, data: dict, user: User) -> Tuple[
         try:
             if "node_id" in data:
                 from app.services.op_account_service import sync_device_account_nodes
-                sync_device_account_nodes(db, device)
+                sync_device_account_nodes(db, device, user.username)
             if target_node_id is not None:
                 _recheck_node_bindable(db, target_node_id)
             db.flush()
         except IntegrityError as e:
             db.rollback()
-            if _is_node_unique_error(e):
-                logger.warning("update_device %s: node unique conflict", device.id)
-                raise DeviceServiceError(409, "该节点已绑定其他设备")
+
             logger.exception("update_device %s: unexpected integrity error", device.id)
             raise
         _write_device_log(
@@ -387,7 +353,7 @@ def soft_delete_device(db: Session, device: Device, user: User) -> None:
     device.node_id = None
     device.node_ids = []
     from app.services.op_account_service import sync_device_account_nodes
-    sync_device_account_nodes(db, device)
+    sync_device_account_nodes(db, device, user.username)
     db.commit()
 
 
@@ -426,26 +392,91 @@ def parse_log_changes(raw: Optional[str]) -> Optional[dict]:
         return None
 
 
+def readable_device_log(db: Session, log: DeviceLog) -> dict:
+    from app.models.op_account import OpAccount
+
+    changes = parse_log_changes(log.changes) or {}
+    details = []
+
+    def reference(model, value):
+        if value is None:
+            return "未关联"
+        if isinstance(value, str) and value.isdecimal():
+            value = int(value)
+        if not isinstance(value, int):
+            return "历史对象无法识别"
+        item = db.get(model, value)
+        if item is None:
+            return "历史对象已不存在"
+        if model is ProxyNode:
+            return f"{item.ip}:{item.port}"
+        if model is OpAccount:
+            return item.account
+        return item.real_name or item.username
+
+    def relation_values(state, plural, singular):
+        value = state.get(plural, state.get(singular))
+        return value if isinstance(value, list) else ([] if value is None else [value])
+
+    def relation_details(label, model, old, new):
+        removed = [value for value in old if value not in new]
+        added = [value for value in new if value not in old]
+        if added:
+            details.append(f"关联{label}：" + "、".join(reference(model, value) for value in added))
+        if removed:
+            details.append(f"解除{label}：" + "、".join(reference(model, value) for value in removed))
+
+    name = (changes.get("name") or {}).get("new")
+    kind = (changes.get("device_type") or {}).get("new")
+    summary = {"CREATE": f"新增{'手机' if kind == 'phone' else '电脑' if kind == 'pc' else '终端'}{(' ' + str(name)) if name else ''}",
+               "UPDATE": "更新终端", "DELETE": "删除终端"}.get(log.action, "终端操作")
+    for field, change in changes.items():
+        if not isinstance(change, dict):
+            continue
+        old, new = change.get("old"), change.get("new")
+        if field == "relations":
+            if isinstance(old, dict) or isinstance(new, dict):
+                old_state = old if isinstance(old, dict) else {}
+                new_state = new if isinstance(new, dict) else {}
+                for label, model, plural, singular in (("节点", ProxyNode, "node_ids", "node_id"),
+                                                       ("账号", OpAccount, "account_ids", "account_id")):
+                    relation_details(label, model, relation_values(old_state, plural, singular),
+                                     relation_values(new_state, plural, singular))
+            elif "old_node_ids" in change or "new_node_ids" in change:
+                relation_details("节点", ProxyNode, change.get("old_node_ids") or [], change.get("new_node_ids") or [])
+            summary = "调整终端关联"
+            continue
+        if old == new or (not old and not new):
+            continue
+        if field == "node_id" and "node_ids" in changes:
+            continue
+        if field in ("node_id", "node_ids"):
+            relation_details("节点", ProxyNode, old if isinstance(old, list) else ([] if old is None else [old]),
+                             new if isinstance(new, list) else ([] if new is None else [new]))
+        elif field == "owner_id":
+            details.append("所属人：" + (reference(User, old) + " → " if old is not None else "") + reference(User, new))
+        elif field == "remark":
+            details.append("清空备注" if not new else "设置备注：" + str(new))
+        elif field in ("name", "device_type") and log.action != "CREATE":
+            label = "名称" if field == "name" else "类型"
+            labels = {"phone": "手机", "pc": "电脑"}
+            details.append(f"{label}：{labels.get(old, old) or '未设置'} → {labels.get(new, new) or '未设置'}")
+    return {"summary": summary, "details": details}
+
+
 def get_bindable_nodes(
     db: Session,
     q: Optional[str] = None,
     exclude_device_id: Optional[int] = None,
     limit: int = 100,
 ) -> List[dict]:
-    """可绑定节点：仅 idle/active，且排除已被其他未删除设备占用的节点。"""
+    """返回可共享绑定的空闲或使用中节点。"""
     query = db.query(ProxyNode).filter(ProxyNode.status.in_(BINDABLE_NODE_STATUSES))
 
     if q:
         query = query.filter(or_(ProxyNode.ip.contains(q)))
 
-    # 排除已占用节点（编辑设备时放行其自身已绑定的节点）
-    bound = db.query(Device.node_id).filter(
-        Device.node_id.isnot(None),
-        Device.is_deleted == False,
-    )
-    if exclude_device_id is not None:
-        bound = bound.filter(Device.id != exclude_device_id)
-    query = query.filter(~ProxyNode.id.in_(bound))
+
 
     nodes = query.order_by(ProxyNode.id.desc()).limit(limit).all()
     return [

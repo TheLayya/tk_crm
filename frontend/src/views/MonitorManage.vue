@@ -10,20 +10,8 @@
       <span>批量检查正在后台运行：{{ progressDialog.success + progressDialog.failed }}/{{ progressDialog.total }} 已完成</span>
       <el-button link type="primary" @click="progressDialog.visible = true">查看进度</el-button>
     </el-alert>
-    <!-- 移动端分段控制器 -->
-    <div v-if="isMobile" class="ios-segment-control">
-      <button
-        v-for="seg in mobileTabs"
-        :key="seg.key"
-        class="ios-segment-btn"
-        :class="{ 'is-active': activeTab === seg.key }"
-        @click="handleMobileTabChange(seg.key)"
-      >{{ seg.label }}</button>
-    </div>
-
-    <el-tabs v-if="!isMobile" v-model="activeTab" type="border-card" @tab-change="onTabChange">
       <!-- 项目管理 -->
-      <el-tab-pane label="项目管理" name="projects">
+      <el-dialog v-model="projectManagerVisible" title="项目管理" width="min(1200px, 92vw)" destroy-on-close @open="loadProjects">
         <el-card shadow="never" :body-style="{ padding: '0' }">
           <template #header>
             <div class="card-header">
@@ -84,15 +72,17 @@
             <div v-if="!projects.length" class="ios-empty">暂无项目</div>
           </div>
         </el-card>
-      </el-tab-pane>
+      </el-dialog>
 
       <!-- 账号列表 -->
-      <el-tab-pane label="账号列表" name="accounts">
+      <div v-if="!isMobile">
         <el-card shadow="never" :body-style="{ padding: '0' }">
           <template #header>
             <div class="card-header">
               <span>账号列表</span>
               <div class="header-actions">
+                <el-button @click="projectManagerVisible = true">项目管理</el-button>
+                <el-button v-if="authStore.hasPermission('monitor:proxy')" @click="proxyManagerVisible = true">代理管理</el-button>
                 <el-button type="primary" @click="handleCreateAccount">
                   <el-icon><Plus /></el-icon>添加账号
                 </el-button>
@@ -140,108 +130,60 @@
             <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
           </div>
 
-          <el-table v-if="!isMobile" :data="accounts" v-loading="accountLoading" @selection-change="handleSelectionChange">
-            <el-table-column type="selection" width="55" />
-            <el-table-column label="账号信息" min-width="300">
+          <el-table ref="accountTable" class="compact-account-table" v-if="!isMobile" :data="accounts" row-key="id" size="small" v-loading="accountLoading" @selection-change="handleSelectionChange" @expand-change="handleAccountExpansion">
+            <el-table-column type="selection" width="42" />
+            <el-table-column type="expand" width="36">
               <template #default="{ row }">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                  <el-avatar :src="row.avatar_url" :size="50" v-if="row.avatar_url">
-                    <template #error><el-icon><User /></el-icon></template>
-                  </el-avatar>
-                  <el-avatar :size="50" v-else><el-icon><User /></el-icon></el-avatar>
-                  <div style="flex: 1; min-width: 0;">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                      <span style="font-weight: 500; font-size: 14px;">@{{ row.username }}</span>
-                      <span v-if="row.nickname" style="color: #606266; font-size: 13px;">{{ row.nickname }}</span>
-                    </div>
-                    <div style="font-size: 12px; color: #909399; margin-bottom: 2px;">
-                      <span v-if="row.tiktok_id">ID: {{ row.tiktok_id }}</span>
-                      <span v-if="row.tiktok_id && row.sec_uid"> | </span>
-                      <span v-if="row.sec_uid">UID: {{ row.sec_uid.substring(0, 20) }}...</span>
-                    </div>
-                    <div v-if="row.bio" style="font-size: 12px; color: #909399; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                      <el-tooltip :content="row.bio" placement="top" v-if="row.bio.length > 40">
-                        <span>{{ row.bio.substring(0, 40) }}...</span>
-                      </el-tooltip>
-                      <span v-else>{{ row.bio }}</span>
-                    </div>
+                <div class="account-expanded" :style="{ width: accountTable?.$el?.clientWidth ? accountTable.$el.clientWidth + 'px' : '100%' }">
+                  <el-alert v-if="['not_found', 'failed', 'verification_required'].includes(row.latest_check_status)" :title="accountCheckNotice(row).title" :description="accountCheckNotice(row).description" :type="row.latest_check_status === 'not_found' ? 'error' : 'warning'" :closable="false" show-icon />
+                  <details v-if="row.latest_check_error"><summary>查看技术原因</summary>{{ row.latest_check_error }}</details>
+                  <InlineAccountVideos :account-id="row.id" />
+                  <div class="account-detail-grid">
+                  <section class="account-profile-panel">
+                  <div class="detail-panel-heading">账号资料</div>
+                  <el-descriptions :column="3" size="small" border>
+                    <el-descriptions-item label="昵称">{{ row.nickname || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="关注 / 点赞 / 视频">{{ formatNumber(row.following_count) }} / {{ formatNumber(row.like_count) }} / {{ row.video_count ?? 0 }}</el-descriptions-item>
+                    <el-descriptions-item label="地区 / 注册">{{ row.region || '-' }} / {{ formatShortDate(row.account_created_at) }}</el-descriptions-item>
+                    <el-descriptions-item label="TikTok ID">{{ row.tiktok_id || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="UID" :span="2">{{ row.sec_uid || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="简介" :span="3">{{ row.bio || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="代理">{{ row.use_proxy ? '启用' : '关闭' }}</el-descriptions-item>
+                    <el-descriptions-item label="视频监控">{{ row.enable_video_monitoring ? '启用' : '关闭' }}</el-descriptions-item>
+                    <el-descriptions-item label="视频数据更新">{{ formatDate(row.video_data_updated_at) }}</el-descriptions-item>
+                    <el-descriptions-item label="监控间隔">{{ row.monitor_interval / 60 }} 分钟</el-descriptions-item>
+                  </el-descriptions>
+                  </section>
+                  <section class="account-history-panel">
+                  <div class="detail-panel-heading">最近检查 <span>粉丝变化对比上次检查，非日增量</span></div>
+                  <el-table class="check-history-table" :data="recentTrend(row.id)" size="small" height="190" empty-text="暂无历史记录">
+                    <el-table-column label="检查时间" min-width="150"><template #default="{ row: point }"><time>{{ formatDate(point.checked_at) }}</time></template></el-table-column>
+                    <el-table-column label="粉丝" min-width="64" align="right"><template #default="{ row: point }">{{ formatNumber(point.follower_count) }}</template></el-table-column>
+                    <el-table-column label="粉丝变化" min-width="76" align="right"><template #default="{ row: point }"><span :class="deltaClass(point.followers_change)">{{ formatDelta(point.followers_change) }}</span></template></el-table-column>
+                    <el-table-column label="点赞" min-width="68" align="right"><template #default="{ row: point }">{{ formatNumber(point.like_count) }}</template></el-table-column>
+                    <el-table-column prop="video_count" label="视频" min-width="52" align="right" />
+                  </el-table>
+                  </section>
                   </div>
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="project_name" label="所属项目" width="120" />
-            <el-table-column label="粉丝数" min-width="200">
-              <template #default="{ row }">
-                <div class="stat-with-chart">
-                  <span class="stat-value">{{ formatNumber(row.follower_count) }}</span>
-                  <div :ref="el => setChartRef('follower_count_' + row.id, el)" class="mini-chart"></div>
-                </div>
-              </template>
+            <el-table-column label="账号" min-width="250">
+              <template #default="{ row }"><div class="compact-account" role="button" tabindex="0" :aria-expanded="expandedAccountIds.includes(row.id)" :aria-label="(expandedAccountIds.includes(row.id) ? '收起' : '展开') + '账号 ' + row.username + '详情'" :title="expandedAccountIds.includes(row.id) ? '点击收起账号详情' : '点击展开账号详情'" @click="toggleAccountExpansion(row)" @keydown.enter.prevent="toggleAccountExpansion(row)" @keydown.space.prevent="toggleAccountExpansion(row)"><el-avatar :src="row.avatar_url" :size="32"><el-icon><User /></el-icon></el-avatar><div><strong>@{{ row.username }}</strong><span>{{ row.nickname || row.username }}</span><div class="account-metrics" aria-label="账号数据"><span title="粉丝数">粉丝 {{ formatNumber(row.follower_count) }}</span><span title="关注数">关注 {{ formatNumber(row.following_count) }}</span><span title="点赞数">赞 {{ formatNumber(row.like_count) }}</span><span title="视频数">视频 {{ formatNumber(row.video_count) }}</span></div></div></div></template>
             </el-table-column>
-            <el-table-column label="关注数" min-width="200">
-              <template #default="{ row }">
-                <div class="stat-with-chart">
-                  <span class="stat-value">{{ formatNumber(row.following_count) }}</span>
-                  <div :ref="el => setChartRef('following_count_' + row.id, el)" class="mini-chart"></div>
-                </div>
-              </template>
+            <el-table-column label="粉丝数" min-width="110" align="right"><template #default="{ row }"><strong>{{ formatNumber(row.follower_count) }}</strong></template></el-table-column>
+            <el-table-column label="较上次变化" min-width="130" align="right"><template #default="{ row }"><span :class="deltaClass(followerDelta(row.id))">{{ formatDelta(followerDelta(row.id)) }}</span></template></el-table-column>
+            <el-table-column label="粉丝趋势" width="150"><template #default="{ row }"><div :ref="el => setChartRef('follower_count_' + row.id, el)" class="mini-chart"></div></template></el-table-column>
+            <el-table-column label="视频数量" width="95" align="right"><template #default="{ row }">{{ formatNumber(row.video_count) }}</template></el-table-column>
+            <el-table-column label="昨日更新（北京时间）" width="175" align="center"><template #default="{ row }"><el-tooltip content="依据已采集视频的发布时间判断，北京时间昨日 00:00–24:00；未发现不等于确认未发布。" placement="top"><el-tag :type="row.yesterday_video_count > 0 ? 'success' : 'info'" size="small">{{ yesterdayVideoLabel(row) }}</el-tag></el-tooltip></template></el-table-column>
+            <el-table-column label="昨日视频流量" min-width="190">
+              <template #default="{ row }"><el-tooltip content="北京时间昨日发布视频的最新累计播放量，按发布时间从新到旧逐条展示；不是昨日新增播放量。" placement="top"><span class="yesterday-video-plays">{{ yesterdayVideoPlaysLabel(row) }}</span></el-tooltip></template>
             </el-table-column>
-            <el-table-column label="点赞数" min-width="200">
-              <template #default="{ row }">
-                <div class="stat-with-chart">
-                  <span class="stat-value">{{ formatNumber(row.like_count) }}</span>
-                  <div :ref="el => setChartRef('like_count_' + row.id, el)" class="mini-chart"></div>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="视频数" min-width="160">
-              <template #default="{ row }">
-                <div class="stat-with-chart">
-                  <span class="stat-value">{{ row.video_count || 0 }}</span>
-                  <div :ref="el => setChartRef('video_count_' + row.id, el)" class="mini-chart-small"></div>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="国家/地区" width="100" align="center">
-              <template #default="{ row }">
-                <span v-if="row.region">{{ row.region }}</span>
-                <span v-else style="color: #909399;">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="注册时间" width="110" align="center">
-              <template #default="{ row }">
-                <span v-if="row.account_created_at" style="font-size: 12px;">{{ formatShortDate(row.account_created_at) }}</span>
-                <span v-else style="color: #909399;">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="代理" width="80" align="center">
-              <template #default="{ row }">
-                <el-tag v-if="row.use_proxy" type="success" size="small">启用</el-tag>
-                <el-tag v-else type="info" size="small">关闭</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="视频监控" width="90" align="center">
-              <template #default="{ row }">
-                <el-tag v-if="row.enable_video_monitoring" type="success" size="small">启用</el-tag>
-                <el-tag v-else type="info" size="small">关闭</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="is_active" label="状态" width="80">
-              <template #default="{ row }">
-                <el-tag :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? '激活' : '禁用' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="last_checked_at" label="最后检查" width="180">
-              <template #default="{ row }">{{ formatDate(row.last_checked_at) }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="250" fixed="right">
-              <template #default="{ row }">
-                <el-button link type="primary" @click="viewAccountDetail(row)">详情</el-button>
-                <el-button link type="primary" @click="handleCheckAccount(row)">立即检查</el-button>
-                <el-button link type="primary" @click="handleEditAccount(row)">编辑</el-button>
-                <el-button link type="danger" @click="handleDeleteAccount(row)">删除</el-button>
-              </template>
-            </el-table-column>
+            <el-table-column prop="project_name" label="项目" min-width="110" show-overflow-tooltip />
+            <el-table-column label="最近检查" width="125"><template #default="{ row }"><el-tooltip :content="row.latest_check_error || '最近账号检查结果；数据在检查失败时保留历史值。'"><el-tag :type="row.latest_check_status === 'not_found' ? 'danger' : ['failed', 'verification_required'].includes(row.latest_check_status) ? 'warning' : row.latest_check_status === 'success' ? 'success' : 'info'" size="small">{{ row.latest_check_status === 'not_found' ? '账号不存在' : row.latest_check_status === 'verification_required' ? '验证拦截' : row.latest_check_status === 'failed' ? '检查失败' : row.latest_check_status === 'success' ? '检查成功' : '尚未检查' }}</el-tag></el-tooltip></template></el-table-column>
+            <el-table-column label="监控开关" width="85"><template #default="{ row }"><el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '启用' : '禁用' }}</el-tag></template></el-table-column>
+            <el-table-column label="最后检查" width="165"><template #default="{ row }">{{ formatDate(row.last_checked_at) }}</template></el-table-column>
+            <el-table-column label="操作" width="175" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="handleCheckAccount(row)">检查</el-button><el-button link type="primary" @click="handleEditAccount(row)">编辑</el-button><el-button link type="danger" @click="handleDeleteAccount(row)">删除</el-button></template></el-table-column>
           </el-table>
 
           <!-- 移动端 iOS 卡片列表 -->
@@ -296,10 +238,10 @@
             />
           </div>
         </el-card>
-      </el-tab-pane>
+      </div>
 
       <!-- 代理管理 -->
-      <el-tab-pane v-if="authStore.hasPermission('monitor:proxy')" label="代理管理" name="proxies">
+      <el-dialog v-if="authStore.hasPermission('monitor:proxy')" v-model="proxyManagerVisible" title="代理管理" width="min(1200px, 92vw)" destroy-on-close @open="loadProxies">
         <el-card shadow="never" :body-style="{ padding: '0' }">
           <template #header>
             <div class="card-header">
@@ -416,52 +358,14 @@
           </div>
 
         </el-card>
-      </el-tab-pane>
-    </el-tabs>
+      </el-dialog>
 
-    <!-- ===== 移动端内容区 ===== -->
-    <!-- 移动端项目列表 -->
-    <div v-if="isMobile && activeTab === 'projects'">
-      <div class="mobile-section-header">
-        <span>项目管理</span>
-        <el-button type="primary" size="small" @click="handleCreateProject">
-          <el-icon><Plus /></el-icon>新建
-        </el-button>
-      </div>
-      <div class="ios-card-list" v-loading="projectLoading">
-        <div v-for="row in projects" :key="row.id" class="ios-card">
-          <div class="ios-card-title">{{ row.name }}</div>
-          <div class="ios-card-row" v-if="row.description">
-            <span class="ios-card-row-label">描述</span>
-            <span class="ios-card-row-value">{{ row.description }}</span>
-          </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">账号数量</span>
-            <span class="ios-card-row-value">{{ row.account_count ?? 0 }}</span>
-          </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">创建人</span>
-            <span class="ios-card-row-value">{{ row.created_by || '-' }}</span>
-          </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">创建时间</span>
-            <span class="ios-card-row-value">{{ formatDate(row.created_at) }}</span>
-          </div>
-          <div class="ios-card-actions">
-            <el-button size="small" @click="handleEditProject(row)">编辑</el-button>
-            <el-button size="small" type="primary" @click="viewProjectAccounts(row)">查看账号</el-button>
-            <el-button size="small" type="warning" @click="handleProjectMembers(row)">协作成员</el-button>
-            <el-button size="small" type="danger" @click="handleDeleteProject(row)">删除</el-button>
-          </div>
-        </div>
-        <div v-if="!projects.length" class="ios-empty">暂无项目</div>
-      </div>
-    </div>
 
     <!-- 移动端账号列表 -->
-    <div v-if="isMobile && activeTab === 'accounts'">
+    <div v-if="isMobile">
       <div class="mobile-section-header">
         <span>账号列表</span>
+        <div class="mobile-manager-actions"><el-button size="small" @click="projectManagerVisible = true">项目管理</el-button><el-button v-if="authStore.hasPermission('monitor:proxy')" size="small" @click="proxyManagerVisible = true">代理管理</el-button></div>
         <el-button type="primary" size="small" @click="handleCreateAccount">
           <el-icon><Plus /></el-icon>添加
         </el-button>
@@ -480,23 +384,23 @@
             <el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '激活' : '禁用' }}</el-tag>
           </div>
           <div class="ios-card-row">
-            <span class="ios-card-row-label">粉丝数</span>
-            <span class="ios-card-row-value">{{ formatNumber(row.follower_count) }}</span>
+            <span class="ios-card-row-label">粉丝 / 较上次</span>
+            <span class="ios-card-row-value">{{ formatNumber(row.follower_count) }} <span :class="deltaClass(followerDelta(row.id))">{{ formatDelta(followerDelta(row.id)) }}</span></span>
           </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">关注数</span>
-            <span class="ios-card-row-value">{{ formatNumber(row.following_count) }}</span>
-          </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">点赞数</span>
-            <span class="ios-card-row-value">{{ formatNumber(row.like_count) }}</span>
-          </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">所属项目</span>
-            <span class="ios-card-row-value">{{ row.project_name || '-' }}</span>
+          <div class="ios-card-row"><span class="ios-card-row-label">视频数量</span><span class="ios-card-row-value">{{ formatNumber(row.video_count) }}</span></div>
+          <div class="ios-card-row"><span class="ios-card-row-label">昨日更新（北京时间）</span><span class="ios-card-row-value">{{ yesterdayVideoLabel(row) }}</span></div>
+          <div class="ios-card-row"><span class="ios-card-row-label">昨日视频流量</span><span class="ios-card-row-value">{{ yesterdayVideoPlaysLabel(row) }}</span></div>
+          <el-alert v-if="['not_found', 'failed', 'verification_required'].includes(row.latest_check_status)" :title="accountCheckNotice(row).title" :description="accountCheckNotice(row).description" :type="row.latest_check_status === 'not_found' ? 'error' : 'warning'" :closable="false" show-icon />
+          <div v-if="expandedMobileAccounts.includes(row.id)" class="mobile-account-details">
+            <div>项目：{{ row.project_name || '-' }}</div>
+            <div>关注 {{ formatNumber(row.following_count) }} · 点赞 {{ formatNumber(row.like_count) }} · 视频 {{ row.video_count ?? 0 }}</div>
+            <div>最后检查：{{ formatDate(row.last_checked_at) }}</div>
+            <div>简介：{{ row.bio || '-' }}</div>
+            <div v-for="point in recentTrend(row.id)" :key="point.checked_at">{{ formatDate(point.checked_at) }} · 粉丝 {{ formatNumber(point.follower_count) }} <span :class="deltaClass(point.followers_change)">{{ formatDelta(point.followers_change) }}</span></div>
+            <InlineAccountVideos :account-id="row.id" />
           </div>
           <div class="ios-card-actions">
-            <el-button size="small" type="primary" @click="viewAccountDetail(row)">详情</el-button>
+            <el-button size="small" type="primary" @click="toggleMobileAccount(row.id)">{{ expandedMobileAccounts.includes(row.id) ? '收起' : '展开详情' }}</el-button>
             <el-button size="small" @click="handleCheckAccount(row)">立即检查</el-button>
             <el-button size="small" @click="handleEditAccount(row)">编辑</el-button>
             <el-button size="small" type="danger" @click="handleDeleteAccount(row)">删除</el-button>
@@ -507,54 +411,6 @@
     </div>
 
     <!-- 移动端代理列表 -->
-    <div v-if="isMobile && activeTab === 'proxies' && authStore.hasPermission('monitor:proxy')">
-      <div class="mobile-section-header">
-        <span>代理管理</span>
-        <el-button type="primary" size="small" @click="handleCreateProxy">
-          <el-icon><Plus /></el-icon>添加
-        </el-button>
-      </div>
-      <div class="ios-card-list" v-loading="proxyLoading">
-        <div v-for="row in proxies" :key="row.id" class="ios-card">
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">类型</span>
-            <span class="ios-card-row-value">
-              <el-tag size="small">{{ row.proxy_type?.toUpperCase() }}</el-tag>
-            </span>
-          </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">地址</span>
-            <span class="ios-card-row-value">{{ row.host }}:{{ row.port }}</span>
-          </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">用户名</span>
-            <span class="ios-card-row-value">{{ row.username || '-' }}</span>
-          </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">状态</span>
-            <span class="ios-card-row-value">
-              <el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '启用' : '禁用' }}</el-tag>
-            </span>
-          </div>
-          <div class="ios-card-row">
-            <span class="ios-card-row-label">测试结果</span>
-            <span class="ios-card-row-value">
-              <el-tag v-if="row.last_test_result" :type="row.last_test_result === 'success' ? 'success' : 'danger'" size="small">
-                {{ row.last_test_result === 'success' ? '成功' : '失败' }}
-              </el-tag>
-              <span v-else>-</span>
-            </span>
-          </div>
-          <div class="ios-card-actions">
-            <el-button size="small" type="primary" @click="handleTestProxy(row)" :loading="testingIds.includes(row.id)">测试</el-button>
-            <el-button size="small" @click="handleEditProxy(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDeleteProxy(row)">删除</el-button>
-          </div>
-        </div>
-        <div v-if="!proxies.length" class="ios-empty">暂无代理</div>
-      </div>
-    </div>
-
     <!-- ===== 项目弹窗 ===== -->
     <el-dialog v-model="projectDialogVisible" :title="projectDialogTitle" width="500px">
       <el-form :model="projectForm" :rules="projectRules" ref="projectFormRef" label-width="80px">
@@ -721,6 +577,7 @@ import * as echarts from 'echarts'
 import { getProjects, createProject, updateProject, deleteProject, getProjectMembers, setProjectMembers } from '@/api/projects'
 import { getAccounts, deleteAccount, triggerCheck, batchAction } from '@/api/accounts'
 import { getAccountTrend } from '@/api/history'
+import InlineAccountVideos from '@/components/InlineAccountVideos.vue'
 import { getProxies, createProxy, updateProxy, deleteProxy, testProxy, batchCreateProxies } from '@/api/proxies'
 import { getMembers } from '@/api/team'
 import { useAuthStore } from '@/stores/auth'
@@ -729,38 +586,29 @@ import ImportDialog from '@/components/ImportDialog.vue'
 import ExportDialog from '@/components/ExportDialog.vue'
 import AccountDialog from '@/components/AccountDialog.vue'
 
+const accountCheckNotice = (row) => {
+  if (row.latest_check_status === 'not_found') return { title: '账号已不可访问：TikTok 提示找不到此账号', description: '可能已改名、删除或被平台移除。下方粉丝和视频仅为历史记录，不代表当前数据。' }
+  if (row.latest_check_status === 'verification_required') return { title: '检查未完成：TikTok 要求验证', description: '系统暂时无法确认账号是否仍可访问。下方显示历史数据，请打开 TikTok 主页核实或稍后重新检查。' }
+  return { title: '检查未完成：未获取到有效账号数据', description: '当前账号状态尚未确认，不能据此判断正常或不存在。下方显示历史数据，请打开 TikTok 主页核实或重新检查。' }
+}
+
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 
-const activeTab = ref('projects')
+const projectManagerVisible = ref(false)
+const proxyManagerVisible = ref(false)
 
 // ===== 响应式断点 =====
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
 const handleResize = () => { windowWidth.value = window.innerWidth }
 
-const mobileTabs = computed(() => {
-  const tabs = [
-    { key: 'projects', label: '项目' },
-    { key: 'accounts', label: '账号' }
-  ]
-  if (authStore.hasPermission('monitor:proxy')) {
-    tabs.push({ key: 'proxies', label: '代理' })
-  }
-  return tabs
-})
-
-const handleMobileTabChange = (tab) => {
-  activeTab.value = tab
-  onTabChange(tab)
-}
-
 // ===== 工具函数 =====
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
   const s = dateStr.endsWith('Z') ? dateStr : dateStr + 'Z'
-  return new Date(s).toLocaleString('zh-CN')
+  return new Date(s).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
 }
 const formatShortDate = (dateStr) => {
   if (!dateStr) return '-'
@@ -839,7 +687,7 @@ const handleDeleteProject = async (row) => {
 }
 const viewProjectAccounts = (row) => {
   accountFilters.value.project_id = row.id
-  activeTab.value = 'accounts'
+  projectManagerVisible.value = false
   loadAccounts()
 }
 
@@ -892,7 +740,7 @@ const progressDialog = ref({
 })
 const batchCheckRunning = ref(false)
 
-const loadAccounts = async (renderCharts = true) => {
+const loadAccounts = async () => {
   accountLoading.value = true
   try {
     const params = {
@@ -905,10 +753,8 @@ const loadAccounts = async (renderCharts = true) => {
     const data = await getAccounts(params)
     accounts.value = data.items || data
     accountPagination.value.total = data.total ?? data.length
-    if (renderCharts) {
-      await nextTick()
-      renderAllCharts()
-    }
+    await nextTick()
+    renderAllCharts()
   } catch (e) {
     console.error(e)
   } finally {
@@ -1029,27 +875,64 @@ const batchCheck = async () => {
 }
 
 // ===== 图表 =====
+const yesterdayVideoPlaysLabel = (row) => {
+  if (!Object.hasOwn(row, 'yesterday_video_plays')) return '接口待更新'
+  if (row.yesterday_video_plays == null) return '暂无可靠数据'
+  return row.yesterday_video_plays.length ? row.yesterday_video_plays.join(' / ') : '—'
+}
+const yesterdayVideoLabel = (row) => {
+  if (!Object.hasOwn(row, 'yesterday_video_count')) return '接口待更新'
+  if (row.yesterday_video_count != null) return row.yesterday_video_count > 0 ? '已更新 ' + row.yesterday_video_count + ' 条' : '未发现更新'
+  if (!row.enable_video_monitoring) return '视频监控未启用'
+  return row.video_data_updated_at ? '视频数据待刷新' : '尚无视频记录'
+}
+const accountTable = ref(null)
+const expandedAccountIds = ref([])
+const handleAccountExpansion = (_row, expandedRows) => { expandedAccountIds.value = expandedRows.map(row => row.id) }
+const toggleAccountExpansion = (row) => accountTable.value?.toggleRowExpansion(row)
+const accountTrends = ref({})
+const expandedMobileAccounts = ref([])
+const recentTrend = (accountId) => (accountTrends.value[accountId]?.data_points || [])
+  .map((point, index) => ({ ...point, followers_change: index === 0 ? null : point.followers_change }))
+  .slice(-10).reverse()
+const followerDelta = (accountId) => {
+  const points = accountTrends.value[accountId]?.data_points || []
+  return points.length > 1 ? points[points.length - 1].follower_count - points[points.length - 2].follower_count : null
+}
+const formatDelta = (delta) => delta == null ? '暂无对比' : (delta > 0 ? '+' : '') + delta.toLocaleString()
+const deltaClass = (delta) => delta > 0 ? 'delta-up' : delta < 0 ? 'delta-down' : 'delta-neutral'
+const toggleMobileAccount = (accountId) => {
+  expandedMobileAccounts.value = expandedMobileAccounts.value.includes(accountId)
+    ? expandedMobileAccounts.value.filter(id => id !== accountId)
+    : [...expandedMobileAccounts.value, accountId]
+}
 const chartRefs = ref({})
 const chartInstances = ref({})
-const setChartRef = (id, el) => { if (el) chartRefs.value[id] = el }
+const setChartRef = (id, el) => {
+  if (chartRefs.value[id] === el) return
+  chartInstances.value[id]?.dispose()
+  delete chartInstances.value[id]
+  if (el) chartRefs.value[id] = el
+  else delete chartRefs.value[id]
+}
+let trendGeneration = 0
 const renderAllCharts = async () => {
-  for (const account of accounts.value) {
-    // 每个账号只请求一次 trend 数据，4个指标复用
+  const generation = ++trendGeneration
+  accountTrends.value = {}
+  Object.values(chartInstances.value).forEach(chart => chart.dispose())
+  chartInstances.value = {}
+  for (const account of accounts.value.slice()) {
     let trendData = null
     try {
       trendData = await getAccountTrend(account.id)
-    } catch (e) { continue }
-    if (!trendData?.data_points?.length) continue
-    for (const metric of ['follower_count', 'following_count', 'like_count', 'video_count']) {
-      renderMiniChartWithData(account, metric, trendData)
+    } catch (error) {
+      if (generation !== trendGeneration) return
+      continue
     }
+    if (generation !== trendGeneration) return
+    accountTrends.value[account.id] = trendData
+    renderMiniChartWithData(account, 'follower_count', trendData)
   }
-}
-const renderMiniChart = async (account, metric) => {
-  try {
-    const data = await getAccountTrend(account.id)
-    renderMiniChartWithData(account, metric, data)
-  } catch (e) { console.error(e) }
 }
 const renderMiniChartWithData = (account, metric, data) => {
   const key = `${metric}_${account.id}`
@@ -1206,63 +1089,30 @@ const handleBatchDeleteProxy = async () => {
   } catch (e) { if (e !== 'cancel') console.error(e) }
 }
 
-// ===== Tab 切换时懒加载 =====
-const onTabChange = (tab) => {
-  if (tab === 'accounts') loadAccounts()
-  else if (tab === 'proxies') loadProxies()
-}
-
 onMounted(() => {
   window.addEventListener('resize', handleResize)
   // 支持从其他页面跳转带 tab 参数
-  if (route.query.tab) activeTab.value = route.query.tab
+  if (route.query.tab === 'projects') projectManagerVisible.value = true
+  else if (route.query.tab === 'proxies' && authStore.hasPermission('monitor:proxy')) proxyManagerVisible.value = true
   if (route.query.project_id) accountFilters.value.project_id = parseInt(route.query.project_id)
   loadProjects()
-  if (activeTab.value === 'accounts') loadAccounts()
-  else if (activeTab.value === 'proxies') loadProxies()
+  loadAccounts()
 })
 
 onUnmounted(() => {
+  trendGeneration++
   window.removeEventListener('resize', handleResize)
+  Object.values(chartInstances.value).forEach(chart => chart.dispose())
 })
 </script>
 
 <style scoped>
+.mobile-manager-actions { display: flex; gap: 4px; margin-left: auto; }
+.monitor-manage :deep(.el-dialog__body) { max-height: 72vh; overflow: auto; }
 .monitor-manage {
   padding: 20px;
 }
 
-/* ===== 移动端分段控制器 ===== */
-.ios-segment-control {
-  display: flex;
-  background: rgba(118, 118, 128, 0.12);
-  border-radius: 9px;
-  padding: 2px;
-  margin: 12px 16px 8px;
-}
-
-.ios-segment-btn {
-  flex: 1;
-  border: none;
-  background: transparent;
-  border-radius: 7px;
-  padding: 6px 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: #3C3C43;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
-  cursor: pointer;
-  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
-  min-height: 32px;
-}
-
-.ios-segment-btn.is-active {
-  background: #FFFFFF;
-  color: #000000;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
-}
-
-/* ===== 移动端区块标题 ===== */
 .mobile-section-header {
   display: flex;
   justify-content: space-between;
@@ -1383,7 +1233,7 @@ onUnmounted(() => {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-/* 移动端隐藏 el-tabs */
+/* 移动端布局 */
 @media (max-width: 768px) {
   .monitor-manage {
     padding: 0;
@@ -1391,11 +1241,14 @@ onUnmounted(() => {
 }
 .card-header {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: center;
 }
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 .filters {
@@ -1418,18 +1271,45 @@ onUnmounted(() => {
   justify-content: flex-end;
   padding: 0 20px 16px;
 }
-.stat-with-chart {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.compact-account { display: flex; align-items: center; gap: 8px; cursor: pointer; border-radius: 4px; }
+.compact-account:hover strong { color: var(--el-color-primary); }
+.compact-account:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.compact-account > div { min-width: 0; }
+.compact-account strong, .compact-account span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compact-account span { font-size: 12px; color: #909399; }
+.compact-account .el-avatar { flex-shrink: 0; }
+.compact-account .account-metrics { display: flex; flex-wrap: wrap; column-gap: 8px; color: #909399; font-size: 11px; line-height: 16px; }
+.compact-account .account-metrics span { display: inline; overflow: visible; text-overflow: clip; white-space: nowrap; font-size: 11px; }
+.compact-account-table :deep(.el-table__cell) { padding: 5px 0; }
+.account-expanded { box-sizing: border-box; max-width: 100%; padding: 10px 16px 12px; background: #f8fafc; }
+.account-expanded :deep(.el-descriptions__content) { overflow-wrap: anywhere; }
+.account-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 0.42fr); gap: 12px; align-items: start; margin-top: 6px; }
+.account-profile-panel, .account-history-panel { min-width: 0; overflow: hidden; }
+.detail-panel-heading { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; font-weight: 600; color: #606266; }
+.detail-panel-heading span { font-weight: 400; font-size: 11px; color: #909399; }
+.account-profile-panel :deep(.el-descriptions__cell) { padding: 4px 8px !important; font-size: 12px; line-height: 20px; }
+.account-profile-panel :deep(.el-descriptions__label) { white-space: nowrap; }
+.account-profile-panel :deep(.el-descriptions__body) { height: 190px; overflow: auto; }
+.account-profile-panel :deep(.el-descriptions__table) { width: 100%; height: 190px; table-layout: fixed; }
+.check-history-table { width: 100%; max-width: 100%; font-variant-numeric: tabular-nums; }
+.check-history-table :deep(.el-table__cell) { padding: 2px 0; }
+.check-history-table :deep(.cell) { padding: 0 8px; line-height: 22px; }
+.check-history-table time { white-space: nowrap; }
+@media (max-width: 1200px) {
+  .account-detail-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
 }
+.delta-up { color: #169b62; font-weight: 600; }
+.delta-down { color: #e5484d; font-weight: 600; }
+.delta-neutral { color: #909399; }
+.yesterday-video-plays { white-space: normal; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mobile-account-details { padding: 0 16px 12px; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
 .stat-value {
   font-size: 14px;
   font-weight: 500;
 }
 .mini-chart {
-  width: 170px;
-  height: 40px;
+  width: 130px;
+  height: 28px;
 }
 .mini-chart-small {
   width: 130px;

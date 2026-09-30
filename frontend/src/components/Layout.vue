@@ -33,31 +33,13 @@
           <el-icon><Connection /></el-icon>
           <template #title><span>节点管理</span></template>
         </el-menu-item>
-        <el-sub-menu
+        <el-menu-item
           v-if="authStore.hasPermission('team:dept:view') || authStore.hasPermission('team:member:view') || authStore.hasPermission('team:role:view') || authStore.hasPermission('team:log:view')"
-          index="/team"
+          index="/team/manage"
         >
-          <template #title>
-            <el-icon><UserFilled /></el-icon>
-            <span>团队管理</span>
-          </template>
-          <el-menu-item v-if="authStore.hasPermission('team:dept:view')" index="/team/dept">
-            <el-icon><OfficeBuilding /></el-icon>
-            <template #title><span>部门管理</span></template>
-          </el-menu-item>
-          <el-menu-item v-if="authStore.hasPermission('team:member:view')" index="/team/member">
-            <el-icon><User /></el-icon>
-            <template #title><span>成员管理</span></template>
-          </el-menu-item>
-          <el-menu-item v-if="authStore.hasPermission('team:role:view')" index="/team/role">
-            <el-icon><Key /></el-icon>
-            <template #title><span>角色管理</span></template>
-          </el-menu-item>
-          <el-menu-item v-if="authStore.hasPermission('team:log:view')" index="/team/log">
-            <el-icon><Document /></el-icon>
-            <template #title><span>操作日志</span></template>
-          </el-menu-item>
-        </el-sub-menu>
+          <el-icon><UserFilled /></el-icon>
+          <template #title><span>团队管理</span></template>
+        </el-menu-item>
         <el-menu-item v-if="authStore.hasPermission('settings:view')" index="/settings">
           <el-icon><Setting /></el-icon>
           <template #title><span>系统设置</span></template>
@@ -92,38 +74,12 @@
 
       <el-main class="main-content">
         <Breadcrumb :isMobile="isMobile" />
-        <!-- 移动端团队子导航 -->
-        <div v-if="isMobile && route.path.startsWith('/team')" class="team-sub-nav">
-          <button
-            v-if="authStore.hasPermission('team:member:view')"
-            class="team-sub-btn"
-            :class="{ 'is-active': route.path === '/team/member' }"
-            @click="router.push('/team/member')"
-          >成员</button>
-          <button
-            v-if="authStore.hasPermission('team:dept:view')"
-            class="team-sub-btn"
-            :class="{ 'is-active': route.path === '/team/dept' }"
-            @click="router.push('/team/dept')"
-          >部门</button>
-          <button
-            v-if="authStore.hasPermission('team:role:view')"
-            class="team-sub-btn"
-            :class="{ 'is-active': route.path === '/team/role' }"
-            @click="router.push('/team/role')"
-          >角色</button>
-          <button
-            v-if="authStore.hasPermission('team:log:view')"
-            class="team-sub-btn"
-            :class="{ 'is-active': route.path === '/team/log' }"
-            @click="router.push('/team/log')"
-          >日志</button>
-        </div>
         <router-view />
       </el-main>
     </el-container>
 
     <!-- 移动端底部 Tab Bar -->
+    <FloatingTableScrollbar />
     <MobileTabBar v-if="isMobile" />
   </el-container>
 </template>
@@ -131,11 +87,12 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Setting, Briefcase, UserFilled, User, Key, Document, OfficeBuilding, SwitchButton, Connection, Iphone } from '@element-plus/icons-vue'
+import { Monitor, Setting, Briefcase, UserFilled, SwitchButton, Connection, Iphone } from '@element-plus/icons-vue'
 import { getSettings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import Breadcrumb from '@/components/Breadcrumb.vue'
 import MobileTabBar from '@/components/MobileTabBar.vue'
+import FloatingTableScrollbar from '@/components/FloatingTableScrollbar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -178,7 +135,7 @@ const activeMenu = computed(() => {
   if (path.startsWith('/op-accounts')) return '/op-accounts'
   if (path.startsWith('/proxy-nodes')) return '/proxy-nodes'
   if (path.startsWith('/settings')) return '/settings'
-  if (path.startsWith('/team')) return path
+  if (path.startsWith('/team')) return '/team/manage'
   return path
 })
 
@@ -414,33 +371,4 @@ onMounted(() => {
   }
 }
 
-/* ===== 移动端团队子导航 ===== */
-.team-sub-nav {
-  display: flex;
-  background: rgba(118, 118, 128, 0.12);
-  border-radius: 9px;
-  padding: 2px;
-  margin: 0 16px 12px;
-}
-
-.team-sub-btn {
-  flex: 1;
-  border: none;
-  background: transparent;
-  border-radius: 7px;
-  padding: 6px 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: #3C3C43;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
-  cursor: pointer;
-  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
-  min-height: 32px;
-}
-
-.team-sub-btn.is-active {
-  background: #FFFFFF;
-  color: #000000;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
-}
 </style>

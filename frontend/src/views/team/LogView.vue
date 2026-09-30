@@ -213,12 +213,14 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getLoginLogs, getOperationLogs } from '@/api/team'
 
+const props = defineProps({ username: { type: String, default: '' }, initialTab: { type: String, default: 'login' } })
+
 // 响应式断点
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
 const onResize = () => { windowWidth.value = window.innerWidth }
 
-const activeTab = ref('login')
+const activeTab = ref(props.initialTab)
 
 // Login logs
 const loginLogs = ref([])
@@ -226,7 +228,7 @@ const loginLoading = ref(false)
 const loginTotal = ref(0)
 const loginPage = ref(1)
 const loginPageSize = ref(20)
-const loginFilters = ref({ username: '', dateRange: null, result: '' })
+const loginFilters = ref({ username: props.username, dateRange: null, result: '' })
 
 // Operation logs
 const opLogs = ref([])
@@ -234,7 +236,7 @@ const opLoading = ref(false)
 const opTotal = ref(0)
 const opPage = ref(1)
 const opPageSize = ref(20)
-const opFilters = ref({ username: '', dateRange: null, module: '', action: '' })
+const opFilters = ref({ username: props.username, dateRange: null, module: '', action: '' })
 
 const formatTime = (t) => {
   if (!t) return ''
@@ -288,7 +290,7 @@ const handleTabChange = (tab) => {
 
 onMounted(() => {
   window.addEventListener('resize', onResize)
-  loadLoginLogs()
+  handleTabChange(activeTab.value)
 })
 
 onUnmounted(() => {

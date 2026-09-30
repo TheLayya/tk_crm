@@ -3,6 +3,8 @@
  */
 import request from './request'
 
+export const getProxyNodeLogs = (id, params) => request.get(`/proxy-nodes/${id}/logs`, { params })
+
 /**
  * 序列化数组参数为多个同名查询参数
  * axios 默认会将数组序列化为 key[]=val 格式，

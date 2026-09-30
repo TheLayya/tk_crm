@@ -72,5 +72,6 @@ async def collect_account(db: Session, account: OpAccount, proxy) -> bool:
         logger.error(f"collect_account failed for account {account.id}: {e}")
         account.collect_status = "failed"
         account.collect_error = str(e)[:500]
+        account.updated_at = datetime.utcnow()
         db.commit()
         return False

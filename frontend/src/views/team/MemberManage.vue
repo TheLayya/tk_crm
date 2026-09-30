@@ -3,7 +3,8 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>成员管理</span>
+          <span>团队成员 <small class="member-count">{{ total }} 人</small></span>
+          <slot name="management-actions" />
           <el-button v-permission="'team:member:create'" type="primary" :icon="Plus" @click="openCreate">
             新增成员
           </el-button>
@@ -45,7 +46,9 @@
       <el-table v-if="!isMobile" :data="members" v-loading="loading" stripe>
         <el-table-column prop="username" label="用户名" />
         <el-table-column prop="real_name" label="姓名" />
-        <el-table-column prop="department_name" label="部门" />
+        <el-table-column label="部门">
+          <template #default="{ row }">{{ row.department_name || '未分配' }}</template>
+        </el-table-column>
         <el-table-column label="角色">
           <template #default="{ row }">
             <el-tag v-for="r in row.roles" :key="r.id" size="small" style="margin-right:4px">{{ r.name }}</el-tag>
@@ -56,9 +59,10 @@
             <el-tag :type="row.is_active ? 'success' : 'danger'">{{ row.is_active ? '启用' : '禁用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="260">
+        <el-table-column label="操作" width="350" fixed="right">
           <template #default="{ row }">
             <el-button v-permission="'team:member:edit'" link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button v-permission="'team:log:view'" link type="primary" size="small" @click="emit('view-logs', row.username)">操作记录</el-button>
             <el-button v-permission="'team:member:edit'" link :type="row.is_active ? 'warning' : 'success'" size="small" @click="toggleActive(row)">
               {{ row.is_active ? '禁用' : '启用' }}
             </el-button>
@@ -86,9 +90,9 @@
             <span class="ios-card-row-label">姓名</span>
             <span class="ios-card-row-value">{{ row.real_name }}</span>
           </div>
-          <div v-if="row.department_name" class="ios-card-row">
+          <div class="ios-card-row">
             <span class="ios-card-row-label">部门</span>
-            <span class="ios-card-row-value">{{ row.department_name }}</span>
+            <span class="ios-card-row-value">{{ row.department_name || '未分配' }}</span>
           </div>
           <div v-if="row.roles?.length" class="ios-card-row">
             <span class="ios-card-row-label">角色</span>
@@ -98,6 +102,7 @@
           </div>
           <div class="ios-card-actions ios-card-actions-wrap">
             <el-button v-permission="'team:member:edit'" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button v-permission="'team:log:view'" size="small" @click="emit('view-logs', row.username)">操作记录</el-button>
             <el-button v-permission="'team:member:edit'" size="small" :type="row.is_active ? 'warning' : 'success'" @click="toggleActive(row)">
               {{ row.is_active ? '禁用' : '启用' }}
             </el-button>
@@ -172,6 +177,10 @@ import { ElMessage } from 'element-plus'
 import { Plus, Lock, Unlock, Delete } from '@element-plus/icons-vue'
 import { getMembers, createMember, updateMember, deleteMember, resetMemberPassword, getRoles, getDeptTree, unlockMember } from '@/api/team'
 import { verifyPassword } from '@/api/auth'
+import { useAuthStore } from '@/stores/auth'
+
+const emit = defineEmits(['view-logs'])
+const authStore = useAuthStore()
 
 // 响应式断点
 const windowWidth = ref(window.innerWidth)
@@ -340,12 +349,17 @@ const handleConfirmAction = async () => {
   }
 }
 
-onMounted(async () => {
+const refresh = async () => {
+  await Promise.all([
+    authStore.hasPermission('team:dept:view') ? getDeptTree().then(tree => { deptOptions.value = flattenDepts(tree) }).catch(() => {}) : Promise.resolve(),
+    authStore.hasPermission('team:role:view') ? getRoles().then(roleList => { roles.value = roleList }).catch(() => {}) : Promise.resolve(),
+    loadMembers()
+  ])
+}
+defineExpose({ refresh })
+onMounted(() => {
   window.addEventListener('resize', onResize)
-  const [tree, roleList] = await Promise.all([getDeptTree(), getRoles()])
-  deptOptions.value = flattenDepts(tree)
-  roles.value = roleList
-  await loadMembers()
+  refresh()
 })
 
 onUnmounted(() => {
@@ -354,6 +368,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.member-count { color: #909399; font-size: 12px; font-weight: normal; }
+.card-header { flex-wrap: wrap; gap: 8px; }
 .card-header {
   display: flex;
   justify-content: space-between;

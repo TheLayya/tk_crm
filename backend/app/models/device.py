@@ -1,12 +1,12 @@
 """终端资产（设备）模型
 
-Device：设备（手机/电脑），可选绑定代理节点（1:1 唯一）。
+Device：设备（手机/电脑），多台设备可以共享代理节点。
 DeviceLog：设备操作历史轨迹（old→new 变更），软删除设备后保留。
 """
 from datetime import datetime
 from sqlalchemy import JSON
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
+    Boolean, DateTime, ForeignKey, Integer, String, Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,7 +37,7 @@ class Device(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
-    # 一个节点最多绑定一台设备
+
 class DeviceLog(Base):
     __tablename__ = "device_logs"
 

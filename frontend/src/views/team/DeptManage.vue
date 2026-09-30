@@ -37,7 +37,7 @@
     </el-card>
 
     <!-- 新增/编辑对话框 -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="400px">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="min(400px, 94vw)" append-to-body>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
         <el-form-item label="部门名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入部门名称" />

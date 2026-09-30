@@ -45,7 +45,7 @@
           :max="1440"
           :step="5"
         />
-        <span style="margin-left: 10px; color: #909399; font-size: 12px;">分钟</span>
+        <span style="margin-left: 10px; color: #909399; font-size: 12px;">分钟；新建时留空使用系统间隔</span>
       </el-form-item>
 
       <el-form-item label="使用代理" prop="use_proxy">
@@ -121,7 +121,7 @@ const form = ref({
   nickname: '',
   tiktok_id: '',
   sec_uid: '',
-  monitor_interval: 60,  // 60 minutes = 1 hour
+  monitor_interval: null,
   use_proxy: true,
   proxy_id: null,
   enable_video_monitoring: true,
@@ -136,7 +136,7 @@ const rules = {
     { required: true, message: '请输入用户名', trigger: 'blur' }
   ],
   monitor_interval: [
-    { required: true, message: '请输入监控间隔', trigger: 'blur' },
+    { required: false, message: '请输入监控间隔', trigger: 'blur' },
     { type: 'number', min: 5, max: 1440, message: '间隔必须在 5-1440 分钟之间', trigger: 'blur' }
   ]
 }
@@ -157,7 +157,7 @@ const resetForm = () => {
     nickname: '',
     tiktok_id: '',
     sec_uid: '',
-    monitor_interval: 60,
+    monitor_interval: null,
     use_proxy: true,
     proxy_id: null,
     enable_video_monitoring: true,
@@ -180,7 +180,7 @@ const handleSubmit = async () => {
     // Convert minutes to seconds for backend
     const payload = {
       ...form.value,
-      monitor_interval: form.value.monitor_interval * 60
+      monitor_interval: form.value.monitor_interval == null ? null : form.value.monitor_interval * 60
     }
 
     // Remove empty optional fields

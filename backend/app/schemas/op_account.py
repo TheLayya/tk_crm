@@ -142,6 +142,10 @@ class OpAccountResponse(BaseModel):
     nickname: Optional[str] = None
     avatar_url: Optional[str] = None
     follower_count: Optional[int] = None
+    monitor_account_id: Optional[int] = None
+    followers_change: Optional[int] = None
+    yesterday_video_count: Optional[int] = None
+    yesterday_video_plays: Optional[List[int]] = None
     following_count: Optional[int] = None
     like_count: Optional[int] = None
     video_count: Optional[int] = None
@@ -201,6 +205,8 @@ class BatchAssignOperator(BaseModel):
 
 
 class AuditLogResponse(BaseModel):
+    summary: Optional[str] = None
+    details: List[str] = []
     id: int
     action: str
     field_name: Optional[str] = None

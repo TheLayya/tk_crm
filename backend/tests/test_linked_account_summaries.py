@@ -63,6 +63,9 @@ def test_linked_account_summaries_preserve_all_accounts_and_metrics(
             "following_count": account.following_count,
             "like_count": account.like_count,
             "video_count": account.video_count,
+            "followers_change": None,
+            "yesterday_video_count": None,
+            "yesterday_video_plays": None,
         }
         if name_field == "account":
             expected["platform"] = account.platform
@@ -81,3 +84,27 @@ def test_linked_account_summaries_preserve_all_accounts_and_metrics(
     assert [(account.device_id, account.node_id) for account in accounts] == [
         (device.id, node.id)
     ] * 3
+
+
+def test_bind_second_account_to_occupied_phone_preserves_first(client, db, super_admin, make_node):
+    node = make_node()
+    device = Device(name="shared phone", device_type="phone", owner_id=super_admin.id,
+                    node_id=node.id)
+    db.add(device)
+    db.flush()
+    first = OpAccount(platform="tiktok", account="shared-first", device_id=device.id, node_id=node.id)
+    second = OpAccount(platform="tiktok", account="shared-second")
+    db.add_all([first, second])
+    db.commit()
+    response = client.put(f"/api/op-accounts/{second.id}", json={"device_id": device.id},
+                          headers=auth_headers(super_admin))
+    assert response.status_code == 200, response.text
+    db.refresh(first)
+    db.refresh(second)
+    assert first.device_id == second.device_id == device.id
+    assert first.node_id == second.node_id == node.id
+    response = client.get("/api/devices", params={"device_type": "phone"},
+                          headers=auth_headers(super_admin))
+    assert response.status_code == 200, response.text
+    summary = next(item for item in response.json()["items"] if item["id"] == device.id)
+    assert {account["id"] for account in summary["accounts"]} == {first.id, second.id}

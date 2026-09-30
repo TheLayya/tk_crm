@@ -44,7 +44,12 @@ class AccountResponse(BaseModel):
     following_count: int
     like_count: int
     video_count: int
+    yesterday_video_count: Optional[int] = None
+    yesterday_video_plays: Optional[List[int]] = None
+    video_data_updated_at: Optional[datetime] = None
     last_checked_at: Optional[datetime] = None
+    latest_check_status: Optional[str] = None
+    latest_check_error: Optional[str] = None
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
     account_created_at: Optional[datetime] = None

@@ -49,10 +49,10 @@ const tabs = computed(() => [
     permission: 'device:view'
   },
   {
-    key: '/team/member',
+    key: '/team/manage',
     label: '团队',
     icon: UserFilled,
-    permission: 'team:member:view'
+    permission: ['team:member:view', 'team:dept:view', 'team:role:view', 'team:log:view']
   },
   {
     key: '/settings',
@@ -60,7 +60,7 @@ const tabs = computed(() => [
     icon: Setting,
     permission: 'settings:view'
   }
-].filter(tab => authStore.hasPermission(tab.permission)))
+].filter(tab => Array.isArray(tab.permission) ? tab.permission.some(permission => authStore.hasPermission(permission)) : authStore.hasPermission(tab.permission)))
 
 const activeTab = computed(() => {
   const path = route.path
@@ -68,7 +68,7 @@ const activeTab = computed(() => {
   if (path.startsWith('/op-accounts')) return '/op-accounts'
   if (path.startsWith('/proxy-nodes')) return '/proxy-nodes'
   if (path.startsWith('/devices')) return '/devices'
-  if (path.startsWith('/team')) return '/team/member'
+  if (path.startsWith('/team')) return '/team/manage'
   if (path.startsWith('/settings')) return '/settings'
   return ''
 })

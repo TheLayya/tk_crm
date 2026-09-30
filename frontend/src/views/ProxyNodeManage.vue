@@ -138,6 +138,10 @@
 
       <!-- 节点数据表格 -->
       <el-table
+        ref="nodeTable"
+        @expand-change="loadExpandedNode"
+        row-key="id"
+        size="small"
         :data="nodes"
         v-loading="loading"
         @selection-change="handleSelectionChange"
@@ -145,7 +149,29 @@
         style="width: 100%;"
       >
         <el-table-column type="selection" width="50" fixed="left" />
-        <el-table-column prop="ip" label="IP" width="140" fixed="left" />
+        <el-table-column type="expand" width="36" fixed="left">
+          <template #default="{ row }">
+            <div class="node-inline-details resource-state-grid" :style="{ width: nodeTable?.$el?.clientWidth ? nodeTable.$el.clientWidth + 'px' : '100%' }">
+              <section>
+                <strong>当前状态</strong>
+                <div class="inline-detail-section"><b>业务状态</b><el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag><b>最近检测</b><span>{{ row.last_test_result === 'success' ? '检测成功' : row.last_test_result === 'failed' ? '检测失败' : '尚未检测' }}{{ row.last_test_latency != null ? ' · ' + row.last_test_latency + 'ms' : '' }}</span></div>
+                <div class="inline-detail-section"><b>检测时间</b>{{ row.last_test_at ? new Date(row.last_test_at).toLocaleString('zh-CN') : '—' }}</div>
+                <div class="inline-detail-section"><b>关联终端（{{ row.devices?.length || 0 }}）</b><el-tag v-for="device in row.devices || []" :key="device.id" size="small">{{ device.name }}</el-tag><span v-if="!row.devices?.length">未绑定</span></div>
+                <div class="inline-detail-section"><b>关联账号（{{ row.accounts?.length || 0 }}）</b><span>{{ (row.accounts || []).map(account => account.username).join(' / ') || '未关联' }}</span></div>
+                <div class="inline-detail-section"><b>到期</b>{{ row.expire_date || '未设置' }}</div>
+                <div v-if="row.remark" class="inline-detail-section"><b>备注</b><span>{{ row.remark }}</span></div>
+                <div class="state-note">检测结果仅代表最近一次检测，不代表实时连通状态。</div>
+              <AssociationOverview kind="node" :resource-id="row.id" />
+              </section>
+              <ResourceActivity :logs="nodeActivity[row.id]?.items || []" :total="nodeActivity[row.id]?.total || 0" :page="nodeActivityPage[row.id] || 1" :loading="nodeActivityLoading[row.id]" :error="nodeActivityError[row.id]" note="已有单节点操作记录；批量操作和从终端侧调整关联不在此记录范围内。" @page-change="loadNodeActivity(row.id, $event)" />
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="IP" width="130" fixed="left">
+          <template #default="{ row }">
+            <button type="button" class="resource-expand-trigger" :aria-expanded="expandedNodeIds.includes(row.id)" :title="expandedNodeIds.includes(row.id) ? '点击收起节点详情' : '点击展开节点详情'" @click="nodeTable.toggleRowExpansion(row)">{{ row.ip }}</button>
+          </template>
+        </el-table-column>
         <el-table-column prop="port" label="端口" width="80" />
         <el-table-column prop="protocol" label="协议" width="90">
           <template #default="{ row }">
@@ -222,7 +248,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="215" fixed="right">
           <template #default="{ row }">
             <el-button
               link
@@ -625,6 +651,9 @@ import {
 import SellerSelector from '@/components/SellerSelector.vue'
 import QRCodeDialog from '@/components/QRCodeDialog.vue'
 import LinkedAccountCards from '@/components/LinkedAccountCards.vue'
+import AssociationOverview from '@/components/AssociationOverview.vue'
+import ResourceActivity from '@/components/ResourceActivity.vue'
+import { getProxyNodeLogs } from '@/api/proxy_nodes'
 import { useAuthStore } from '@/stores/auth'
 import {
   getProxyNodes,
@@ -645,6 +674,24 @@ import {
 import { isExpiringSoon } from '@/utils/proxyNodeUtils'
 
 const authStore = useAuthStore()
+const nodeTable = ref(null)
+const expandedNodeIds = ref([])
+const nodeActivity = ref({})
+const nodeActivityPage = ref({})
+const nodeActivityLoading = ref({})
+const nodeActivityError = ref({})
+async function loadNodeActivity(id, page = 1) {
+  nodeActivityPage.value[id] = page
+  nodeActivityLoading.value[id] = true
+  nodeActivityError.value[id] = ''
+  try { nodeActivity.value[id] = await getProxyNodeLogs(id, { skip: (page - 1) * 5, limit: 5 }) }
+  catch { nodeActivityError.value[id] = '轨迹加载失败，收起后重新展开重试' }
+  finally { nodeActivityLoading.value[id] = false }
+}
+function loadExpandedNode(row, expandedRows) {
+  expandedNodeIds.value = expandedRows.map(item => item.id)
+  if (expandedRows.some(item => item.id === row.id)) loadNodeActivity(row.id)
+}
 
 const relationDialogVisible = ref(false)
 const relationRow = ref(null)
@@ -1215,6 +1262,17 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.resource-expand-trigger { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; line-height: inherit; overflow-wrap: anywhere; }
+.resource-expand-trigger:hover { color: var(--el-color-primary); }
+.resource-expand-trigger:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.resource-state-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; }
+.resource-state-grid > section { min-width: 0; }
+.state-note { margin-top: 5px; font-size: 11px; color: #909399; }
+@media (max-width: 1100px) { .resource-state-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
+.node-inline-details { box-sizing: border-box; max-width: 100%; padding: 10px 16px; background: #f8fafc; font-size: 12px; }
+.inline-detail-fields, .inline-detail-section { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; line-height: 22px; }
+.inline-detail-fields b, .inline-detail-section b { margin-right: 8px; color: #909399; font-weight: 500; }
+.inline-detail-section { margin-top: 6px; overflow-wrap: anywhere; }
 .proxy-node-manage {
   padding: 20px;
 }

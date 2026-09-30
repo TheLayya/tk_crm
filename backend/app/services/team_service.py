@@ -135,6 +135,11 @@ def list_members(
 
     total = query.count()
     users = query.offset((page - 1) * size).limit(size).all()
+    department_ids = {u.department_id for u in users if u.department_id is not None}
+    departments = {
+        department.id: department.name
+        for department in db.query(Department).filter(Department.id.in_(department_ids)).all()
+    } if department_ids else {}
 
     items = []
     for u in users:
@@ -149,6 +154,7 @@ def list_members(
             "username": u.username,
             "real_name": u.real_name,
             "department_id": u.department_id,
+            "department_name": departments.get(u.department_id),
             "is_active": u.is_active,
             "is_super_admin": u.is_super_admin,
             "created_at": u.created_at,

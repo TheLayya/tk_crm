@@ -223,6 +223,9 @@ async def check_account(db: Session, account: MonitorAccount) -> MonitorHistory:
                                 existing_video.like_count = video_info.get("like_count", existing_video.like_count)
                                 existing_video.comment_count = video_info.get("comment_count", existing_video.comment_count)
                                 existing_video.share_count = video_info.get("share_count", existing_video.share_count)
+                                existing_video.updated_at = now
+                                if video_info.get("published_at"):
+                                    existing_video.published_at = datetime.utcfromtimestamp(video_info["published_at"])
                             else:
                                 new_video = Video(
                                     account_id=account.id,
@@ -401,9 +404,9 @@ def register_scheduler_jobs(scheduler, db_factory: Callable) -> None:
     scheduler.add_job(
         _job,
         trigger="interval",
-        minutes=5,
+        minutes=1,
         id="scheduled_monitor_checks",
         replace_existing=True,
         max_instances=1,
     )
-    logger.info("Registered scheduled monitor check job (every 5 minutes)")
+    logger.info("Registered scheduled monitor check job (every minute)")

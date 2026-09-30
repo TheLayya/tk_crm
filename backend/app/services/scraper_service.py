@@ -1,3 +1,5 @@
+import html
+import re
 import httpx
 import asyncio
 import logging
@@ -8,6 +10,22 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+
+ACCOUNT_NOT_FOUND = "ACCOUNT_NOT_FOUND: TikTok 明确提示找不到此账号（可能已改名、删除或不可用）"
+
+
+def is_account_not_found_message(message) -> bool:
+    text = str(message or "").strip().lower()
+    return text in ("user not found", "user doesn't exist", "user does not exist") or any(phrase in text for phrase in (
+        "couldn't find this account", "couldn’t find this account", "could not find this account",
+        "找不到此账号", "找不到此帐号",
+    ))
+
+
+def is_verification_page(response) -> bool:
+    text = response.text.lower()
+    return any(marker in text for marker in ("slardarwaf", "_wafchallengeid", "waf-aiso/", "verify you are human"))
 
 
 class ScraperService:
@@ -42,16 +60,20 @@ class ScraperService:
                 follow_redirects=True
             ) as client:
                 # 尝试 TikTok web API (非官方)
-                result = await self._try_web_api(client, username)
-                if result['success']:
-                    return result
+                api_result = await self._try_web_api(client, username)
+                if api_result['success']:
+                    return api_result
 
                 # 备用: TikTok oEmbed API（仅能获取基础信息）
                 result = await self._try_oembed_api(client, username)
                 if result['success']:
                     return result
 
-                return {'success': False, 'data': None, 'error': 'All API endpoints failed'}
+                if result.get('error_code') == 'verification_required':
+                    return result
+                if result.get('error_code') == 'account_not_found' or api_result.get('error_code') == 'account_not_found':
+                    return {'success': False, 'data': None, 'error': ACCOUNT_NOT_FOUND, 'error_code': 'account_not_found'}
+                return {'success': False, 'data': None, 'error': f"User API: {api_result.get('error')}; profile page: {result.get('error')}"}
 
         except httpx.ProxyError as e:
             logger.error(f"Proxy error for {username}: {e}")
@@ -68,9 +90,17 @@ class ScraperService:
         try:
             url = f"https://www.tiktok.com/api/user/detail/?uniqueId={username}&aid=1988&app_language=en&app_name=tiktok_web&device_platform=web_pc"
             response = await client.get(url, headers=self.headers)
+            if is_verification_page(response):
+                return {'success': False, 'data': None, 'error': 'VERIFICATION_REQUIRED: TikTok 返回验证页，采集端未获取到账号页面，无法判断账号是否存在；请人工打开主页核实。', 'error_code': 'verification_required'}
 
             if response.status_code == 200:
-                data = response.json()
+                try:
+                    data = response.json()
+                except ValueError:
+                    return {'success': False, 'data': None, 'error': 'TikTok 用户接口返回非 JSON 内容，未获取到账号数据'}
+
+                if is_account_not_found_message(data.get('statusMsg')) and not data.get('userInfo', {}).get('user', {}).get('id'):
+                    return {'success': False, 'data': None, 'error': ACCOUNT_NOT_FOUND, 'error_code': 'account_not_found'}
                 user_info = data.get('userInfo', {})
                 user = user_info.get('user', {})
                 stats = user_info.get('stats', {})
@@ -113,12 +143,13 @@ class ScraperService:
         try:
             url = f"https://www.tiktok.com/@{username}"
             response = await client.get(url, headers=self.headers)
+            if is_verification_page(response):
+                return {'success': False, 'data': None, 'error': 'VERIFICATION_REQUIRED: TikTok 返回验证页，采集端未获取到账号页面，无法判断账号是否存在；请人工打开主页核实。', 'error_code': 'verification_required'}
 
             if response.status_code == 200:
                 # 尝试从页面中提取 __UNIVERSAL_DATA_FOR_REHYDRATION__
                 content = response.text
                 import json
-                import re
                 pattern = r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>'
                 match = re.search(pattern, content, re.DOTALL)
                 if match:
@@ -133,6 +164,9 @@ class ScraperService:
                         )
                         user = user_detail.get('user', {})
                         stats = user_detail.get('stats', {})
+                        detail = page_data.get('__DEFAULT_SCOPE__', {}).get('webapp.user-detail', {})
+                        if not user.get('id') and is_account_not_found_message(detail.get('statusMsg')):
+                            return {'success': False, 'data': None, 'error': ACCOUNT_NOT_FOUND, 'error_code': 'account_not_found'}
                         if user.get('id'):
                             create_time = user.get('createTime')
                             account_created_at = None
@@ -161,7 +195,14 @@ class ScraperService:
                     except (json.JSONDecodeError, KeyError):
                         pass
 
-            return {'success': False, 'data': None, 'error': f'oEmbed HTTP {response.status_code}'}
+            visible_text = html.unescape(re.sub(r'<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>', '', response.text, flags=re.S | re.I))
+            visible_text = re.sub(r'<[^>]+>', ' ', visible_text)
+            visible_text = ' '.join(visible_text.split())
+            if response.status_code in (200, 404) and is_account_not_found_message(visible_text):
+                return {'success': False, 'data': None, 'error': ACCOUNT_NOT_FOUND, 'error_code': 'account_not_found'}
+            if response.status_code == 200:
+                return {'success': False, 'data': None, 'error': 'TikTok 主页返回 HTTP 200，但未获取到账号数据或明确的不存在提示，无法判断账号是否存在'}
+            return {'success': False, 'data': None, 'error': f'Profile HTTP {response.status_code}'}
 
         except Exception as e:
             logger.debug(f"oEmbed API failed for {username}: {e}")

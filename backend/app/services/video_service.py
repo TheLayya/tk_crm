@@ -1,7 +1,8 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models.monitor import MonitorAccount
@@ -21,6 +22,53 @@ def get_videos(db: Session, account_id: int, skip: int = 0, limit: int = 100) ->
         .limit(limit)
         .all()
     )
+
+
+def get_yesterday_video_counts(db: Session, account_ids: List[int], now: Optional[datetime] = None) -> dict:
+    if not account_ids:
+        return {}
+    start, end = _yesterday_beijing_bounds(now)
+    rows = (
+        db.query(
+            Video.account_id,
+            func.count(Video.published_at),
+            func.sum(case(((Video.published_at >= start) & (Video.published_at < end), 1), else_=0)),
+            func.max(Video.updated_at),
+        )
+        .filter(Video.account_id.in_(account_ids))
+        .group_by(Video.account_id)
+        .all()
+    )
+    return {
+        account_id: int(yesterday_count) if dated_count and (yesterday_count or updated_at >= end) else None
+        for account_id, dated_count, yesterday_count, updated_at in rows
+    }
+
+
+def get_yesterday_video_plays(db: Session, account_ids: List[int], now: Optional[datetime] = None) -> dict:
+    if not account_ids:
+        return {}
+    start, end = _yesterday_beijing_bounds(now)
+    rows = (
+        db.query(Video.account_id, Video.play_count)
+        .filter(Video.account_id.in_(account_ids), Video.published_at >= start, Video.published_at < end)
+        .order_by(Video.account_id, Video.published_at.desc(), Video.id.desc())
+        .all()
+    )
+    plays = {}
+    for account_id, play_count in rows:
+        plays.setdefault(account_id, []).append(int(play_count))
+    return plays
+
+
+def _yesterday_beijing_bounds(now: Optional[datetime] = None):
+    beijing = timezone(timedelta(hours=8))
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    today = current.astimezone(beijing).replace(hour=0, minute=0, second=0, microsecond=0)
+    end = today.astimezone(timezone.utc).replace(tzinfo=None)
+    return end - timedelta(days=1), end
 
 
 def get_video_stats(db: Session, video_id: int) -> List[VideoStats]:

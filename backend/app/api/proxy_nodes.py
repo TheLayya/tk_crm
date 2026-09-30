@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.database import get_db
+from app.services.account_summary_service import enrich_monitor_summaries
 from app.models.device import Device, DeviceLog
 from app.models.op_account import OpAccount
 from app.schemas.proxy_node import (
@@ -30,7 +31,7 @@ from app.schemas.proxy_node import (
 from app.services import proxy_node_export_service, proxy_node_import_service
 from app.services import proxy_node_service, proxy_node_test_service
 from app.services.auth_service import get_current_user_from_header, require_permission, get_user_data_scope, get_dept_member_usernames
-from app.models.team import User
+from app.models.team import User, OperationLog
 from app.models.proxy_node import ProxyNode
 import threading
 
@@ -106,6 +107,7 @@ def list_nodes(
             n.account_count = len(accounts)
             n.account_ids = [a.id for a in accounts]
             n.devices = [{"id": d.id, "name": d.name} for d in linked_devices]
+            enrich_monitor_summaries(db, accounts, _current_user)
             n.accounts = [{
                 "id": a.id,
                 "username": a.account,
@@ -115,6 +117,9 @@ def list_nodes(
                 "following_count": a.following_count,
                 "like_count": a.like_count,
                 "video_count": a.video_count,
+                "followers_change": a.followers_change,
+                "yesterday_video_count": a.yesterday_video_count,
+                "yesterday_video_plays": a.yesterday_video_plays,
                 "device_id": a.device_id,
             } for a in accounts]
         items = [ProxyNodeResponse.model_validate(n) for n in nodes]
@@ -450,6 +455,48 @@ def update_node(node_id: int, data: ProxyNodeUpdate, db: Session = Depends(get_d
         )
     return node
 
+@router.get("/{resource_id}/association-history", response_model=dict)
+def get_association_history(resource_id: int, db: Session = Depends(get_db), current_user=Depends(require_permission("proxy_node:view"))):
+    from app.services.relation_history_service import relation_overview
+    return relation_overview(db, "node", resource_id, current_user)
+
+
+@router.get("/{node_id}/logs", response_model=dict)
+def get_node_logs(
+    node_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("proxy_node:view")),
+):
+    node = db.query(ProxyNode).filter(ProxyNode.id == node_id).first()
+    if node is None:
+        raise HTTPException(status_code=404, detail="代理节点不存在")
+    scope = get_user_data_scope(db, current_user)
+    if not current_user.is_super_admin and scope != "all":
+        allowed = get_dept_member_usernames(db, current_user) if scope == "dept" else [current_user.username]
+        visible = db.query(OpAccount).filter(
+            OpAccount.node_id == node_id,
+            (OpAccount.registrant.in_(allowed)) | (OpAccount.operator.in_(allowed)),
+        ).first()
+        if visible is None:
+            raise HTTPException(status_code=403, detail="无权查看此节点轨迹")
+    paths = [f"{method} /api/proxy-nodes/{node_id}{suffix}" for method, suffix in (
+        ("UPDATE", ""), ("UPDATE", "/relation"), ("DELETE", ""), ("VIEW_SECRET", "/uri"),
+    )]
+    query = db.query(OperationLog).filter(
+        OperationLog.module.in_(["节点管理", "节点关联"]), OperationLog.summary.in_(paths),
+    )
+    return {
+        "total": query.count(),
+        "items": [{"id": log.id, "username": log.username, "action": log.action,
+                   "result": log.result, "summary": "调整关联" if log.summary.endswith("/relation") else
+                   {"UPDATE": "修改节点资料", "DELETE": "删除节点", "VIEW_SECRET": "查看节点连接凭据"}.get(log.action, log.action),
+                   "created_at": log.created_at}
+                  for log in query.order_by(OperationLog.created_at.desc(), OperationLog.id.desc()).offset(skip).limit(limit).all()],
+    }
+
+
 @router.put("/{node_id}/relation", response_model=dict)
 def update_node_relation(node_id: int, data: ProxyNodeRelationUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_permission("proxy_node:manage"))):
     with _relation_lock:
@@ -480,10 +527,7 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
             raise HTTPException(status_code=403, detail="无权关联该终端")
         if node.status not in ("idle", "active"):
             raise HTTPException(status_code=409, detail="代理节点当前状态不可绑定")
-        for other in db.query(Device).filter(Device.id != d.id, Device.is_deleted == False).all():
-            ids = other.node_ids or ([other.node_id] if other.node_id else [])
-            if node_id in ids:
-                raise HTTPException(status_code=409, detail=f"节点已绑定终端 {other.name}")
+
         ids = d.node_ids or ([d.node_id] if d.node_id else [])
         old_ids = list(ids)
         d.node_ids = list(dict.fromkeys(ids + [node_id]))
@@ -501,8 +545,9 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
                 if device and node_id in (device.node_ids or ([device.node_id] if device.node_id else [])):
                     raise HTTPException(status_code=409, detail="账号节点由终端管理，请先解除终端的节点关联")
             account.node_id = None
-            from app.services.op_account_service import _write_audit_log
+            from app.services.op_account_service import _write_audit_log, record_relation_snapshot
             _write_audit_log(db, account.id, "update", "node_id", str(node_id), None, current_user.username)
+            record_relation_snapshot(db, account, current_user.username)
     else:
         account = db.query(OpAccount).filter(OpAccount.id == data.account_id).first()
         if not account:
@@ -513,12 +558,15 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
             raise HTTPException(status_code=409, detail="代理节点当前状态不可绑定")
         from app.services.op_account_service import normalize_account_relation
         normalize_account_relation(db, {"node_id": node_id}, account)
+        old_node_id = account.node_id
         account.node_id = node_id
-        from app.services.op_account_service import _write_audit_log
-        _write_audit_log(db, account.id, "update", "node_id", None, str(node_id), current_user.username)
+        from app.services.op_account_service import _write_audit_log, record_relation_snapshot
+        if old_node_id != node_id:
+            _write_audit_log(db, account.id, "update", "node_id", str(old_node_id) if old_node_id else None, str(node_id), current_user.username)
+            record_relation_snapshot(db, account, current_user.username)
     for device, old_ids, new_ids in relation_changes:
         from app.services.op_account_service import sync_device_account_nodes
-        sync_device_account_nodes(db, device)
+        sync_device_account_nodes(db, device, current_user.username)
         db.add(DeviceLog(device_id=device.id, user_id=current_user.id, username=current_user.username,
                          action="UPDATE", changes=json.dumps({"relations": {"old_node_ids": old_ids, "new_node_ids": new_ids,
                                                                        "source": "proxy_node"}}, ensure_ascii=False)))
