@@ -1,0 +1,32 @@
+@media (min-width: 769px) {
+  .main-content .el-card:has(.el-table),
+  .main-content .el-card__body:has(.el-table) {
+    overflow: visible;
+  }
+
+  .main-content .el-table:not(.el-table--scrollable-y) {
+    overflow: visible;
+  }
+
+  .main-content .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper {
+    position: sticky;
+    top: -20px;
+    z-index: 20 !important;
+    background: #fff !important;
+    box-shadow: 0 1px 0 var(--el-table-border-color);
+    isolation: isolate;
+  }
+
+  .main-content .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper table,
+  .main-content .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper th {
+    background-color: #fff !important;
+  }
+
+  .main-content .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper th {
+    z-index: 21 !important;
+  }
+
+  .main-content :is(.el-dialog, .el-drawer) .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper {
+    top: 0;
+  }
+}

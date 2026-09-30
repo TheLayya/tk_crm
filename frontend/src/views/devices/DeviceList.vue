@@ -105,7 +105,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="owner_name" label="所属人" width="110" />
-        <el-table-column prop="node_ip" label="绑定节点" min-width="150">
+        <el-table-column prop="node_ip" label="绑定节点" width="155" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.node_ip">{{ row.node_ip }}</span>
             <span v-else style="color: #909399;">未绑定</span>
