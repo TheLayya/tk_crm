@@ -8,6 +8,8 @@ from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.core.config import settings
 from app.models.team import User
+from app.models.work_item import WorkItem  # noqa: F401
+from app.models.card_key import CardKeyProject, CardKey  # noqa: F401
 # 显式导入确保 Base.metadata.create_all 建出 devices/device_logs 表
 from app.models import device  # noqa: F401
 from app.api import projects, accounts, history, proxies, videos, import_export, op_accounts, auth, team
@@ -15,6 +17,8 @@ from app.api import settings as settings_router
 from app.api import backup as backup_router
 from app.api import proxy_nodes
 from app.api import devices
+from app.api import emails
+from app.api import work_items, card_keys, overview
 from app.middleware.rate_limit import limiter
 from app.middleware.operation_log import OperationLogMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -97,6 +101,10 @@ app.include_router(team.router, prefix="/api")
 app.include_router(backup_router.router, prefix="/api")
 app.include_router(proxy_nodes.router, prefix="/api")
 app.include_router(devices.router, prefix="/api")
+app.include_router(emails.router, prefix="/api")
+app.include_router(work_items.router, prefix="/api")
+app.include_router(card_keys.router, prefix="/api")
+app.include_router(overview.router, prefix="/api")
 
 
 @app.get("/health")

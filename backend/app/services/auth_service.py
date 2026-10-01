@@ -69,12 +69,6 @@ def login(username: str, password: str, ip: str, db: Session) -> dict:
     # Verify password (always run to avoid timing attacks)
     password_ok = user is not None and verify_password(password, user.password_hash)
 
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"LOGIN DEBUG: username={username}, user_found={user is not None}, password_ok={password_ok}, failure_count={failure_count}")
-    if user:
-        logger.info(f"LOGIN DEBUG: hash_prefix={user.password_hash[:20]}, is_active={user.is_active}")
-
     if not password_ok:
         _record_login_log(db, username, ip, "failed", "用户名或密码错误")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
@@ -236,7 +230,15 @@ def require_permission(perm: str):
             return user
         # Check if user has the required permission
         permissions = set(_get_user_permissions(db, user.id))
-        if perm not in permissions:
+        legacy_aliases = {
+            "email:view": {"op_account:view"},
+            "email:manage": {"op_account:edit"},
+            "email:import": {"op_account:import"},
+            "email:check": {"op_account:collect"},
+            "card_key:view": {"card_key:manage"},
+            "work_item:view": {"work_item:manage"},
+        }
+        if perm not in permissions and not permissions.intersection(legacy_aliases.get(perm, set())):
             raise HTTPException(status_code=403, detail="权限不足")
         return user
     return dependency

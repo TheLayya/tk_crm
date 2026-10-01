@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional, Tuple
 
 import openpyxl
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.schemas.proxy_node import ProxyNodeCreate, ProxyNodeImportResult
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # 支持的列名（全部小写）
 SUPPORTED_COLUMNS = [
-    "ip", "port", "username", "password", "protocol",
+    "ip", "port", "country", "username", "password", "protocol",
     "relay_ip", "relay_port", "relay_protocol",
     "purchase_date", "purchase_price", "purchase_channel",
     "expire_date", "sale_customer", "sale_price",
@@ -29,12 +30,13 @@ SUPPORTED_COLUMNS = [
 
 # 枚举合法值
 VALID_PROTOCOL = {"socks5", "http", "https"}
-VALID_STATUS = {"active", "expired", "sold", "disabled"}
+VALID_STATUS = {"idle", "active", "sold", "disabled"}
 VALID_USAGE = {"self", "rented", "idle"}
 
 # 模板示例数据
 _TEMPLATE_EXAMPLE = {
     "ip": "1.2.3.4",
+    "country": "美国",
     "port": "1080",
     "username": "user",
     "password": "pass",
@@ -122,7 +124,7 @@ def _validate_row(
     if status_str and status_str not in VALID_STATUS:
         return None, (
             f"第 {line_num} 行: status 值 '{status_str}' 不合法，"
-            f"允许值为 active/expired/sold/disabled"
+            f"允许值为 idle/active/sold/disabled"
         )
 
     usage_str = row.get("usage", "")
@@ -166,8 +168,9 @@ def _validate_row(
         return None, f"第 {line_num} 行: sale_price 格式不正确，应为数字"
 
     # --- 构建 ProxyNodeCreate ---
-    create_data = ProxyNodeCreate(
+    create_values = dict(
         ip=ip,
+        country=row.get("country", ""),
         port=port,
         username=row.get("username") or None,
         password=row.get("password") or None,
@@ -186,7 +189,11 @@ def _validate_row(
         remark=row.get("remark") or None,
     )
 
-    return create_data, None
+    try:
+        return ProxyNodeCreate(**create_values), None
+    except ValidationError as error:
+        fields = ", ".join(str(item["loc"][0]) for item in error.errors())
+        return None, f"第 {line_num} 行: 必填信息缺失或格式不正确: {fields}"
 
 
 def import_from_csv(db: Session, file_content: bytes) -> ProxyNodeImportResult:

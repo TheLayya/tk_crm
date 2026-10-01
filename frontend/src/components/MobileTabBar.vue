@@ -16,7 +16,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Briefcase, UserFilled, Setting, Connection, Iphone } from '@element-plus/icons-vue'
+import { Monitor, Briefcase, UserFilled, Setting, Connection, Iphone, Message, Memo } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
@@ -24,6 +24,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const tabs = computed(() => [
+  ...(authStore.hasPermission('device:view') && authStore.hasPermission('op_account:view') && authStore.hasPermission('proxy_node:view') ? [{ key: '/overview', label: '总览', icon: Monitor, permission: 'device:view' }] : []),
   {
     key: '/monitor',
     label: '监控',
@@ -36,6 +37,19 @@ const tabs = computed(() => [
     icon: Briefcase,
     permission: 'op_account:view'
   },
+  {
+    key: '/emails',
+    label: '邮箱',
+    icon: Message,
+    permission: 'email:view'
+  },
+  {
+    key: '/work-items',
+    label: '备忘',
+    icon: Memo,
+    permission: 'work_item:view'
+  },
+  { key: '/card-keys', label: '卡密', icon: Memo, permission: 'card_key:view' },
   {
     key: '/proxy-nodes',
     label: '节点',
@@ -64,8 +78,12 @@ const tabs = computed(() => [
 
 const activeTab = computed(() => {
   const path = route.path
+  if (path.startsWith('/overview')) return '/overview'
   if (path.startsWith('/monitor') || path.startsWith('/accounts')) return '/monitor'
   if (path.startsWith('/op-accounts')) return '/op-accounts'
+  if (path.startsWith('/emails')) return '/emails'
+  if (path.startsWith('/work-items')) return '/work-items'
+  if (path.startsWith('/card-keys')) return '/card-keys'
   if (path.startsWith('/proxy-nodes')) return '/proxy-nodes'
   if (path.startsWith('/devices')) return '/devices'
   if (path.startsWith('/team')) return '/team/manage'

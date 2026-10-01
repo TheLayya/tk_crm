@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # 导出列名（与导入模板保持一致）
 EXPORT_COLUMNS = [
-    "ip", "port", "username", "password", "protocol",
+    "ip", "port", "country", "username", "password", "protocol",
     "relay_ip", "relay_port", "relay_protocol",
     "purchase_date", "purchase_price", "purchase_channel",
     "expire_date", "sale_customer", "sale_price",
@@ -29,6 +29,7 @@ def _node_to_row(node: ProxyNode) -> dict:
     """将 ProxyNode ORM 对象转换为可导出的字典（所有值均为字符串）。"""
     return {
         "ip": node.ip or "",
+        "country": node.country or "",
         "port": str(node.port) if node.port is not None else "",
         "username": node.username or "",
         "password": node.password or "",

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db, SessionLocal
 from app.core.scheduler import scheduler
-from app.schemas.settings import SettingsUpdate, SettingsResponse
+from app.schemas.settings import PublicSettingsResponse, SettingsUpdate, SettingsResponse
 from app.models.monitor import MonitorAccount, MonitorSettings
 from app.services.auth_service import require_permission
 from app.services.backup_service import reschedule_backup_job
@@ -45,11 +45,12 @@ def get_or_create_settings(db: Session) -> MonitorSettings:
     return settings
 
 
-@router.get("/public", response_model=SettingsResponse)
+@router.get("/public", response_model=PublicSettingsResponse, response_model_exclude_none=True)
 def get_public_settings(db: Session = Depends(get_db)):
     """公开接口：返回站点名称和 logo，不需要登录。"""
     try:
-        return get_or_create_settings(db)
+        settings = get_or_create_settings(db)
+        return PublicSettingsResponse(site_name=settings.site_name, logo_image=settings.logo_image, login_screen_text=settings.login_screen_text)
     except Exception as e:
         logger.error(f"Failed to get public settings: {e}")
         raise HTTPException(
@@ -133,6 +134,9 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db), _=Depen
         
         if data.site_name is not None:
             settings.site_name = data.site_name
+
+        if data.login_screen_text is not None:
+            settings.login_screen_text = data.login_screen_text.strip()
         
         # Allow clearing logo by passing empty string or None
         if data.logo_image is not None:
@@ -150,7 +154,7 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db), _=Depen
             settings.backup_interval_hours = data.backup_interval_hours
         if data.telegram_enabled is not None:
             settings.telegram_enabled = data.telegram_enabled
-        if data.telegram_bot_token is not None:
+        if data.telegram_bot_token not in (None, "", "********"):
             settings.telegram_bot_token = data.telegram_bot_token
         if data.telegram_chat_id is not None:
             settings.telegram_chat_id = data.telegram_chat_id
@@ -162,7 +166,7 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db), _=Depen
             settings.smtp_port = data.smtp_port
         if data.smtp_username is not None:
             settings.smtp_username = data.smtp_username
-        if data.smtp_password is not None:
+        if data.smtp_password not in (None, "", "********"):
             settings.smtp_password = data.smtp_password
         if data.smtp_sender is not None:
             settings.smtp_sender = data.smtp_sender

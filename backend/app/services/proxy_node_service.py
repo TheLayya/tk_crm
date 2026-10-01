@@ -8,6 +8,7 @@ from urllib.parse import quote
 from sqlalchemy.orm import Session
 
 from app.models.proxy_node import ProxyNode
+from app.services.sale_validation_service import validate_sale_information
 from app.schemas.proxy_node import (
     ChannelStats,
     ProxyNodeCreate,
@@ -95,6 +96,7 @@ def get_node(db: Session, node_id: int) -> Optional[ProxyNode]:
 def create_node(db: Session, data: ProxyNodeCreate) -> ProxyNode:
     """创建节点，默认值已在 Schema 中定义。"""
     data_dict = data.model_dump()
+    validate_sale_information(data_dict, "sold")
     data_dict['sellers'] = _serialize_sellers(data_dict.get('sellers'))
     node = ProxyNode(**data_dict)
     db.add(node)
@@ -113,6 +115,7 @@ def update_node(
         return None
 
     update_data = data.get_update_data()
+    validate_sale_information({**{field: getattr(node, field) for field in ("status", "sale_customer", "sale_price", "sellers")}, **update_data}, "sold")
     if 'sellers' in update_data:
         update_data['sellers'] = _serialize_sellers(update_data['sellers'])
     for field, value in update_data.items():
@@ -166,13 +169,17 @@ def batch_delete_nodes(db: Session, node_ids: List[int]) -> int:
     return deleted
 
 
-def batch_update_status(db: Session, node_ids: List[int], status: str) -> int:
+def batch_update_status(db: Session, node_ids: List[int], status: str, sale_customer=None, sale_price=None, sellers=None) -> int:
     """批量修改状态，自动更新 updated_at，返回更新数量。"""
+    values = {"status": status, "updated_at": datetime.utcnow()}
+    if status == "sold":
+        validate_sale_information(dict(status=status, sale_customer=sale_customer, sale_price=sale_price, sellers=sellers), "sold")
+        values.update(sale_customer=sale_customer, sale_price=sale_price, sellers=_serialize_sellers(sellers))
     updated = (
         db.query(ProxyNode)
         .filter(ProxyNode.id.in_(node_ids))
         .update(
-            {"status": status, "updated_at": datetime.utcnow()},
+            values,
             synchronize_session=False,
         )
     )

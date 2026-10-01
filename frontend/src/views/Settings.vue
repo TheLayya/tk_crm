@@ -76,6 +76,11 @@
           <span class="hint">显示在浏览器标签和侧边栏顶部</span>
         </el-form-item>
 
+        <el-form-item label="登录屏幕文字" prop="login_screen_text">
+          <el-input v-model="form.login_screen_text" type="textarea" :rows="3" maxlength="500" show-word-limit placeholder="数据连接团队，协作创造价值" />
+          <span class="hint">显示在登录场景的三面屏幕上；留空隐藏文字。仅支持纯文本，保存后刷新登录页生效。</span>
+        </el-form-item>
+
         <el-form-item label="网站Logo" prop="logo_image">
           <div class="logo-upload">
             <el-upload
@@ -181,7 +186,7 @@
         <el-form-item label="Telegram Bot Token">
           <el-input
             v-model="form.telegram_bot_token"
-            placeholder="请输入 Bot Token"
+            placeholder="Telegram Bot Token（留空保持不变）"
             :disabled="!form.backup_enabled || !form.telegram_enabled"
             show-password
           />
@@ -317,6 +322,7 @@ const form = ref({
   default_video_count: 20,
   site_name: 'TikTok Monitor',
   logo_image: '',
+  login_screen_text: '数据连接团队，协作创造价值',
   backup_enabled: false,
   backup_interval_hours: 24,
   telegram_enabled: false,
@@ -376,6 +382,7 @@ const loadSettings = async () => {
       default_video_count: data.default_video_count || 20,
       site_name: data.site_name || 'TikTok Monitor',
       logo_image: data.logo_image || '',
+      login_screen_text: data.login_screen_text ?? '数据连接团队，协作创造价值',
       backup_enabled: data.backup_enabled || false,
       backup_interval_hours: data.backup_interval_hours || 24,
       telegram_enabled: data.telegram_enabled || false,
@@ -441,6 +448,7 @@ const handleSubmit = async () => {
       default_video_count: form.value.default_video_count,
       site_name: form.value.site_name,
       logo_image: form.value.logo_image,
+      login_screen_text: form.value.login_screen_text,
       backup_enabled: form.value.backup_enabled,
       backup_interval_hours: form.value.backup_interval_hours,
       telegram_enabled: form.value.telegram_enabled,
@@ -456,15 +464,10 @@ const handleSubmit = async () => {
       smtp_use_tls: form.value.smtp_use_tls
     }
     await updateSettings(payload)
-    ElMessage.success('设置保存成功，刷新页面生效')
-    
-    // 更新页面标题
-    document.title = form.value.site_name
-    
-    // 刷新页面以应用新的logo和站名
-    setTimeout(() => {
-      window.location.reload()
-    }, 1000)
+    window.dispatchEvent(new CustomEvent('site-settings-updated', {
+      detail: { site_name: form.value.site_name, logo_image: form.value.logo_image }
+    }))
+    ElMessage.success('设置保存成功')
   } catch (error) {
     console.error('Failed to update settings:', error)
     ElMessage.error('设置保存失败')

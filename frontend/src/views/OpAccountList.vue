@@ -1,45 +1,5 @@
 <template>
   <div class="op-account-list">
-    <!-- 统计面板 -->
-    <div class="stats-panel">
-      <div class="stats-grid">
-        <el-card class="stat-card" shadow="hover">
-          <div class="stat-value">{{ accountStats.total }}</div>
-          <div class="stat-label">账号总数</div>
-        </el-card>
-        <el-card class="stat-card stat-card--success" shadow="hover">
-          <div class="stat-value">{{ accountStats.by_status?.['正常'] ?? 0 }}</div>
-          <div class="stat-label">正常</div>
-        </el-card>
-        <el-card class="stat-card stat-card--primary" shadow="hover">
-          <div class="stat-value">{{ accountStats.by_status?.['自用'] ?? 0 }}</div>
-          <div class="stat-label">自用</div>
-        </el-card>
-        <el-card class="stat-card stat-card--danger" shadow="hover">
-          <div class="stat-value">{{ accountStats.by_status?.['封禁'] ?? 0 }}</div>
-          <div class="stat-label">封禁</div>
-        </el-card>
-        <el-card class="stat-card stat-card--info" shadow="hover">
-          <div class="stat-value">{{ accountStats.by_status?.['已售'] ?? 0 }}</div>
-          <div class="stat-label">已售</div>
-        </el-card>
-        <el-card class="stat-card" shadow="hover">
-          <div class="stat-value">{{ formatCurrency(accountStats.total_purchase_cost) }}</div>
-          <div class="stat-label">总采购成本</div>
-        </el-card>
-        <el-card class="stat-card stat-card--success" shadow="hover">
-          <div class="stat-value">{{ formatCurrency(accountStats.total_sale_revenue) }}</div>
-          <div class="stat-label">总出售收入</div>
-        </el-card>
-        <el-card class="stat-card" shadow="hover">
-          <div class="stat-value" :class="Number(accountStats.net_profit) >= 0 ? 'stat-value--profit' : 'stat-value--loss'">
-            {{ formatCurrency(accountStats.net_profit) }}
-          </div>
-          <div class="stat-label">净收益</div>
-        </el-card>
-      </div>
-    </div>
-
     <!-- 过滤栏 -->
     <el-card class="filter-card">
       <div class="filter-row">
@@ -85,6 +45,7 @@
         <span class="batch-toolbar-new__count">已选 {{ selectedIds.length }} 项</span>
         <el-button v-if="canBatchAssign" size="small" type="primary" plain @click="openBatchAssign">批量分配</el-button>
         <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button>
+        <el-button v-if="selectedGmailIds.length" size="small" type="warning" :loading="gmailCheckLoading" @click="handleGmailCheck(selectedGmailIds)">检测 Gmail</el-button>
         <el-button size="small" @click="handleBatchCollect" :loading="collectLoading">采集</el-button>
         <el-button size="small" type="danger" @click="handleBatchDelete">批量删除</el-button>
       </div>
@@ -112,19 +73,24 @@
               <div class="inline-summary">
                 <strong>{{ row.account }}</strong>
                 <span v-if="row.nickname && row.nickname !== row.account">{{ row.nickname }}</span>
-                <span>粉丝 {{ formatNum(row.follower_count) }}</span>
-                <span>关注 {{ formatNum(row.following_count) }}</span>
-                <span>点赞 {{ formatNum(row.like_count) }}</span>
-                <span>视频 {{ formatNum(row.video_count) }}</span>
+                <span v-if="row.platform !== 'gmail'">粉丝 {{ formatNum(row.follower_count) }}</span>
+                <span v-if="row.platform !== 'gmail'">关注 {{ formatNum(row.following_count) }}</span>
+                <span v-if="row.platform !== 'gmail'">点赞 {{ formatNum(row.like_count) }}</span>
+                <span v-if="row.platform !== 'gmail'">视频 {{ formatNum(row.video_count) }}</span>
+              </div>
+              <div v-if="row.platform === 'gmail'" class="inline-summary">
+                <el-tag :type="gmailCheckTagType(row.gmail_check_status)" size="small">{{ row.gmail_check_status || '未检测' }}</el-tag>
+                <span>{{ gmailCheckHint(row) }}</span>
               </div>
               <AssociationOverview kind="account" :resource-id="row.id" />
+              <AccountEmailRelations v-if="authStore.hasPermission('email:view')" :account-id="row.id" />
               <InlineAccountVideos v-if="row.monitor_account_id" :account-id="row.monitor_account_id" />
 
         <!-- 账号凭证 -->
         <div class="section-group">
           <div class="section-group__title">账号凭证</div>
           <div class="section-group__body">
-            <div class="info-row" v-for="field in credentialFields" :key="field.key">
+            <div class="info-row" v-for="field in accountCredentialFields(row)" :key="field.key">
               <span class="info-row__label">{{ field.label }}</span>
               <span class="info-row__value">
                 <template v-if="field.sensitive">
@@ -183,7 +149,7 @@
             <div class="info-row"><span class="info-row__label">注册人</span><span class="info-row__value">{{ row.registrant || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">使用人</span><span class="info-row__value">{{ row.operator || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">账号来源</span><span class="info-row__value">{{ row.source || '-' }}</span></div>
-            <div class="info-row"><span class="info-row__label">注册时间</span><span class="info-row__value">{{ row.account_created_at ? formatDate(row.account_created_at) : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">注册时间</span><span class="info-row__value">{{ row.account_created_at ? formatDate(row.account_created_at) : row.account_created_year || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">最后采集</span><span class="info-row__value">{{ row.last_collected_at ? formatDate(row.last_collected_at) : '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">采集状态</span><span class="info-row__value">{{ collectStatusLabel(row.collect_status) }}</span></div>
 <div class="info-row info-row--full"><span class="info-row__label">备注</span><div class="info-row__value"><details v-if="row.remark" class="inline-remark"><summary :title="row.remark">{{ row.remark }}</summary><div>{{ row.remark }}</div></details><span v-else>-</span></div></div>
@@ -198,7 +164,7 @@
             <span :class="['op-platform-badge', `op-platform-badge--${row.platform}`]">{{ row.platform?.toUpperCase() }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="账号" min-width="200" fixed="left">
+        <el-table-column :label="filters.platform === 'gmail' ? '邮箱' : '账号'" min-width="200" fixed="left">
           <template #default="{ row }">
             <div
               class="account-cell"
@@ -215,7 +181,7 @@
               <div>
                 <div style="font-weight:500">{{ row.account }}</div>
                 <div v-if="row.nickname" style="font-size:12px;color:#909399">{{ row.nickname }}</div>
-                <div class="account-metrics" aria-label="账号数据">
+                <div v-if="row.platform !== 'gmail'" class="account-metrics" aria-label="账号数据">
                   <span title="粉丝数">粉丝 {{ formatNum(row.follower_count) }}</span>
                   <span title="关注数">关注 {{ formatNum(row.following_count) }}</span>
                   <span title="点赞数">赞 {{ formatNum(row.like_count) }}</span>
@@ -225,10 +191,11 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="粉丝数" width="100" align="right"><template #default="{ row }">{{ formatNum(row.follower_count) }}</template></el-table-column>
-        <el-table-column label="粉丝变化" width="110" align="right"><template #default="{ row }"><el-tooltip content="关联监控账号最近两次成功检查的粉丝变化"><span :class="row.followers_change > 0 ? 'op-delta-up' : row.followers_change < 0 ? 'op-delta-down' : 'op-delta-neutral'">{{ row.followers_change == null ? '暂无对比' : (row.followers_change > 0 ? '+' : '') + row.followers_change }}</span></el-tooltip></template></el-table-column>
-        <el-table-column label="昨日更新（北京时间）" width="170"><template #default="{ row }">{{ !row.monitor_account_id ? '未关联监控' : row.yesterday_video_count == null ? '视频数据待刷新' : row.yesterday_video_count > 0 ? '已更新 ' + row.yesterday_video_count + ' 条' : '未发现更新' }}</template></el-table-column>
-        <el-table-column label="昨日视频流量" min-width="170"><template #default="{ row }"><el-tooltip content="昨日发布视频的最新累计播放量，不是昨日新增播放；按发布时间从新到旧排列。"><span>{{ row.yesterday_video_plays == null ? '暂无可靠数据' : row.yesterday_video_plays.join(' / ') || '—' }}</span></el-tooltip></template></el-table-column>
+        <el-table-column v-if="filters.platform !== 'gmail'" label="粉丝数" width="100" align="right"><template #default="{ row }">{{ formatNum(row.follower_count) }}</template></el-table-column>
+        <el-table-column v-if="filters.platform !== 'gmail'" label="粉丝变化" width="110" align="right"><template #default="{ row }"><el-tooltip content="关联监控账号最近两次成功检查的粉丝变化"><span :class="row.followers_change > 0 ? 'op-delta-up' : row.followers_change < 0 ? 'op-delta-down' : 'op-delta-neutral'">{{ row.followers_change == null ? '暂无对比' : (row.followers_change > 0 ? '+' : '') + row.followers_change }}</span></el-tooltip></template></el-table-column>
+        <el-table-column v-if="filters.platform !== 'gmail'" label="昨日更新（北京时间）" width="170"><template #default="{ row }">{{ !row.monitor_account_id ? '未关联监控' : row.yesterday_video_count == null ? '视频数据待刷新' : row.yesterday_video_count > 0 ? '已更新 ' + row.yesterday_video_count + ' 条' : '未发现更新' }}</template></el-table-column>
+        <el-table-column v-if="filters.platform !== 'gmail'" label="昨日视频流量" min-width="170"><template #default="{ row }"><el-tooltip content="昨日发布视频的最新累计播放量，不是昨日新增播放；按发布时间从新到旧排列。"><span>{{ row.yesterday_video_plays == null ? '暂无可靠数据' : row.yesterday_video_plays.join(' / ') || '—' }}</span></el-tooltip></template></el-table-column>
+        <el-table-column v-if="filters.platform === 'gmail'" label="辅助邮箱" min-width="180"><template #default="{ row }">{{ row.recovery_email || '—' }}</template></el-table-column>
         <el-table-column label="绑定终端" width="140">
           <template #default="{ row }">{{ row.device_name || '未绑定' }}</template>
         </el-table-column>
@@ -240,7 +207,7 @@
             <span :class="['op-status-badge', `op-status-badge--${statusKey(row.status)}`]">{{ row.status }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('password')" label="密码" width="120">
+        <el-table-column v-if="colVisible('password')" :label="filters.platform === 'gmail' ? '邮箱密码' : '密码'" width="120">
           <template #default="{ row }">
             <div class="secret-cell">
               <span>{{ visibleFields[row.id]?.password ? row.password : '••••••' }}</span>
@@ -319,9 +286,9 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('account_created_at')" label="注册时间" width="100">
+        <el-table-column v-if="filters.platform === 'gmail' || colVisible('account_created_at')" label="注册时间" width="150">
           <template #default="{ row }">
-            <span style="font-size:12px">{{ row.account_created_at ? formatDate(row.account_created_at) : '-' }}</span>
+            <span style="font-size:12px">{{ row.account_created_at ? formatDate(row.account_created_at) : row.account_created_year || '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column v-if="colVisible('last_collected_at')" label="最后采集" width="100">
@@ -329,7 +296,7 @@
             <span style="font-size:12px">{{ row.last_collected_at ? formatDate(row.last_collected_at) : '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('collect_status')" label="采集状态" width="90">
+        <el-table-column v-if="filters.platform !== 'gmail' && colVisible('collect_status')" label="采集状态" width="90">
           <template #default="{ row }">
 <el-tooltip :content="row.collect_error || '最近基础数据采集结果'"><el-tag :type="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'danger' : collectStatusType(row.collect_status)" size="small">{{ row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号不存在' : collectStatusLabel(row.collect_status) }}</el-tag></el-tooltip>
           </template>
@@ -375,11 +342,17 @@
             <span v-else>{{ row.remark || '-' }}</span>
           </template>
         </el-table-column>
+        <el-table-column v-if="filters.platform === 'gmail'" label="添加时间" width="150"><template #default="{ row }">{{ formatDate(row.created_at) }}</template></el-table-column>
+        <el-table-column v-if="accounts.some(row => row.platform === 'gmail')" label="Gmail 检测" width="110">
+          <template #default="{ row }"><el-tooltip v-if="row.platform === 'gmail'" :content="gmailCheckHint(row)"><el-tag :type="gmailCheckTagType(row.gmail_check_status)" size="small">{{ row.gmail_check_status || '未检测' }}</el-tag></el-tooltip><span v-else>—</span></template>
+        </el-table-column>
+        <el-table-column v-if="filters.platform === 'gmail'" label="最后检测" width="150"><template #default="{ row }">{{ row.gmail_checked_at ? formatDate(row.gmail_checked_at) : '—' }}</template></el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="success" size="small" @click="openRelation(row)">关联</el-button>
             <el-tooltip content="编辑"><el-button link type="primary" size="small" @click="handleEdit(row)"><el-icon><Edit /></el-icon></el-button></el-tooltip>
-            <el-tooltip content="采集"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
+            <el-tooltip v-if="row.platform === 'gmail'" content="检测 Gmail"><el-button link type="warning" size="small" :loading="gmailCheckLoading" @click="handleGmailCheck([row.id])"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
+            <el-tooltip v-if="row.platform === 'tiktok'" content="采集"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
             <el-tooltip content="历史"><el-button link type="primary" size="small" @click="showLogs(row)"><el-icon><Document /></el-icon></el-button></el-tooltip>
             <el-tooltip content="删除"><el-button link type="danger" size="small" @click="handleDelete(row)"><el-icon><Delete /></el-icon></el-button></el-tooltip>
           </template>
@@ -404,6 +377,7 @@
               <span :class="['op-status-badge', `op-status-badge--${statusKey(row.status)}`]" style="margin-left:4px">{{ row.status }}</span>
             </div>
           </div>
+          <div v-if="row.platform === 'gmail'" class="ios-card-row"><span class="ios-card-row-label">Gmail 检测</span><el-tooltip :content="gmailCheckHint(row)"><el-tag :type="gmailCheckTagType(row.gmail_check_status)" size="small">{{ row.gmail_check_status || '未检测' }}</el-tag></el-tooltip></div>
           <!-- 行项 -->
           <div v-if="row.country" class="ios-card-row">
             <span class="ios-card-row-label">国家</span>
@@ -432,7 +406,8 @@
           <!-- 操作区 -->
           <div class="ios-card-actions">
             <el-tooltip content="编辑"><el-button link type="primary" size="small" @click="handleEdit(row)"><el-icon><Edit /></el-icon></el-button></el-tooltip>
-            <el-tooltip content="采集"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
+            <el-tooltip v-if="row.platform === 'gmail'" content="检测 Gmail"><el-button link type="warning" size="small" :loading="gmailCheckLoading" @click="handleGmailCheck([row.id])"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
+            <el-tooltip v-if="row.platform === 'tiktok'" content="采集"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
             <el-tooltip content="历史"><el-button link type="primary" size="small" @click="showLogs(row)"><el-icon><Document /></el-icon></el-button></el-tooltip>
             <el-tooltip content="删除"><el-button link type="danger" size="small" @click="handleDelete(row)"><el-icon><Delete /></el-icon></el-button></el-tooltip>
           </div>
@@ -489,7 +464,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="账号" prop="account" :rules="[{required:true,message:'请输入账号'}]">
+            <el-form-item :label="form.platform === 'gmail' ? '邮箱' : '账号'" prop="account" :rules="[{required:true,message:'请输入账号'}]">
               <el-input v-model="form.account" />
             </el-form-item>
           </el-col>
@@ -520,22 +495,27 @@
         <div class="form-section-title">账号凭证</div>
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="密码"><el-input v-model="form.password" show-password /></el-form-item>
+            <el-form-item :label="form.platform === 'gmail' ? '邮箱密码' : '密码'"><el-input v-model="form.password" show-password /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="2FA密钥"><el-input v-model="form.totp_secret" /></el-form-item>
+            <el-form-item label="2FA密钥"><el-input v-model="form.totp_secret" show-password /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="绑定邮箱"><el-input v-model="form.email" /></el-form-item>
+            <el-form-item v-if="form.platform === 'gmail'" label="辅助邮箱"><el-input v-model="form.recovery_email" /></el-form-item>
+            <el-form-item v-else label="绑定邮箱"><el-input v-model="form.email" /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="邮箱密码"><el-input v-model="form.email_password" show-password /></el-form-item>
+            <el-form-item v-if="form.platform !== 'gmail'" label="邮箱密码"><el-input v-model="form.email_password" show-password /></el-form-item>
+            <template v-else>
+              <el-form-item label="注册时间"><el-date-picker v-model="form.account_created_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%" /></el-form-item>
+              <el-form-item v-if="!form.account_created_at" label="注册年份"><el-input-number v-model="form.account_created_year" :min="1" :max="9999" :precision="0" placeholder="仅知道年份时填写" /></el-form-item>
+            </template>
           </el-col>
           <el-col :span="24">
             <el-form-item label="邮箱登录地址"><el-input v-model="form.email_login_url" /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="绑定手机"><el-input v-model="form.phone" /></el-form-item>
+            <el-form-item :label="form.platform === 'gmail' ? '恢复手机号' : '绑定手机'"><el-input v-model="form.phone" /></el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="手机管理链接"><el-input v-model="form.phone_manage_url" /></el-form-item>
@@ -565,22 +545,24 @@
           </el-col>
         </el-row>
 
+        <template v-if="form.status === '已售'">
         <div class="form-section-title">出售信息</div>
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="出售客户"><el-input v-model="form.sale_customer" /></el-form-item>
+            <el-form-item label="出售客户" required><el-input v-model="form.sale_customer" /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="出售金额"><el-input-number v-model="form.sale_price" :precision="2" :min="0" style="width:100%" /></el-form-item>
+            <el-form-item label="出售金额" required><el-input-number v-model="form.sale_price" :precision="2" :min="0" style="width:100%" /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="出售日期"><el-date-picker v-model="form.sale_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
+            <el-form-item label="出售日期" required><el-date-picker v-model="form.sale_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="出售人"><SellerSelector v-model="form.sellers" /></el-form-item>
+            <el-form-item label="出售人" required><SellerSelector v-model="form.sellers" /></el-form-item>
           </el-col>
         </el-row>
 
+        </template>
         <div class="form-section-title">其他</div>
         <el-row :gutter="16">
           <el-col :span="12">
@@ -650,10 +632,10 @@
           </el-select>
         </el-form-item>
         <template v-if="batchStatus.status === '已售'">
-          <el-form-item label="出售客户"><el-input v-model="batchStatus.sale_customer" /></el-form-item>
-          <el-form-item label="出售金额"><el-input-number v-model="batchStatus.sale_price" :precision="2" :min="0" style="width:100%" /></el-form-item>
-          <el-form-item label="出售日期"><el-date-picker v-model="batchStatus.sale_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
-          <el-form-item label="出售人"><SellerSelector v-model="batchStatus.sellers" /></el-form-item>
+          <el-form-item label="出售客户" required><el-input v-model="batchStatus.sale_customer" /></el-form-item>
+          <el-form-item label="出售金额" required><el-input-number v-model="batchStatus.sale_price" :precision="2" :min="0" style="width:100%" /></el-form-item>
+          <el-form-item label="出售日期" required><el-date-picker v-model="batchStatus.sale_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
+          <el-form-item label="出售人" required><SellerSelector v-model="batchStatus.sellers" /></el-form-item>
         </template>
       </el-form>
       <template #footer>
@@ -665,13 +647,21 @@
     <!-- 批量导入对话框 -->
     <el-dialog v-model="showImportDialog" title="批量导入账号" width="560px">
       <el-alert type="info" :closable="false" style="margin-bottom:12px">
-        <p>支持 CSV 或 Excel 文件。必填列：<strong>账号</strong>、<strong>平台</strong>（TikTok/YouTube/Instagram/Facebook）</p>
+        <p>运营账号导入支持 CSV/Excel，必填列：账号、平台。邮箱请在独立的邮箱管理中导入。</p>
         <p>其余列可留空；请先下载中文模板，按示例填写后再导入。布尔字段填写“是/否”。</p>
         <el-button link type="primary" @click="downloadImportTemplate"><el-icon><Download /></el-icon>下载中文示例模板</el-button>
       </el-alert>
       <el-form label-width="80px">
-        <el-form-item label="CSV文件">
-          <el-upload ref="uploadRef" :auto-upload="false" :limit="1" accept=".csv,.xlsx" :on-change="handleFileChange" :file-list="importForm.fileList">
+        <el-form-item label="导入方式">
+          <el-radio-group v-model="importForm.mode"><el-radio value="file" label="file">文件</el-radio></el-radio-group>
+          <el-button v-if="authStore.hasPermission('email:view')" link type="primary" @click="router.push('/emails')">前往邮箱管理</el-button>
+        </el-form-item>
+        <el-form-item v-if="importForm.mode === 'gmail'" label="Gmail">
+          <el-input v-model="importForm.text" type="textarea" :rows="7" placeholder="邮箱:邮箱密码:辅助邮箱:2FA:注册时间:国家&#10;demo@gmail.com:password:recovery@example.com:KEY:2021:美国" />
+          <small>每行一个，无需表头。支持年份、日期、完整时间；也支持 ---- 分隔四字段，缺少时间/国家无需补齐。</small>
+        </el-form-item>
+        <el-form-item v-else label="文件">
+          <el-upload ref="uploadRef" :auto-upload="false" :limit="1" accept=".csv,.xlsx,.txt" :on-change="handleFileChange" :file-list="importForm.fileList">
             <el-button type="primary">选择文件</el-button>
           </el-upload>
         </el-form-item>
@@ -739,7 +729,7 @@
         </div>
 
         <!-- 数据概览 -->
-        <div class="section-group">
+        <div v-if="detailDialog.row.platform !== 'gmail'" class="section-group">
           <div class="section-group__title">数据概览</div>
           <div class="stats-grid">
             <div class="stat-item"><div class="stat-item__value">{{ formatNum(detailDialog.row.follower_count) }}</div><div class="stat-item__label">粉丝数</div></div>
@@ -753,7 +743,7 @@
         <div class="section-group">
           <div class="section-group__title">账号凭证</div>
           <div class="section-group__body">
-            <div class="info-row" v-for="field in credentialFields" :key="field.key">
+            <div class="info-row" v-for="field in accountCredentialFields(detailDialog.row)" :key="field.key">
               <span class="info-row__label">{{ field.label }}</span>
               <span class="info-row__value">
                 <template v-if="field.sensitive">
@@ -812,7 +802,7 @@
             <div class="info-row"><span class="info-row__label">注册人</span><span class="info-row__value">{{ detailDialog.row.registrant || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">使用人</span><span class="info-row__value">{{ detailDialog.row.operator || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">账号来源</span><span class="info-row__value">{{ detailDialog.row.source || '-' }}</span></div>
-            <div class="info-row"><span class="info-row__label">注册时间</span><span class="info-row__value">{{ detailDialog.row.account_created_at ? formatDate(detailDialog.row.account_created_at) : '-' }}</span></div>
+            <div class="info-row"><span class="info-row__label">注册时间</span><span class="info-row__value">{{ detailDialog.row.account_created_at ? formatDate(detailDialog.row.account_created_at) : detailDialog.row.account_created_year || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">最后采集</span><span class="info-row__value">{{ detailDialog.row.last_collected_at ? formatDate(detailDialog.row.last_collected_at) : '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">采集状态</span><span class="info-row__value">{{ collectStatusLabel(detailDialog.row.collect_status) }}</span></div>
             <div class="info-row info-row--full"><span class="info-row__label">备注</span><span class="info-row__value">{{ detailDialog.row.remark || '-' }}</span></div>
@@ -841,40 +831,27 @@
 <script setup>
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRouter, useRoute } from 'vue-router'
 import { Plus, Upload, Download, Search, Setting, ArrowDown, View, Hide, Edit, Delete, Refresh, Document } from '@element-plus/icons-vue'
 import {
   listOpAccounts, createOpAccount, updateOpAccount, deleteOpAccount,
   batchUpdateStatus, batchAssignOperator, importOpAccounts, downloadOpAccountImportTemplate, exportOpAccounts,
-  triggerCollect, getCollectTask, getAuditLogs, getOpAccountStats
+  triggerCollect, getCollectTask, getAuditLogs, checkGmailAccounts
 } from '@/api/op_accounts'
 import { getMembers } from '@/api/team'
 import { getDevices } from '@/api/devices'
 import { getProxyNodes } from '@/api/proxy_nodes'
 import { useAuthStore } from '@/stores/auth'
 import SellerSelector from '@/components/SellerSelector.vue'
+import { saleInformationError } from '@/utils/saleValidation'
 import InlineAccountVideos from '@/components/InlineAccountVideos.vue'
 import AssociationOverview from '@/components/AssociationOverview.vue'
+import AccountEmailRelations from '@/components/AccountEmailRelations.vue'
 
 const authStore = useAuthStore()
+const router = useRouter()
+const route = useRoute()
 const canBatchAssign = computed(() => authStore.hasPermission('op_account:edit') && authStore.hasPermission('team:member:view'))
-
-// ===== 统计数据 =====
-const accountStats = ref({
-  total: 0,
-  by_status: { '正常': 0, '自用': 0, '封禁': 0, '已售': 0 },
-  by_platform: {},
-  total_purchase_cost: 0,
-  total_sale_revenue: 0,
-  net_profit: 0,
-})
-const loadStats = async () => {
-  try {
-    accountStats.value = await getOpAccountStats()
-  } catch (e) {
-    if (e?.response?.status === 409) ElMessage.warning('该平台账号已存在，不能重复添加')
-    else console.error(e)
-  }
-}
 
 // ===== 数据 =====
 const accounts = ref([])
@@ -940,6 +917,13 @@ const credentialFields = [
   { key: 'phone', label: '绑定手机', sensitive: false },
   { key: 'phone_manage_url', label: '手机管理链接', sensitive: false },
 ]
+const accountCredentialFields = (row) => row.platform === 'gmail' ? [
+  { key: 'account', label: '邮箱' },
+  { key: 'password', label: '邮箱密码', sensitive: true },
+  { key: 'recovery_email', label: '辅助邮箱' },
+  { key: 'totp_secret', label: '2FA密钥', sensitive: true },
+  { key: 'phone', label: '恢复手机号' },
+] : credentialFields
 const tiktokPerms = [
   { key: 'tiktok_mid_video', label: '中视频' },
   { key: 'tiktok_showcase', label: '橱窗' },
@@ -991,6 +975,7 @@ const loadAccounts = async () => {
     const params = {
       skip: (pagination.page - 1) * pagination.limit,
       limit: pagination.limit,
+      exclude_gmail: true,
     }
     if (filters.platform) params.platform = filters.platform
     if (filters.status) params.status = filters.status
@@ -1032,7 +1017,7 @@ const collectStatusType = (s) => ({ success: 'success', failed: 'danger', pendin
 const collectStatusLabel = (s) => ({ success: '成功', failed: '失败', pending: '待采集', unsupported: '不支持' }[s] || s)
 const auditActionLabel = (action) => ({ create: '新增', update: '修改', delete: '删除' }[action] || action || '-')
 const fieldLabel = (field) => ({
-  account: '账号', platform: '平台', password: '密码', totp_secret: '双重验证码密钥', email: '绑定邮箱',
+  recovery_email: '辅助邮箱', account_created_at: '注册时间', account_created_year: '注册年份', account: '账号', platform: '平台', password: '密码', totp_secret: '双重验证码密钥', email: '绑定邮箱',
   email_password: '邮箱密码', email_login_url: '邮箱登录地址', phone: '绑定手机', phone_manage_url: '手机管理链接',
   country: '国家/地区', source: '账号来源', tags: '标签', remark: '备注', status: '状态', registrant: '注册人',
   operator: '使用人', purchase_channel: '采购渠道', purchase_price: '采购金额', purchase_date: '采购日期',
@@ -1044,7 +1029,7 @@ const formRef = ref(null)
 const formDialog = reactive({ visible: false, isEdit: false, loading: false })
 const emptyForm = () => ({
   platform: 'tiktok', account: '', password: '', totp_secret: '',
-  email: '', email_password: '', email_login_url: '', phone: '', phone_manage_url: '',
+  recovery_email: '', account_created_at: null, account_created_year: null, email: '', email_password: '', email_login_url: '', phone: '', phone_manage_url: '',
   country: '', source: null, tags: '', remark: '', status: '正常', registrant: '', operator: '',
   tiktok_mid_video: false, tiktok_showcase: false, tiktok_phone_live: false, tiktok_partner_live: false,
   purchase_channel: '', purchase_price: null, purchase_date: null,
@@ -1073,6 +1058,10 @@ const handleEdit = (row) => {
   formDialog.visible = true
 }
 const handleSubmit = async () => {
+  if (form.value.status === '已售') {
+    const error = saleInformationError(form.value, true)
+    if (error) return ElMessage.warning(error)
+  }
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   formDialog.loading = true
@@ -1082,7 +1071,7 @@ const handleSubmit = async () => {
       ElMessage.success('更新成功')
     } else {
       await createOpAccount(form.value)
-      ElMessage.success('创建成功，已触发信息采集')
+      ElMessage.success(form.value.platform === 'tiktok' ? '创建成功，已触发信息采集' : '创建成功')
     }
     formDialog.visible = false
     loadAccounts()
@@ -1097,7 +1086,6 @@ const handleDelete = async (row) => {
     await deleteOpAccount(row.id)
     ElMessage.success('删除成功')
     loadAccounts()
-    loadStats()
   } catch (e) { if (e !== 'cancel') console.error(e) }
 }
 const handleBatchDelete = async () => {
@@ -1106,7 +1094,6 @@ const handleBatchDelete = async () => {
     await Promise.all(selectedIds.value.map(id => deleteOpAccount(id)))
     ElMessage.success('批量删除成功')
     loadAccounts()
-    loadStats()
   } catch (e) { if (e !== 'cancel') console.error(e) }
 }
 
@@ -1145,26 +1132,29 @@ const handleBatchAssign = async () => {
       detailDialog.value.row.operator = batchAssign.operator
     }
     showBatchAssignDialog.value = false
-    await Promise.all([loadAccounts(), loadStats()])
+    await loadAccounts()
   } catch (e) { console.error(e) }
   finally { batchAssign.loading = false }
 }
 const batchStatus = reactive({ status: '正常', sale_customer: '', sale_price: null, sale_date: null, sellers: [], loading: false })
 const handleBatchStatus = async () => {
+  if (batchStatus.status === '已售') {
+    const error = saleInformationError(batchStatus, true)
+    if (error) return ElMessage.warning(error)
+  }
   batchStatus.loading = true
   try {
     await batchUpdateStatus({
       ids: selectedIds.value,
       status: batchStatus.status,
       sale_customer: batchStatus.sale_customer || null,
-      sale_price: batchStatus.sale_price || null,
+      sale_price: batchStatus.sale_price ?? null,
       sale_date: batchStatus.sale_date || null,
       sellers: batchStatus.sellers?.length ? batchStatus.sellers : null,
     })
     ElMessage.success('批量修改状态成功')
     showBatchStatusDialog.value = false
     loadAccounts()
-    loadStats()
   } catch (e) { console.error(e) }
   finally { batchStatus.loading = false }
 }
@@ -1191,7 +1181,7 @@ const handleExport = async (format) => {
 // ===== 导入 =====
 const showImportDialog = ref(false)
 const importResult = ref(null)
-const importForm = reactive({ fileList: [], file: null, loading: false })
+const importForm = reactive({ mode: 'file', text: '', fileList: [], file: null, loading: false })
 const handleFileChange = (file) => { importForm.file = file.raw }
 const downloadImportTemplate = async () => {
   try {
@@ -1201,14 +1191,15 @@ const downloadImportTemplate = async () => {
   } catch (e) { console.error(e) }
 }
 const handleImport = async () => {
-  if (!importForm.file) { ElMessage.warning('请选择CSV或Excel文件'); return }
+  if (importForm.mode === 'gmail' ? !importForm.text.trim() : !importForm.file) { ElMessage.warning('请选择文件或粘贴 Gmail 账号'); return }
   importForm.loading = true
   try {
     const fd = new FormData()
-    fd.append('file', importForm.file)
+    fd.append('file', importForm.mode === 'gmail' ? new File([importForm.text], 'gmail.txt', { type: 'text/plain' }) : importForm.file)
     importResult.value = await importOpAccounts(fd)
+    if (importForm.mode === 'gmail' && importResult.value.failed === 0) importForm.text = ''
     ElMessage.success(`导入完成：成功 ${importResult.value.success}，重复 ${importResult.value.duplicates}，失败 ${importResult.value.failed}`)
-    await Promise.all([loadAccounts(), loadStats()])
+    await loadAccounts()
     if (importResult.value.task_id) {
       watchCollectTask(importResult.value.task_id, importResult.value.rows
         .filter(row => row._result === 'success' && row._id)
@@ -1228,6 +1219,8 @@ const collectTask = reactive({ visible: false, total: 0, completed: 0, success: 
 let collectPollTimer = null
 
 const startCollect = async (ids) => {
+  ids = ids.filter(id => accounts.value.some(row => row.id === id && row.platform === 'tiktok'))
+  if (!ids.length) return ElMessage.info('仅支持 TikTok 账号采集')
   collectLoading.value = true
   try {
     const res = await triggerCollect(ids)
@@ -1251,10 +1244,28 @@ const watchCollectTask = (taskId, ids) => {
         clearInterval(collectPollTimer)
         collectTask.done = true
         collectTask.status = t.failed > 0 ? 'warning' : 'success'
-        await Promise.all([loadAccounts(), loadStats()])
+        await loadAccounts()
       }
     } catch (e) { clearInterval(collectPollTimer) }
   }, 2000)
+}
+const gmailCheckLoading = ref(false)
+const selectedGmailIds = computed(() => selectedIds.value.filter(id => accounts.value.some(row => row.id === id && row.platform === 'gmail')))
+const gmailCheckTagType = (status) => ({ '正常': 'success', '封禁': 'danger', '验证': 'warning' }[status] || 'info')
+const gmailCheckHint = (row) => ['第三方探测，不代表可登录；不覆盖管理状态', row.gmail_check_raw_status, row.gmail_checked_at ? formatDate(row.gmail_checked_at) : '尚未检测'].filter(Boolean).join(' · ')
+const handleGmailCheck = async (ids) => {
+  if (gmailCheckLoading.value) return
+  if (!ids.length || ids.length > 50) return ElMessage.warning('每次请选择 1–50 个 Gmail 账号')
+  try {
+    await ElMessageBox.confirm('将把所选邮箱地址发送至 gmail0918.top 检测，不发送密码或 2FA。结果仅为第三方探测，不覆盖管理状态。是否继续？', 'Gmail 第三方检测', { type: 'warning' })
+  } catch { return }
+  gmailCheckLoading.value = true
+  try {
+    const result = await checkGmailAccounts(ids)
+    ElMessage.success('已检测 ' + result.checked + ' 个 Gmail 账号')
+    await loadAccounts()
+  } catch (error) { console.error(error) }
+  finally { gmailCheckLoading.value = false }
 }
 const handleBatchCollect = () => startCollect(selectedIds.value)
 const handleCollectOne = (row) => startCollect([row.id])
@@ -1275,10 +1286,12 @@ const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
 const handleResize = () => { windowWidth.value = window.innerWidth }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('resize', handleResize)
-  loadAccounts()
-  loadStats()
+  if (route.query.account_id) filters.keyword = String(route.query.keyword || '')
+  await loadAccounts()
+  const linkedAccount = accounts.value.find(account => account.id === Number(route.query.account_id))
+  if (linkedAccount) detailDialog.value = { visible: true, row: linkedAccount }
   if (authStore.hasPermission('team:member:view')) {
     getMembers({ size: 200 }).then(data => {
       teamMembers.value = data.items || []
@@ -1334,59 +1347,6 @@ onUnmounted(() => {
   gap: var(--space-md);
   background: var(--color-bg-page);
   min-height: 100%;
-}
-
-/* ===== 统计面板 ===== */
-.stats-panel {
-  margin-bottom: 4px;
-}
-
-.stats-panel > .stats-grid {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 12px;
-}
-
-@media (max-width: 1024px) {
-  .stats-panel > .stats-grid { grid-template-columns: repeat(4, 1fr); }
-}
-
-@media (max-width: 767px) {
-  .stats-panel > .stats-grid { grid-template-columns: repeat(4, 1fr); }
-}
-
-.stat-card {
-  text-align: center;
-  cursor: default;
-  height: 100%;
-}
-.stat-card :deep(.el-card__body) {
-  padding: 12px 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 72px;
-}
-.stat-card--success { border-top: 3px solid #67c23a; }
-.stat-card--primary { border-top: 3px solid #409eff; }
-.stat-card--warning { border-top: 3px solid #e6a23c; }
-.stat-card--info    { border-top: 3px solid #909399; }
-.stat-card--danger  { border-top: 3px solid #f56c6c; }
-.stat-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: #303133;
-  line-height: 1.2;
-  word-break: break-all;
-}
-.stat-value--profit { color: #67c23a; }
-.stat-value--loss   { color: #f56c6c; }
-
-.stat-label {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
 }
 
 .filter-card :deep(.el-card__body) { padding: 16px; }

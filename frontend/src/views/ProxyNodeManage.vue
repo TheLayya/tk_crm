@@ -1,46 +1,5 @@
 <template>
   <div class="proxy-node-manage">
-    <!-- 统计面板 -->
-    <div class="stats-panel">
-      <!-- 桌面端：一行8个 -->
-      <div class="stats-grid">
-        <el-card class="stat-card" shadow="hover">
-          <div class="stat-value">{{ stats.total }}</div>
-          <div class="stat-label">节点总数</div>
-        </el-card>
-        <el-card class="stat-card stat-card--success" shadow="hover">
-          <div class="stat-value">{{ stats.by_status?.active ?? 0 }}</div>
-          <div class="stat-label">自用</div>
-        </el-card>
-        <el-card class="stat-card stat-card--info" shadow="hover">
-          <div class="stat-value">{{ stats.by_status?.idle ?? 0 }}</div>
-          <div class="stat-label">闲置</div>
-        </el-card>
-        <el-card class="stat-card stat-card--warning" shadow="hover">
-          <div class="stat-value">{{ stats.by_status?.sold ?? 0 }}</div>
-          <div class="stat-label">已出售</div>
-        </el-card>
-        <el-card class="stat-card stat-card--danger" shadow="hover">
-          <div class="stat-value">{{ stats.by_status?.disabled ?? 0 }}</div>
-          <div class="stat-label">停用</div>
-        </el-card>
-        <el-card class="stat-card" shadow="hover">
-          <div class="stat-value">{{ formatCurrency(stats.total_purchase_cost) }}</div>
-          <div class="stat-label">总采购成本</div>
-        </el-card>
-        <el-card class="stat-card stat-card--success" shadow="hover">
-          <div class="stat-value">{{ formatCurrency(stats.total_sale_revenue) }}</div>
-          <div class="stat-label">总出售收入</div>
-        </el-card>
-        <el-card class="stat-card" shadow="hover">
-          <div class="stat-value" :class="Number(stats.net_profit) >= 0 ? 'stat-value--profit' : 'stat-value--loss'">
-            {{ formatCurrency(stats.net_profit) }}
-          </div>
-          <div class="stat-label">净收益</div>
-        </el-card>
-      </div>
-    </div>
-
     <el-card style="margin-top: 16px;">
       <template #header>
         <div class="card-header">
@@ -173,6 +132,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="port" label="端口" width="80" />
+        <el-table-column prop="country" label="国家/地区" width="100"><template #default="{ row }">{{ row.country || '未填写' }}</template></el-table-column>
         <el-table-column prop="protocol" label="协议" width="90">
           <template #default="{ row }">
             <el-tag size="small" type="info">{{ row.protocol?.toUpperCase() }}</el-tag>
@@ -338,24 +298,24 @@
         </el-row>
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="采购渠道" label-width="80px">
-              <el-input v-model="batchCommon.purchase_channel" placeholder="可选" />
+            <el-form-item label="采购渠道" required label-width="80px">
+              <el-input v-model="batchCommon.purchase_channel" placeholder="请输入采购渠道" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="采购单价" label-width="80px">
+            <el-form-item label="采购单价" required label-width="80px">
               <el-input-number v-model="batchCommon.purchase_price" :min="0" :precision="2" :controls="false" style="width: 100%;" placeholder="可选" />
             </el-form-item>
           </el-col>
         </el-row>
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="采购日期" label-width="80px">
+            <el-form-item label="采购日期" required label-width="80px">
               <el-date-picker v-model="batchCommon.purchase_date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" style="width: 100%;" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="到期日期" label-width="80px">
+            <el-form-item label="到期日期" required label-width="80px">
               <el-date-picker v-model="batchCommon.expire_date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" style="width: 100%;" />
             </el-form-item>
           </el-col>
@@ -377,6 +337,13 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-form-item label="国家/地区" required label-width="80px"><el-input v-model="batchCommon.country" maxlength="100" placeholder="例如：美国" /></el-form-item>
+
+        <el-row v-if="batchCommon.status === 'sold'" :gutter="16">
+          <el-col :span="12"><el-form-item label="出售客户" required label-width="80px"><el-input v-model="batchCommon.sale_customer" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="单个售价" required label-width="80px"><el-input-number v-model="batchCommon.sale_price" :min="0" :precision="2" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="24"><el-form-item label="出售人" required label-width="80px"><SellerSelector v-model="batchCommon.sellers" /></el-form-item></el-col>
+        </el-row>
 
         <!-- 解析预览 -->
         <div v-if="batchPreview.length > 0" style="margin-top: 8px;">
@@ -396,12 +363,13 @@
         v-if="editingId || addMode === 'single'"
         ref="nodeFormRef"
         :model="nodeForm"
-        :rules="nodeRules"
+        :rules="editingId ? { ip: nodeRules.ip, port: nodeRules.port } : nodeRules"
         label-width="100px"
         style="max-height: 60vh; overflow-y: auto; padding-right: 8px;"
       >
         <!-- 原始节点信息 -->
         <div class="form-section-title">原始节点信息</div>
+        <el-form-item label="国家/地区" prop="country"><el-input v-model="nodeForm.country" placeholder="例如：美国" maxlength="100" /></el-form-item>
         <el-row :gutter="16">
           <el-col :span="14">
             <el-form-item label="IP 地址" prop="ip">
@@ -467,48 +435,48 @@
           </el-collapse-item>
 
           <!-- 采购信息（可折叠） -->
-          <el-collapse-item title="采购信息" name="purchase">
+          <el-collapse-item :title="editingId ? '采购信息' : '采购信息（必填）'" name="purchase">
             <el-row :gutter="16">
               <el-col :span="12">
-                <el-form-item label="采购日期">
+                <el-form-item label="采购日期" prop="purchase_date">
                   <el-date-picker v-model="nodeForm.purchase_date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" style="width: 100%;" />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="到期日期">
+                <el-form-item label="到期日期" prop="expire_date">
                   <el-date-picker v-model="nodeForm.expire_date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" style="width: 100%;" />
                 </el-form-item>
               </el-col>
             </el-row>
             <el-row :gutter="16">
               <el-col :span="12">
-                <el-form-item label="采购单价">
+                <el-form-item label="采购单价" prop="purchase_price">
                   <el-input-number v-model="nodeForm.purchase_price" :min="0" :precision="2" :controls="false" style="width: 100%;" placeholder="可选" />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="采购渠道">
-                  <el-input v-model="nodeForm.purchase_channel" placeholder="可选" />
+                <el-form-item label="采购渠道" prop="purchase_channel">
+                  <el-input v-model="nodeForm.purchase_channel" placeholder="请输入采购渠道" />
                 </el-form-item>
               </el-col>
             </el-row>
           </el-collapse-item>
 
           <!-- 出售信息（可折叠） -->
-          <el-collapse-item title="出售信息" name="sale">
+          <el-collapse-item v-if="nodeForm.status === 'sold'" title="出售信息（必填）" name="sale">
             <el-row :gutter="16">
               <el-col :span="12">
-                <el-form-item label="出售客户">
-                  <el-input v-model="nodeForm.sale_customer" placeholder="可选" />
+                <el-form-item label="出售客户" required>
+                  <el-input v-model="nodeForm.sale_customer" placeholder="请输入出售客户" />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="出售价格">
-                  <el-input-number v-model="nodeForm.sale_price" :min="0" :precision="2" :controls="false" style="width: 100%;" placeholder="可选" />
+                <el-form-item label="出售价格" required>
+                  <el-input-number v-model="nodeForm.sale_price" :min="0" :precision="2" :controls="false" style="width: 100%;" placeholder="请输入售价" />
                 </el-form-item>
               </el-col>
               <el-col :span="24">
-                <el-form-item label="出售人">
+                <el-form-item label="出售人" required>
                   <SellerSelector v-model="nodeForm.sellers" />
                 </el-form-item>
               </el-col>
@@ -520,7 +488,7 @@
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="状态">
-              <el-select v-model="nodeForm.status" style="width: 100%;">
+              <el-select v-model="nodeForm.status" style="width: 100%;" @change="openSaleFields">
                 <el-option label="闲置" value="idle" />
                 <el-option label="自用" value="active" />
                 <el-option label="已出售" value="sold" />
@@ -539,6 +507,15 @@
           {{ !editingId && addMode === 'batch' ? `批量添加 (${batchPreview.filter(r => !r.error).length} 条)` : '确定' }}
         </el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="batchSaleVisible" title="批量出售节点" width="480px">
+      <el-form label-width="90px">
+        <el-form-item label="出售客户" required><el-input v-model="batchSale.sale_customer" /></el-form-item>
+        <el-form-item label="单个售价" required><el-input-number v-model="batchSale.sale_price" :min="0" :precision="2" style="width:100%" /></el-form-item>
+        <el-form-item label="出售人" required><SellerSelector v-model="batchSale.sellers" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="batchSaleVisible = false">取消</el-button><el-button type="primary" :loading="batchSaleLoading" @click="submitBatchSale">确认出售</el-button></template>
     </el-dialog>
 
     <!-- 导入对话框 -->
@@ -643,12 +620,14 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, Upload, Download, Delete, View, Hide,
   Connection, CircleCheck, CircleClose, UploadFilled, Document
 } from '@element-plus/icons-vue'
 import SellerSelector from '@/components/SellerSelector.vue'
+import { saleInformationError } from '@/utils/saleValidation'
 import QRCodeDialog from '@/components/QRCodeDialog.vue'
 import LinkedAccountCards from '@/components/LinkedAccountCards.vue'
 import AssociationOverview from '@/components/AssociationOverview.vue'
@@ -657,6 +636,7 @@ import { getProxyNodeLogs } from '@/api/proxy_nodes'
 import { useAuthStore } from '@/stores/auth'
 import {
   getProxyNodes,
+  getProxyNode,
   createProxyNode,
   updateProxyNode,
   deleteProxyNode,
@@ -667,13 +647,13 @@ import {
   importProxyNodes,
   downloadImportTemplate,
   exportProxyNodes,
-  getProxyNodeStats,
   getNodeUri
   , updateNodeRelation
 } from '@/api/proxy_nodes'
 import { isExpiringSoon } from '@/utils/proxyNodeUtils'
 
 const authStore = useAuthStore()
+const route = useRoute()
 const nodeTable = ref(null)
 const expandedNodeIds = ref([])
 const nodeActivity = ref({})
@@ -751,24 +731,6 @@ function closeQrDialog() {
   qrDialogVisible.value = false
   qrUri.value = ''
   qrTitle.value = ''
-}
-
-// ─── 统计数据 ───────────────────────────────────────────────
-const stats = ref({
-  total: 0,
-  by_status: { idle: 0, active: 0, sold: 0, disabled: 0 },
-  total_purchase_cost: 0,
-  total_sale_revenue: 0,
-  net_profit: 0,
-  by_channel: []
-})
-
-const loadStats = async () => {
-  try {
-    stats.value = await getProxyNodeStats()
-  } catch (err) {
-    console.error('Failed to load stats:', err)
-  }
 }
 
 // ─── 筛选条件 ────────────────────────────────────────────────
@@ -883,7 +845,7 @@ const handleDelete = async (row) => {
     )
     await deleteProxyNode(row.id)
     ElMessage.success('删除成功')
-    await Promise.all([loadNodes(), loadStats()])
+    await loadNodes()
   } catch (err) {
     if (err !== 'cancel') {
       ElMessage.error(err?.response?.data?.detail || '删除失败')
@@ -912,6 +874,12 @@ const handleBatchTest = async () => {
 
 const handleBatchUpdateStatus = async (status) => {
   if (!status) return
+  if (status === 'sold') {
+    Object.assign(batchSale, { sale_customer: '', sale_price: null, sellers: [] })
+    batchStatusTarget.value = null
+    batchSaleVisible.value = true
+    return
+  }
   try {
     await ElMessageBox.confirm(
       `确定将选中的 ${selectedNodes.value.length} 个节点状态修改为 "${status}" 吗？`,
@@ -922,7 +890,7 @@ const handleBatchUpdateStatus = async (status) => {
     await batchUpdateStatus(ids, status)
     ElMessage.success('批量修改状态成功')
     batchStatusTarget.value = null
-    await Promise.all([loadNodes(), loadStats()])
+    await loadNodes()
   } catch (err) {
     batchStatusTarget.value = null
     if (err !== 'cancel') {
@@ -941,7 +909,7 @@ const handleBatchDelete = async () => {
     const ids = selectedNodes.value.map(n => n.id)
     await batchDeleteProxyNodes(ids)
     ElMessage.success(`成功删除 ${ids.length} 个节点`)
-    await Promise.all([loadNodes(), loadStats()])
+    await loadNodes()
   } catch (err) {
     if (err !== 'cancel') {
       ElMessage.error(err?.response?.data?.detail || '批量删除失败')
@@ -951,10 +919,27 @@ const handleBatchDelete = async () => {
 
 // ─── 添加/编辑对话框 ─────────────────────────────────────────
 const nodeDialogVisible = ref(false)
+const batchSaleVisible = ref(false)
+const batchSaleLoading = ref(false)
+const batchSale = reactive({ sale_customer: '', sale_price: null, sellers: [] })
+const submitBatchSale = async () => {
+  const error = saleInformationError(batchSale)
+  if (error) return ElMessage.warning(error)
+  batchSaleLoading.value = true
+  try {
+    await batchUpdateStatus(selectedNodes.value.map(node => node.id), 'sold', batchSale)
+    batchSaleVisible.value = false
+    ElMessage.success('批量出售成功')
+    await loadNodes()
+  } finally { batchSaleLoading.value = false }
+}
 const editingId = ref(null)
 const submitting = ref(false)
 const nodeFormRef = ref(null)
 const activeCollapse = ref([])
+const openSaleFields = (status) => {
+  if (status === 'sold' && !activeCollapse.value.includes('sale')) activeCollapse.value.push('sale')
+}
 
 // 添加模式：single | batch
 const addMode = ref('single')
@@ -962,6 +947,8 @@ const addMode = ref('single')
 // 批量粘贴
 const batchText = ref('')
 const batchCommon = ref({
+  country: '',
+  sale_customer: '', sale_price: null, sellers: [],
   protocol: 'socks5',
   status: 'idle',
   purchase_channel: '',
@@ -999,6 +986,7 @@ const batchPreview = computed(() => {
 const defaultNodeForm = () => ({
   ip: '',
   port: null,
+  country: '',
   username: '',
   password: '',
   protocol: 'socks5',
@@ -1019,6 +1007,7 @@ const defaultNodeForm = () => ({
 const nodeForm = ref(defaultNodeForm())
 
 const nodeRules = {
+  country: [{ required: true, message: '请输入国家/地区', trigger: 'blur' }],
   ip: [{ required: true, message: '请输入 IP 地址', trigger: 'blur' }],
   port: [
     { required: true, message: '请输入端口号', trigger: 'blur' },
@@ -1034,16 +1023,22 @@ const nodeRules = {
       },
       trigger: 'blur'
     }
-  ]
+  ],
+  purchase_date: [{ required: true, message: '请选择采购日期', trigger: 'change' }],
+  purchase_price: [{ required: true, message: '请输入采购单价', trigger: 'change' }],
+  purchase_channel: [{ required: true, message: '请输入采购渠道', trigger: 'blur' }],
+  expire_date: [{ required: true, message: '请选择到期日期', trigger: 'change' }]
 }
 
 const openCreate = () => {
   editingId.value = null
   nodeForm.value = defaultNodeForm()
-  activeCollapse.value = []
+  activeCollapse.value = ['purchase']
   addMode.value = 'single'
   batchText.value = ''
   batchCommon.value = {
+    country: '',
+    sale_customer: '', sale_price: null, sellers: [],
     protocol: 'socks5',
     status: 'idle',
     purchase_channel: '',
@@ -1059,6 +1054,7 @@ const openEdit = (row) => {
   editingId.value = row.id
   nodeForm.value = {
     ip: row.ip || '',
+    country: row.country || '',
     port: row.port || null,
     username: row.username || '',
     password: row.password || '',
@@ -1080,12 +1076,23 @@ const openEdit = (row) => {
   const open = []
   if (row.relay_ip || row.relay_port) open.push('relay')
   if (row.purchase_date || row.purchase_price || row.purchase_channel || row.expire_date) open.push('purchase')
-  if (row.sale_customer || row.sale_price || (row.sellers && row.sellers.length)) open.push('sale')
+  if (row.status === 'sold') open.push('sale')
   activeCollapse.value = open
   nodeDialogVisible.value = true
 }
 
 const handleNodeSubmit = async () => {
+  const saleData = !editingId.value && addMode.value === 'batch' ? batchCommon.value : nodeForm.value
+  if (!editingId.value) {
+    for (const [field, label] of [['country', '国家/地区'], ['purchase_channel', '采购渠道'], ['purchase_date', '采购日期'], ['purchase_price', '采购单价'], ['expire_date', '到期日期']]) {
+      if (saleData[field] == null || String(saleData[field]).trim() === '') return ElMessage.warning(`请填写${label}`)
+    }
+    if (!Number.isFinite(Number(saleData.purchase_price)) || Number(saleData.purchase_price) < 0) return ElMessage.warning('采购单价必须为非负数字')
+  }
+  if (saleData.status === 'sold') {
+    const error = saleInformationError(saleData)
+    if (error) return ElMessage.warning(error)
+  }
   // 批量模式
   if (!editingId.value && addMode.value === 'batch') {
     const validItems = batchPreview.value.filter(r => !r.error)
@@ -1106,8 +1113,12 @@ const handleNodeSubmit = async () => {
             password: item.password || null,
             protocol: batchCommon.value.protocol,
             status: batchCommon.value.status,
+            sale_customer: batchCommon.value.sale_customer,
+            sale_price: batchCommon.value.sale_price,
+            sellers: batchCommon.value.sellers,
             purchase_channel: batchCommon.value.purchase_channel || null,
-            purchase_price: batchCommon.value.purchase_price || null,
+            country: batchCommon.value.country.trim(),
+            purchase_price: batchCommon.value.purchase_price ?? null,
             purchase_date: batchCommon.value.purchase_date || null,
             expire_date: batchCommon.value.expire_date || null,
             remark: batchCommon.value.remark || null,
@@ -1123,7 +1134,7 @@ const handleNodeSubmit = async () => {
         ElMessage.warning(`添加完成：成功 ${successCount}，失败 ${failCount}`)
       }
       nodeDialogVisible.value = false
-      await Promise.all([loadNodes(), loadStats()])
+      await loadNodes()
     } finally {
       submitting.value = false
     }
@@ -1138,7 +1149,7 @@ const handleNodeSubmit = async () => {
   try {
     // 清理空字符串为 null
     const data = { ...nodeForm.value }
-    const strFields = ['username', 'password', 'relay_ip', 'relay_protocol', 'purchase_channel', 'sale_customer', 'remark']
+    const strFields = ['username', 'password', 'relay_ip', 'relay_protocol', 'country', 'purchase_channel', 'sale_customer', 'remark']
     strFields.forEach(f => { if (data[f] === '') data[f] = null })
     if (!data.relay_port) data.relay_port = null
     if (!data.purchase_price && data.purchase_price !== 0) data.purchase_price = null
@@ -1152,7 +1163,7 @@ const handleNodeSubmit = async () => {
       ElMessage.success('节点创建成功')
     }
     nodeDialogVisible.value = false
-    await Promise.all([loadNodes(), loadStats()])
+    await loadNodes()
   } catch (err) {
     ElMessage.error(err?.response?.data?.detail || '操作失败')
   } finally {
@@ -1195,7 +1206,7 @@ const handleImport = async () => {
     const result = await importProxyNodes(importFile.value)
     importResult.value = result
     if (result.success_count > 0) {
-      await Promise.all([loadNodes(), loadStats()])
+      await loadNodes()
     }
   } catch (err) {
     ElMessage.error(err?.response?.data?.detail || '导入失败')
@@ -1257,7 +1268,24 @@ const formatCurrency = (val) => {
 
 // ─── 初始化 ──────────────────────────────────────────────────
 onMounted(async () => {
-  await Promise.all([loadNodes(), loadStats()])
+  await loadNodes()
+  const nodeId = Number(route.query.node_id)
+  if (nodeId) {
+    let node = nodes.value.find(item => item.id === nodeId)
+    if (!node) {
+      try {
+        node = await getProxyNode(nodeId)
+        nodes.value = [node]
+        total.value = 1
+      } catch {
+        ElMessage.error('无法加载该节点')
+      }
+    }
+    if (node) {
+      nodeTable.value?.toggleRowExpansion(node, true)
+      expandedNodeIds.value = [node.id]
+    }
+  }
 })
 </script>
 
@@ -1277,98 +1305,6 @@ onMounted(async () => {
   padding: 20px;
 }
 
-/* 统计面板 */
-.stats-panel {
-  margin-bottom: 4px;
-}
-
-/* flex grid：桌面8列，平板4列，移动4列 */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 12px;
-}
-
-@media (max-width: 1024px) {
-  .stats-grid { grid-template-columns: repeat(4, 1fr); }
-}
-
-@media (max-width: 767px) {
-  .stats-grid { grid-template-columns: repeat(4, 1fr); }
-}
-
-.stat-card {
-  text-align: center;
-  cursor: default;
-  height: 100%;          /* 让所有卡片等高 */
-}
-
-.stat-card :deep(.el-card__body) {
-  padding: 12px 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 72px;      /* 固定最小高度，保证一致 */
-}
-
-.stat-card--success {
-  border-top: 3px solid #67c23a;
-}
-
-.stat-card--primary {
-  border-top: 3px solid #409eff;
-}
-
-.stat-card--warning {
-  border-top: 3px solid #e6a23c;
-}
-
-.stat-card--info {
-  border-top: 3px solid #909399;
-}
-
-.stat-card--danger {
-  border-top: 3px solid #f56c6c;
-}
-
-.stat-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: #303133;
-  line-height: 1.2;
-  word-break: break-all;
-}
-
-.stat-value--profit { color: #67c23a; }
-.stat-value--loss   { color: #f56c6c; }
-
-.stat-label {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
-}
-
-/* 移动端：隐藏第一行里的财务卡片，显示专用财务行 */
-.stats-finance-row { display: none; }
-
-@media (max-width: 767px) {
-  .stat-col-hide-xs { display: none; }
-  .stats-finance-row {
-    display: flex;
-    margin-top: 8px;
-  }
-  .stat-value { font-size: 22px; }
-  .stat-value--small { font-size: 15px; }
-}
-
-/* 桌面端：隐藏专用财务行（已在第一行显示） */
-@media (min-width: 768px) {
-  .stats-finance-row { display: none !important; }
-  .stat-col-hide-xs { display: block; }
-}
-
-/* 卡片头部 */
 .card-header {
   display: flex;
   justify-content: space-between;

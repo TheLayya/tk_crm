@@ -56,7 +56,8 @@ dist/
 .env.*.local
 
 # Docker
-.dockerignore
+!backend/.dockerignore
+!frontend/.dockerignore
 
 # Testing
 .pytest_cache/

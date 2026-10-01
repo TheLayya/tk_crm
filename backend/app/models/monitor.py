@@ -122,6 +122,7 @@ class MonitorSettings(Base):
     default_video_count = Column(Integer, default=20, nullable=False)  # 默认监控视频数量
     site_name = Column(String(100), default="TikTok Monitor", nullable=False)  # 网站名称
     logo_image = Column(Text, nullable=True)  # Logo图片（base64编码）
+    login_screen_text = Column(Text, nullable=True)
     # Backup & notification fields
     backup_enabled = Column(Boolean, default=False, nullable=False)
     backup_interval_hours = Column(Integer, default=24, nullable=False)

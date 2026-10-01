@@ -124,7 +124,15 @@ const rules = {
   name: [{ required: true, message: '请输入角色名称', trigger: 'blur' }]
 }
 
-const permissionGroups = [
+  const permissionGroups = [
+    {
+      module: 'card_key', label: '卡密管理',
+      perms: [{ value: 'card_key:view', label: '查看/领取' }, { value: 'card_key:manage', label: '项目/导入管理' }]
+    },
+  {
+    module: 'work_item', label: '备忘管理',
+    perms: [{ value: 'work_item:view', label: '查看' }, { value: 'work_item:manage', label: '管理' }]
+  },
   {
     module: 'monitor', label: '监控管理',
     perms: [
@@ -150,6 +158,15 @@ const permissionGroups = [
     perms: [
       { value: 'device:view', label: '查看' },
       { value: 'device:manage', label: '管理' }
+    ]
+  },
+  {
+    module: 'email', label: '邮箱管理',
+    perms: [
+      { value: 'email:view', label: '查看' },
+      { value: 'email:manage', label: '管理' },
+      { value: 'email:import', label: '导入' },
+      { value: 'email:check', label: '检测' }
     ]
   },
   {

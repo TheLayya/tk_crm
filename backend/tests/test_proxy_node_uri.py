@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from app.models.team import OperationLog
 from app.services.proxy_node_service import build_node_uri
+from app.services.proxy_node_test_service import _build_proxy_url
 
 from .conftest import auth_headers
 
@@ -24,6 +25,32 @@ def _node(**kw):
 def test_uri_direct_with_credentials():
     node = _node(username="user", password="p@ss")
     assert build_node_uri(node) == "socks5://user:p%40ss@1.2.3.4:1080"
+
+
+@pytest.mark.parametrize("username,password", [
+    ("user@name", "p@ss:word"),
+    ("a/b", "c#d?e"),
+    ("中文用户", "中文密码"),
+])
+def test_proxy_test_url_escapes_credentials(username, password):
+    node = _node(username=username, password=password)
+    assert _build_proxy_url(node) == build_node_uri(node)
+
+
+@pytest.mark.parametrize("host", ["::1", "[::1]", "fe80::1%eth0"])
+def test_proxy_test_url_supports_ipv6(host):
+    node = _node(ip=host)
+    assert _build_proxy_url(node) == build_node_uri(node)
+
+
+def test_proxy_test_url_preserves_relay_selection():
+    node = _node(
+        username="user", password="p@ss", relay_ip="::1",
+        relay_port=8080, relay_protocol="http",
+    )
+    assert _build_proxy_url(node) == "http://user:p%40ss@[::1]:8080"
+    node.relay_protocol = None
+    assert _build_proxy_url(node) == "http://user:p%40ss@[::1]:8080"
 
 
 @pytest.mark.parametrize("username,password", [

@@ -6,6 +6,7 @@
 import logging
 import json
 from datetime import date
+from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
@@ -53,6 +54,9 @@ class BatchDeleteBody(BaseModel):
 class BatchStatusBody(BaseModel):
     node_ids: List[int]
     status: str
+    sale_customer: Optional[str] = None
+    sale_price: Optional[Decimal] = None
+    sellers: Optional[List[str]] = None
 
 
 class BatchTestBody(BaseModel):
@@ -142,6 +146,8 @@ def create_node(data: ProxyNodeCreate, db: Session = Depends(get_db), _current_u
     try:
         node = proxy_node_service.create_node(db, data)
         return node
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"create_node failed: {e}")
         raise HTTPException(
@@ -352,8 +358,10 @@ def batch_update_status(body: BatchStatusBody, db: Session = Depends(get_db), _c
         occupied = [n.id for n in nodes if n.status == "active" and body.status in {"idle", "disabled", "sold"}]
         if occupied:
             raise HTTPException(status_code=409, detail=f"节点正在使用中，先解除关联: {occupied}")
-        updated = proxy_node_service.batch_update_status(db, [n.id for n in nodes], body.status)
+        updated = proxy_node_service.batch_update_status(db, [n.id for n in nodes], body.status, body.sale_customer, body.sale_price, body.sellers)
         return {"updated": updated}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"batch_update_status failed: {e}")
         raise HTTPException(

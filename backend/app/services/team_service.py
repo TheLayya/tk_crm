@@ -302,9 +302,12 @@ def reset_password(id: int, new_password: str, db: Session) -> None:
 from app.models.team import RolePermission
 
 PREDEFINED_PERMISSIONS = {
+    "card_key:view", "card_key:manage",
+    "work_item:view", "work_item:manage",
     "monitor:view", "monitor:check", "monitor:proxy",
     "op_account:view", "op_account:create", "op_account:edit", "op_account:delete",
     "op_account:import", "op_account:export", "op_account:collect",
+    "email:view", "email:manage", "email:import", "email:check",
     "device:view", "device:manage",
     "proxy_node:view", "proxy_node:manage",
     "settings:view", "settings:edit",

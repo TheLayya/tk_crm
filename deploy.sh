@@ -27,6 +27,25 @@ error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 info()  { echo -e "${BLUE}[→]${NC} $1"; }
 title() { echo -e "${CYAN}$1${NC}"; }
 
+wait_for_services() {
+  local container status waited
+  for container in tiktok-monitor-backend tiktok-monitor-frontend; do
+    waited=0
+    while [ "$waited" -lt 120 ]; do
+      status=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "starting")
+      [ "$status" = "healthy" ] && break
+      [ "$status" = "unhealthy" ] && break
+      sleep 3
+      waited=$((waited + 3))
+    done
+    if [ "$status" != "healthy" ]; then
+      docker compose ps
+      docker compose logs --tail=80
+      error "${container} 未通过健康检查，部署未成功"
+    fi
+  done
+}
+
 # =============================================================================
 # GitHub Token 管理（首次输入后保存，后续自动读取）
 # =============================================================================
@@ -45,24 +64,46 @@ if [ -z "$BASH_SOURCE" ] || [ "$BASH_SOURCE" = "bash" ] || [ "$0" = "bash" ]; th
     echo -e "${GREEN}[✓]${NC} Token 已保存到 $TOKEN_FILE，后续无需重复输入"
   fi
   _saved_token=$(cat "$TOKEN_FILE")
-  exec bash <(curl -fsSL -H "Authorization: token $_saved_token" "$SCRIPT_URL") "$@"
+  exec bash <(printf 'header = "Authorization: token %s"\nurl = "%s"\n' \
+    "$_saved_token" "$SCRIPT_URL" | curl -fsSL --config -) "$@"
 fi
 
 # 读取已保存的 token（本地执行时使用）
 if [ -f "$TOKEN_FILE" ]; then
+  chmod 600 "$TOKEN_FILE"
   SAVED_GITHUB_TOKEN=$(cat "$TOKEN_FILE")
 fi
+
+GITHUB_ASKPASS=""
+prepare_git_auth() {
+  [ -n "$GITHUB_TOKEN" ] || return 0
+  [ -z "$GITHUB_ASKPASS" ] || rm -f "$GITHUB_ASKPASS"
+  GITHUB_ASKPASS=$(mktemp)
+  cat > "$GITHUB_ASKPASS" <<'EOF'
+#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\n' 'x-access-token' ;;
+  *) printf '%s\n' "$GITHUB_TOKEN" ;;
+esac
+EOF
+  chmod 700 "$GITHUB_ASKPASS"
+  export GITHUB_TOKEN GIT_ASKPASS="$GITHUB_ASKPASS" GIT_TERMINAL_PROMPT=0
+  trap 'rm -f "$GITHUB_ASKPASS"' EXIT
+}
 
 # =============================================================================
 # 子命令处理（在项目目录内执行）
 # =============================================================================
 case "$1" in
   --update)
+    GITHUB_TOKEN="$SAVED_GITHUB_TOKEN"
+    prepare_git_auth
     info "拉取最新代码..."
     git pull
     info "重新构建并重启服务..."
-    docker compose down
-    docker compose up -d --build
+    docker compose build
+    docker compose up -d
+    wait_for_services
     log "更新完成！"
     docker compose ps
     exit 0
@@ -78,6 +119,7 @@ case "$1" in
     ;;
   --restart)
     docker compose restart
+    wait_for_services
     log "服务已重启"
     exit 0
     ;;
@@ -148,6 +190,7 @@ else
   chmod 600 "$TOKEN_FILE"
   log "Token 已保存到 $TOKEN_FILE"
 fi
+prepare_git_auth
 
 # 安装目录
 read -rp "$(echo -e "${BLUE}[?]${NC} 安装目录 [默认: /opt/tiktok-monitor]: ")" INSTALL_DIR
@@ -157,29 +200,25 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/tiktok-monitor}"
 read -rp "$(echo -e "${BLUE}[?]${NC} 域名 (例: monitor.example.com，留空则用 IP 访问): ")" DOMAIN
 
 # 管理员密码
-read -rsp "$(echo -e "${BLUE}[?]${NC} 管理员初始密码 [默认: admin123456]: ")" ADMIN_PASSWORD
+read -rsp "$(echo -e "${BLUE}[?]${NC} 管理员初始密码: ")" ADMIN_PASSWORD
 echo ""
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin123456}"
+[ -n "$ADMIN_PASSWORD" ] || error "管理员密码不能为空"
 
 echo ""
 
 # --- 4. Clone 仓库 ---
 info "克隆仓库到 ${INSTALL_DIR}..."
 
-# 将 token 嵌入 URL（支持私有仓库）
-# 格式: https://<token>@github.com/user/repo.git
-REPO_WITH_TOKEN=$(echo "$GITHUB_REPO" | sed "s|https://|https://${GITHUB_TOKEN}@|")
-
 if [ -d "$INSTALL_DIR/.git" ]; then
   warn "目录已存在，执行 git pull 更新..."
   cd "$INSTALL_DIR"
-  # 更新 remote URL（token 可能变了）
-  git remote set-url origin "$REPO_WITH_TOKEN"
+  git remote set-url origin "$GITHUB_REPO"
   git pull
 else
   sudo mkdir -p "$(dirname "$INSTALL_DIR")"
-  sudo git clone "$REPO_WITH_TOKEN" "$INSTALL_DIR"
-  sudo chown -R "$USER:$USER" "$INSTALL_DIR"
+  sudo mkdir -p "$INSTALL_DIR"
+  sudo chown "$USER:$USER" "$INSTALL_DIR"
+  git clone "$GITHUB_REPO" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
 
@@ -191,16 +230,34 @@ git remote set-url origin "$GITHUB_REPO"
 # --- 5. 生成 backend/.env ---
 info "配置环境变量..."
 if [ ! -f backend/.env ]; then
-  cp backend/.env.example backend/.env
-
   JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null \
     || openssl rand -hex 32)
   FIELD_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null \
     || openssl rand -hex 32)
 
-  sed -i "s|your-secret-key-change-in-production|${JWT_SECRET}|g" backend/.env
-  sed -i "s|9b7d1f8a2c5e07394628abcfed1056798024bdf671ea5c0392785601dafb4729|${FIELD_KEY}|g" backend/.env
-  sed -i "s|SUPER_ADMIN_PASSWORD=admin123456|SUPER_ADMIN_PASSWORD=${ADMIN_PASSWORD}|g" backend/.env
+  JWT_SECRET="$JWT_SECRET" FIELD_KEY="$FIELD_KEY" ADMIN_PASSWORD="$ADMIN_PASSWORD" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path('backend/.env')
+values = {
+    'JWT_SECRET': os.environ['JWT_SECRET'],
+    'FIELD_ENCRYPTION_KEY': os.environ['FIELD_KEY'],
+    'SUPER_ADMIN_PASSWORD': os.environ['ADMIN_PASSWORD'],
+}
+if '${' in values['SUPER_ADMIN_PASSWORD']:
+    raise SystemExit('管理员密码不能包含 ${，该组合会被环境配置展开；请改用其他字符')
+lines = []
+for line in Path('backend/.env.example').read_text(encoding='utf-8').splitlines():
+    key = line.partition('=')[0]
+    if key in values:
+        value = values[key].replace('\\', '\\\\').replace("'", "\\'")
+        line = f"{key}='{value}'"
+    lines.append(line)
+descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(descriptor, 'w', encoding='utf-8') as configuration:
+    configuration.write('\n'.join(lines) + '\n')
+PY
 
   log "backend/.env 已生成（密钥已随机生成）"
 else
@@ -214,8 +271,8 @@ if [ ! -f frontend/.env ]; then
 fi
 
 # --- 7. 创建数据目录 ---
-mkdir -p data
-log "数据目录已就绪: ${INSTALL_DIR}/data"
+mkdir -p backend/data
+log "数据目录已就绪: ${INSTALL_DIR}/backend/data"
 
 # --- 8. 构建并启动 ---
 info "构建 Docker 镜像（首次约需 3-5 分钟）..."
@@ -226,16 +283,7 @@ docker compose up -d
 
 # --- 9. 等待健康检查 ---
 info "等待服务启动..."
-MAX_WAIT=90
-WAITED=0
-while [ $WAITED -lt $MAX_WAIT ]; do
-  STATUS=$(docker inspect --format='{{.State.Health.Status}}' tiktok-monitor-backend 2>/dev/null || echo "starting")
-  [ "$STATUS" = "healthy" ] && break
-  sleep 3
-  WAITED=$((WAITED + 3))
-  echo -n "."
-done
-echo ""
+wait_for_services
 
 # --- 10. 配置开机自启（systemd）---
 info "配置开机自启..."
@@ -291,7 +339,7 @@ fi
 
 echo ""
 echo -e "  ${GREEN}管理员账号:${NC}  admin"
-echo -e "  ${GREEN}管理员密码:${NC}  ${ADMIN_PASSWORD}"
+echo -e "  ${GREEN}管理员密码:${NC}  已按安装时输入的密码设置"
 echo ""
 echo -e "  ${CYAN}安装目录:${NC}  ${INSTALL_DIR}"
 echo ""

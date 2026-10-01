@@ -17,6 +17,10 @@
         router
         class="sidebar-menu"
       >
+        <el-menu-item v-if="authStore.hasPermission('device:view') && authStore.hasPermission('op_account:view') && authStore.hasPermission('proxy_node:view')" index="/overview">
+          <el-icon><Monitor /></el-icon>
+          <template #title><span>数据总览</span></template>
+        </el-menu-item>
         <el-menu-item v-if="authStore.hasPermission('monitor:view')" index="/monitor">
           <el-icon><Monitor /></el-icon>
           <template #title><span>监控管理</span></template>
@@ -40,6 +44,17 @@
           <el-icon><UserFilled /></el-icon>
           <template #title><span>团队管理</span></template>
         </el-menu-item>
+        <el-menu-item v-if="authStore.hasPermission('email:view')" index="/emails">
+          <el-icon><Message /></el-icon>
+          <template #title><span>邮箱管理</span></template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.hasPermission('work_item:view')" index="/work-items">
+          <el-icon><Memo /></el-icon>
+          <template #title><span>备忘管理</span></template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.hasPermission('card_key:view')" index="/card-keys">
+          <el-icon><Memo /></el-icon><template #title><span>卡密管理</span></template>
+        </el-menu-item>
         <el-menu-item v-if="authStore.hasPermission('settings:view')" index="/settings">
           <el-icon><Setting /></el-icon>
           <template #title><span>系统设置</span></template>
@@ -55,6 +70,7 @@
           <div class="header-mobile-left"></div>
           <span class="header-title">{{ currentPageTitle }}</span>
           <div class="header-mobile-right">
+            <MemoReminder v-if="authStore.hasPermission('work_item:view')" />
             <el-button link @click="handleLogout" class="logout-icon-btn">
               <el-icon size="20"><SwitchButton /></el-icon>
             </el-button>
@@ -63,6 +79,7 @@
         <!-- 桌面端/平板端：原有样式 -->
         <template v-else>
           <div class="header-right">
+            <MemoReminder v-if="authStore.hasPermission('work_item:view')" />
             <span v-show="!isMobile" class="username">{{ authStore.user?.real_name || authStore.user?.username }}</span>
             <el-button link @click="handleLogout">
               <el-icon><SwitchButton /></el-icon>
@@ -87,12 +104,13 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Setting, Briefcase, UserFilled, SwitchButton, Connection, Iphone } from '@element-plus/icons-vue'
-import { getSettings } from '@/api/settings'
+import { Monitor, Setting, Briefcase, UserFilled, SwitchButton, Connection, Iphone, Message, Memo } from '@element-plus/icons-vue'
+import { getPublicSettings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import Breadcrumb from '@/components/Breadcrumb.vue'
 import MobileTabBar from '@/components/MobileTabBar.vue'
 import FloatingTableScrollbar from '@/components/FloatingTableScrollbar.vue'
+import MemoReminder from '@/components/MemoReminder.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -136,6 +154,8 @@ const activeMenu = computed(() => {
   if (path.startsWith('/proxy-nodes')) return '/proxy-nodes'
   if (path.startsWith('/settings')) return '/settings'
   if (path.startsWith('/team')) return '/team/manage'
+  if (path.startsWith('/work-items')) return '/work-items'
+  if (path.startsWith('/card-keys')) return '/card-keys'
   return path
 })
 
@@ -145,9 +165,8 @@ const handleLogout = async () => {
 }
 
 const loadSettings = async () => {
-  if (!authStore.hasPermission('settings:view')) return
   try {
-    const data = await getSettings()
+    const data = await getPublicSettings()
     settings.value = {
       site_name: data.site_name || 'TikTok Monitor',
       logo_image: data.logo_image || ''
@@ -158,6 +177,14 @@ const loadSettings = async () => {
   }
 }
 
+const handleSiteSettingsUpdated = (event) => {
+  settings.value = {
+    site_name: event.detail?.site_name || 'TikTok Monitor',
+    logo_image: event.detail?.logo_image || ''
+  }
+  document.title = settings.value.site_name
+}
+
 watch(() => route.path, (newPath) => {
   if (newPath !== '/settings') {
     loadSettings()
@@ -166,7 +193,9 @@ watch(() => route.path, (newPath) => {
 
 onMounted(() => {
   loadSettings()
+  window.addEventListener('site-settings-updated', handleSiteSettingsUpdated)
 })
+onUnmounted(() => window.removeEventListener('site-settings-updated', handleSiteSettingsUpdated))
 </script>
 
 <style scoped>

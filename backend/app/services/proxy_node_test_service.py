@@ -3,6 +3,7 @@ import logging
 import time
 from datetime import datetime
 from typing import List, Optional
+from urllib.parse import quote
 
 import httpx
 from sqlalchemy.orm import Session
@@ -39,10 +40,12 @@ def _build_proxy_url(node: ProxyNode) -> str:
 
     # 构建认证部分（仅原始节点有 username/password）
     if node.username and node.password:
-        auth = f"{node.username}:{node.password}@"
+        auth = f"{quote(node.username, safe='')}:{quote(node.password, safe='')}@"
     else:
         auth = ""
 
+    if ":" in ip and not ip.startswith("["):
+        ip = f"[{ip}]"
     return f"{protocol}://{auth}{ip}:{port}"
 
 
@@ -55,7 +58,7 @@ async def _do_test(node: ProxyNode) -> dict:
       失败：{"success": False, "latency_ms": None, "error": str}
     """
     proxy_url = _build_proxy_url(node)
-    logger.debug(f"Testing node id={node.id} via proxy={proxy_url}")
+    logger.debug("Testing node id=%s", node.id)
 
     start = time.monotonic()
     try:
@@ -72,7 +75,7 @@ async def _do_test(node: ProxyNode) -> dict:
         return {"success": True, "latency_ms": elapsed_ms}
 
     except Exception as exc:
-        error_msg = str(exc)[:200]
+        error_msg = f"节点连接测试失败（{type(exc).__name__}）"
         logger.debug(f"Node id={node.id} test failed: {error_msg}")
         return {"success": False, "latency_ms": None, "error": error_msg}
 

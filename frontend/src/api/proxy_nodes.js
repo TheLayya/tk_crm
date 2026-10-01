@@ -101,11 +101,11 @@ export function batchDeleteProxyNodes(nodeIds) {
  * @param {Array<number|string>} nodeIds - 节点 ID 列表
  * @param {string} status - 目标状态（active/expired/sold/disabled）
  */
-export function batchUpdateStatus(nodeIds, status) {
+export function batchUpdateStatus(nodeIds, status, sale = {}) {
   return request({
     url: '/proxy-nodes/batch/status',
     method: 'patch',
-    data: { node_ids: nodeIds, status }
+    data: { node_ids: nodeIds, status, ...sale }
   })
 }
 

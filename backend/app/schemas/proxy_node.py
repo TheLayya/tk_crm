@@ -2,7 +2,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from typing import Annotated
 from typing import Literal
 
 
@@ -11,6 +12,7 @@ from typing import Literal
 # ---------------------------------------------------------------------------
 
 class ProxyNodeCreate(BaseModel):
+    country: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
     # 原始节点信息（ip + port 必填）
     ip: str
     port: int = Field(..., ge=1, le=65535)
@@ -23,11 +25,11 @@ class ProxyNodeCreate(BaseModel):
     relay_port: Optional[int] = Field(None, ge=1, le=65535)
     relay_protocol: Optional[Literal["socks5", "http", "https"]] = None
 
-    # 采购信息（全部可选）
-    purchase_date: Optional[date] = None
-    purchase_price: Optional[Decimal] = None
-    purchase_channel: Optional[str] = None
-    expire_date: Optional[date] = None
+    # 新增节点必须完整填写采购信息
+    purchase_date: date
+    purchase_price: Decimal = Field(..., ge=0, max_digits=10, decimal_places=2)
+    purchase_channel: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+    expire_date: date
 
     # 出售信息（全部可选）
     sale_customer: Optional[str] = None
@@ -46,6 +48,7 @@ class ProxyNodeCreate(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ProxyNodeUpdate(BaseModel):
+    country: Optional[str] = Field(None, max_length=100)
     # 原始节点信息（兼容旧模型字段，关联接口不使用）
     ip: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
@@ -93,6 +96,7 @@ class ProxyNodeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    country: Optional[str] = None
     ip: Optional[str] = None
     port: Optional[int] = None
     username: Optional[str] = None

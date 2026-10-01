@@ -170,7 +170,9 @@ def relation_overview(db, kind, resource_id, user):
 
 def readable_account_log(db, log):
     field = log.field_name
-    labels = {"status": "状态", "account": "账号名称", "operator": "使用人", "registrant": "注册人", "remark": "备注", "device_id": "终端", "node_id": "节点"}
+    if log.action == "gmail_check":
+        return {"summary": "Gmail 第三方检测", "details": [log.new_value or "检测失败", "探测结果，不覆盖管理状态"]}
+    labels = {"recovery_email": "辅助邮箱", "account_created_at": "注册时间", "country": "国家/地区", "status": "状态", "account": "账号名称", "operator": "使用人", "registrant": "注册人", "remark": "备注", "device_id": "终端", "node_id": "节点"}
     if field in ("relation_snapshot", "ban_snapshot"):
         snapshot = parse_snapshot(log)
         return {"summary": "登记封禁时的关联" if field == "ban_snapshot" else "关联快照",

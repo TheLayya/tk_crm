@@ -14,6 +14,7 @@ class ProxyNode(Base):
 
     # 原始节点信息（ip + port 必填）
     ip = Column(String(255), nullable=False)
+    country = Column(String(100), nullable=True)
     port = Column(Integer, nullable=False)
     username = Column(String(255), nullable=True)
     password = Column(String(255), nullable=True)

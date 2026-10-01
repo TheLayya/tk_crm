@@ -2,6 +2,8 @@
 运营账号管理 API 端点
 """
 import logging
+import threading
+import httpx
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile, status
@@ -21,23 +23,27 @@ from app.schemas.op_account import (
     OpAccountUpdate,
     OpImportResult,
     BatchAssignOperator,
+    GmailCheckRequest,
 )
 from app.services import op_account_service, video_service
+from app.services.gmail_checker_service import MAX_BATCH_SIZE, apply_check_results, check_gmail_accounts
 
 from app.services.auth_service import require_permission, get_current_user_from_header, get_user_data_scope, get_dept_member_usernames
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["op-accounts"])
+gmail_check_lock = threading.Lock()
 
 
 @router.get("/stats", response_model=dict)
 def get_stats(
+    exclude_gmail: bool = Query(False),
     db: Session = Depends(get_db),
     _=Depends(require_permission("op_account:view")),
 ):
     """获取运营账号统计数据。"""
-    return op_account_service.get_op_account_stats(db)
+    return op_account_service.get_op_account_stats(db, exclude_gmail=exclude_gmail)
 
 
 @router.get("", response_model=dict)
@@ -50,6 +56,7 @@ def list_op_accounts(
     sale_customer: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+    exclude_gmail: bool = Query(False),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user_from_header),
     _=Depends(require_permission("op_account:view")),
@@ -71,6 +78,7 @@ def list_op_accounts(
         limit=limit,
         scope_username=scope_username,
         scope_usernames=scope_usernames,
+        exclude_gmail=exclude_gmail,
     )
     enrich_monitor_summaries(db, items, current_user)
     for item in items:
@@ -98,7 +106,8 @@ def create_op_account(
             data = data.model_copy(update={"registrant": current_user.username})
         account = op_account_service.create_op_account(db, data, actor=current_user.username)
         # 创建后触发采集
-        op_account_service.trigger_collect(db, [account.id], background_tasks)
+        if account.platform == "tiktok":
+            op_account_service.trigger_collect(db, [account.id], background_tasks)
         return OpAccountResponse.model_validate(account)
     except Exception as e:
         logger.error(f"Failed to create op_account: {e}")
@@ -163,6 +172,7 @@ async def import_from_csv(
     file: UploadFile,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_from_header),
     _=Depends(require_permission("op_account:import")),
 ):
     raw = await file.read()
@@ -170,11 +180,13 @@ async def import_from_csv(
     try:
         if filename.endswith(".xlsx"):
             result = op_account_service.import_from_excel(db, file_content=raw)
+        elif filename.endswith(".txt"):
+            result = op_account_service.import_gmail_text(db, raw.decode("utf-8-sig"), actor=current_user.username)
         elif filename.endswith(".csv"):
             content = raw.decode("utf-8-sig", errors="replace")
             result = op_account_service.import_from_csv(db, csv_content=content)
         else:
-            raise HTTPException(status_code=422, detail="仅支持 CSV 或 XLSX 文件")
+            raise HTTPException(status_code=422, detail="仅支持 CSV、XLSX 或 Gmail 冒号分隔 TXT 文件")
     except HTTPException:
         raise
     except (ValueError, RuntimeError) as exc:
@@ -184,7 +196,9 @@ async def import_from_csv(
         if row.get("_result") == "success" and row.get("_id")
     ]
     if account_ids:
-        result.task_id = op_account_service.trigger_collect(db, account_ids, background_tasks)
+        tiktok_ids = [item.id for item in db.query(op_account_service.OpAccount).filter(op_account_service.OpAccount.id.in_(account_ids), op_account_service.OpAccount.platform == "tiktok").all()]
+        if tiktok_ids:
+            result.task_id = op_account_service.trigger_collect(db, tiktok_ids, background_tasks)
     return result
 
 
@@ -252,6 +266,49 @@ def get_collect_task(task_id: str, db: Session = Depends(get_db), _=Depends(requ
         success=task.success,
         failed=task.failed,
     )
+
+
+@router.post("/gmail-check", response_model=dict)
+def check_gmail_status(
+    body: GmailCheckRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_from_header),
+    _=Depends(require_permission("op_account:collect")),
+):
+    account_ids = list(dict.fromkeys(body.account_ids))
+    if not account_ids or len(account_ids) > MAX_BATCH_SIZE:
+        raise HTTPException(status_code=422, detail=f"请选择 1-{MAX_BATCH_SIZE} 个 Gmail 账号")
+    accounts = db.query(op_account_service.OpAccount).filter(
+        op_account_service.OpAccount.id.in_(account_ids),
+        op_account_service.OpAccount.platform == "gmail",
+    ).all()
+    if len(accounts) != len(account_ids):
+        raise HTTPException(status_code=422, detail="只能检测已选择的 Gmail 账号")
+    scope = get_user_data_scope(db, current_user)
+    allowed = set(get_dept_member_usernames(db, current_user)) if scope == "dept" else {current_user.username}
+    if scope != "all" and any(not ({account.registrant, account.operator} & allowed) for account in accounts):
+        raise HTTPException(status_code=403, detail="无权检测部分运营账号")
+    if not gmail_check_lock.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="已有 Gmail 检测进行中，请稍后重试")
+    try:
+        results = check_gmail_accounts([account.account for account in accounts])
+        apply_check_results(accounts, results)
+        for account in accounts:
+            db.add(op_account_service.OpAuditLog(
+                op_account_id=account.id, action="gmail_check", field_name="gmail_check_status",
+                new_value=account.gmail_check_status, operator=current_user.username,
+            ))
+        db.commit()
+    except (httpx.HTTPError, ValueError, RuntimeError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail="Gmail 检测服务不可用或返回异常，未覆盖原检测结果，请稍后重试") from exc
+    finally:
+        gmail_check_lock.release()
+    return {"checked": len(accounts), "results": [
+        {"id": account.id, "email": account.account, "status": account.gmail_check_status,
+         "raw_status": account.gmail_check_raw_status, "checked_at": account.gmail_checked_at}
+        for account in accounts
+    ]}
 
 
 @router.put("/{id}", response_model=OpAccountResponse)

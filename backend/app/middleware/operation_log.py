@@ -7,6 +7,19 @@ from app.models.team import OperationLog
 
 # Path → (module, action) mapping
 PATH_MODULE_MAP = [
+    (r"POST /api/card-keys/\d+/import", ("卡密管理", "IMPORT")),
+    (r"POST /api/card-keys/\d+/claim", ("卡密管理", "CLAIM")),
+    (r"POST /api/card-keys/\d+/keys/\d+/consume", ("卡密管理", "CONSUME")),
+    (r"POST /api/card-keys/\d+/keys/\d+/release", ("卡密管理", "RELEASE")),
+    (r"POST /api/card-keys", ("卡密管理", "CREATE")),
+    (r"PUT /api/card-keys/\d+", ("卡密管理", "UPDATE")),
+    (r"POST /api/emails", ("邮箱管理", "CREATE")),
+    (r"POST /api/emails/import", ("邮箱管理", "CREATE")),
+    (r"POST /api/emails/check", ("邮箱管理", "UPDATE")),
+    (r"PUT /api/emails/\d+", ("邮箱管理", "UPDATE")),
+    (r"DELETE /api/emails/\d+", ("邮箱管理", "DELETE")),
+    (r"POST /api/emails/\d+/relations", ("邮箱关联", "CREATE")),
+    (r"DELETE /api/emails/\d+/relations/\d+", ("邮箱关联", "UPDATE")),
     (r"POST /api/auth/login", None),  # skip login
     (r"GET /api/proxy-nodes/\d+/uri", ("节点管理", "VIEW_SECRET")),  # 节点二维码 URI（含凭据，审计）
     (r"POST /api/devices", ("终端资产", "CREATE")),
@@ -35,6 +48,10 @@ PATH_MODULE_MAP = [
     (r"PUT /api/team/role/\d+", ("角色管理", "UPDATE")),
     (r"DELETE /api/team/role/\d+", ("角色管理", "DELETE")),
     (r"PUT /api/settings", ("系统设置", "UPDATE")),
+    (r"PUT /api/work-items/categories", ("备忘大类", "UPDATE")),
+    (r"POST /api/work-items", ("备忘管理", "CREATE")),
+    (r"PUT /api/work-items/\d+", ("备忘管理", "UPDATE")),
+    (r"DELETE /api/work-items/\d+", ("备忘管理", "DELETE")),
 ]
 
 
@@ -84,9 +101,9 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
             if response.status_code >= 400:
                 result = "failed"
                 error = f"HTTP {response.status_code}"
-        except Exception as e:
+        except Exception:
             result = "failed"
-            error = str(e)[:512]
+            error = "内部错误"
             raise
         finally:
             # Record operation log

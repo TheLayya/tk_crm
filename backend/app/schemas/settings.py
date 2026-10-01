@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SettingsUpdate(BaseModel):
@@ -10,6 +10,7 @@ class SettingsUpdate(BaseModel):
     default_video_count: Optional[int] = None
     site_name: Optional[str] = None
     logo_image: Optional[str] = None
+    login_screen_text: Optional[str] = Field(default=None, max_length=500)
     # Backup & notification fields
     backup_enabled: Optional[bool] = None
     backup_interval_hours: Optional[int] = None
@@ -35,6 +36,7 @@ class SettingsResponse(BaseModel):
     site_name: str
     logo_image: Optional[str]
     updated_at: datetime
+    login_screen_text: Optional[str] = None
     # Backup & notification fields
     backup_enabled: bool
     backup_interval_hours: int
@@ -57,3 +59,9 @@ class SettingsResponse(BaseModel):
         self.telegram_bot_token = "********" if self.telegram_bot_token else ""
         self.smtp_password = "********" if self.smtp_password else ""
         return self
+
+
+class PublicSettingsResponse(BaseModel):
+    login_screen_text: Optional[str] = None
+    site_name: str
+    logo_image: Optional[str]

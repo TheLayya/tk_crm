@@ -1,12 +1,12 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, PositiveInt, field_validator
+from typing import Annotated, Any, Dict, List, Literal, Optional
+from pydantic import BaseModel, Field, PositiveInt, StringConstraints, field_validator
 
 
 class OpAccountCreate(BaseModel):
     # 必填
-    platform: str
+    platform: Literal["tiktok", "youtube", "instagram", "facebook", "gmail"]
     account: str
     device_id: Optional[int] = None
     node_id: Optional[int] = None
@@ -14,6 +14,7 @@ class OpAccountCreate(BaseModel):
     # 手动维护字段（可选）
     password: Optional[str] = None
     totp_secret: Optional[str] = None
+    recovery_email: Optional[str] = None
     email: Optional[str] = None
     email_password: Optional[str] = None
     email_login_url: Optional[str] = None
@@ -26,6 +27,8 @@ class OpAccountCreate(BaseModel):
     status: Optional[str] = "正常"
     registrant: Optional[str] = None
     operator: Optional[str] = None
+    account_created_at: Optional[datetime] = None
+    account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
 
     # TikTok 专属
     tiktok_mid_video: Optional[bool] = None
@@ -49,13 +52,14 @@ class OpAccountCreate(BaseModel):
 
 
 class OpAccountUpdate(BaseModel):
-    platform: Optional[str] = None
+    platform: Optional[Literal["tiktok", "youtube", "instagram", "facebook", "gmail"]] = None
     account: Optional[str] = None
     device_id: Optional[int] = None
     node_id: Optional[int] = None
 
     password: Optional[str] = None
     totp_secret: Optional[str] = None
+    recovery_email: Optional[str] = None
     email: Optional[str] = None
     email_password: Optional[str] = None
     email_login_url: Optional[str] = None
@@ -68,6 +72,8 @@ class OpAccountUpdate(BaseModel):
     status: Optional[str] = None
     registrant: Optional[str] = None
     operator: Optional[str] = None
+    account_created_at: Optional[datetime] = None
+    account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
 
     tiktok_mid_video: Optional[bool] = None
     tiktok_showcase: Optional[bool] = None
@@ -98,6 +104,7 @@ class OpAccountResponse(BaseModel):
     node_ip: Optional[str] = None
     password: Optional[str] = None
     totp_secret: Optional[str] = None
+    recovery_email: Optional[str] = None
     email: Optional[str] = None
     email_password: Optional[str] = None
     email_login_url: Optional[str] = None
@@ -150,15 +157,134 @@ class OpAccountResponse(BaseModel):
     like_count: Optional[int] = None
     video_count: Optional[int] = None
     account_created_at: Optional[datetime] = None
+    account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
     last_collected_at: Optional[datetime] = None
     collect_status: str
     collect_error: Optional[str] = None
-
+    gmail_check_status: Optional[str] = None
+    gmail_check_raw_status: Optional[str] = None
+    gmail_checked_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class EmailAccountCreate(BaseModel):
+    email: str
+    password: Optional[str] = None
+    recovery_email: Optional[str] = None
+    totp_secret: Optional[str] = None
+    account_created_at: Optional[datetime] = None
+    account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
+    country: Optional[str] = None
+    device_id: Optional[int] = None
+    node_id: Optional[int] = None
+    purchase_channel: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+    purchase_price: Decimal = Field(ge=0)
+    purchase_date: Optional[date] = None
+    sale_customer: Optional[str] = None
+    sale_price: Optional[Decimal] = None
+    sale_date: Optional[date] = None
+    sellers: Optional[List[str]] = None
+    management_status: Optional[str] = "闲置"
+    registrant: Optional[str] = None
+    operator: Optional[str] = None
+    remark: Optional[str] = None
+
+
+class EmailAccountUpdate(BaseModel):
+    email: Optional[str] = None
+    password: Optional[str] = None
+    recovery_email: Optional[str] = None
+    totp_secret: Optional[str] = None
+    account_created_at: Optional[datetime] = None
+    account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
+    country: Optional[str] = None
+    device_id: Optional[int] = None
+    node_id: Optional[int] = None
+    purchase_channel: Optional[str] = None
+    purchase_price: Optional[Decimal] = None
+    purchase_date: Optional[date] = None
+    sale_customer: Optional[str] = None
+    sale_price: Optional[Decimal] = None
+    sale_date: Optional[date] = None
+    sellers: Optional[List[str]] = None
+    management_status: Optional[str] = None
+    operator: Optional[str] = None
+    remark: Optional[str] = None
+
+
+class EmailAccountResponse(BaseModel):
+    id: int
+    email: str
+    password: Optional[str] = None
+    recovery_email: Optional[str] = None
+    totp_secret: Optional[str] = None
+    account_created_at: Optional[datetime] = None
+    account_created_year: Optional[int] = None
+    country: Optional[str] = None
+    device_id: Optional[int] = None
+    node_id: Optional[int] = None
+    device_name: Optional[str] = None
+    node_ip: Optional[str] = None
+    purchase_channel: Optional[str] = None
+    purchase_price: Optional[Decimal] = None
+    purchase_date: Optional[date] = None
+    sale_customer: Optional[str] = None
+    sale_price: Optional[Decimal] = None
+    sale_date: Optional[date] = None
+    sellers: List[str] = []
+    management_status: str
+    gmail_check_status: Optional[str] = None
+    gmail_check_raw_status: Optional[str] = None
+    gmail_checked_at: Optional[datetime] = None
+    registrant: Optional[str] = None
+    operator: Optional[str] = None
+    remark: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    current_relation_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+    @field_validator("sellers", mode="before")
+    @classmethod
+    def normalize_sellers(cls, value):
+        if isinstance(value, str):
+            try:
+                import json
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+        return value or []
+
+
+class EmailImportRequest(BaseModel):
+    text: str
+    purchase_channel: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+    purchase_price: Decimal = Field(ge=0)
+
+
+class EmailRelationRequest(BaseModel):
+    op_account_id: PositiveInt
+    remark: Optional[str] = None
+
+
+class EmailAssetRelationRequest(BaseModel):
+    device_id: Optional[PositiveInt] = None
+    node_id: Optional[PositiveInt] = None
+    remark: Optional[str] = None
+
+    @field_validator("node_id")
+    @classmethod
+    def require_one_asset(cls, value, info):
+        if value is None and info.data.get("device_id") is None:
+            raise ValueError("请选择终端或节点")
+        return value
 
 
 class OpImportResult(BaseModel):
@@ -189,6 +315,11 @@ class BatchStatusUpdate(BaseModel):
     sale_price: Optional[Decimal] = None
     sale_date: Optional[date] = None
     sellers: Optional[List[str]] = None  # 出售人 username 列表
+
+
+class GmailCheckRequest(BaseModel):
+    account_ids: List[PositiveInt] = Field(min_length=1, max_length=50)
+    consent: Literal[True]
 
 
 class BatchAssignOperator(BaseModel):

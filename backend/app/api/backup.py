@@ -16,6 +16,7 @@ from app.services.backup_service import (
     BackupInProgressError,
     InvalidFileTypeError,
     InvalidZipError,
+    InvalidDatabaseBackupError,
     MissingDatabaseError,
     RestoreIOError,
     RestoreInProgressError,
@@ -114,6 +115,8 @@ async def restore_backup(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件必须是 .zip 格式")
     except InvalidZipError:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="上传的文件不是有效的 ZIP 压缩包")
+    except InvalidDatabaseBackupError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="备份中的数据库文件无效或已损坏")
     except MissingDatabaseError:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="ZIP 压缩包中不包含 monitor.db 文件")
     except RestoreIOError as exc:

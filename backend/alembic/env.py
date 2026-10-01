@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+import sqlalchemy as sa
 
 from alembic import context
 
@@ -20,8 +21,13 @@ from app.models.monitor import (  # noqa: F401
     MonitorSettings,
 )
 from app.models.video import Video, VideoStats  # noqa: F401
-from app.models.op_account import OpAccount, OpCollectTask, OpAuditLog  # noqa: F401
+from app.models.op_account import OpAccount, OpCollectTask, OpAuditLog, EmailAccount, EmailAccountRelation, EmailAssetRelation  # noqa: F401
 from app.models.team import User, Department, Role, RolePermission, UserRole, RefreshToken, OperationToken, LoginLog, OperationLog  # noqa: F401
+from app.models.work_item import WorkItem, WorkItemCategorySettings  # noqa: F401
+from app.models.card_key import CardKeyProject, CardKey  # noqa: F401
+from app.models.device import Device, DeviceLog  # noqa: F401
+from app.models.proxy_node import ProxyNode  # noqa: F401
+from app.services.encryption_service import EncryptedType
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -34,6 +40,19 @@ if config.config_file_name is not None:
 
 # Set target metadata to Base.metadata so Alembic can autogenerate migrations
 target_metadata = Base.metadata
+
+
+def _compare_type(context, inspected_column, metadata_column, inspected_type, metadata_type):
+    """Ignore SQLite's storage representation for encrypted fields and enums."""
+    if context.dialect.name != "sqlite":
+        return None
+    if (isinstance(metadata_type, EncryptedType)
+            and isinstance(inspected_type, sa.String) and inspected_type.length is None):
+        return False
+    if (isinstance(metadata_type, sa.Enum) and isinstance(inspected_type, sa.String)
+            and (inspected_type.length is None or inspected_type.length >= metadata_type.length)):
+        return False
+    return None
 
 
 def run_migrations_offline() -> None:
@@ -75,6 +94,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            compare_type=_compare_type,
         )
 
         with context.begin_transaction():

@@ -5,9 +5,9 @@
       :key="account.id"
       type="button"
       class="account-chip"
-      :aria-label="`放大查看账号 ${accountName(account)}`"
-      aria-haspopup="dialog"
-      title="点击放大"
+      :aria-label="`${navigateOnClick ? '查看详情' : '放大查看'}账号 ${accountName(account)}`"
+      :aria-haspopup="navigateOnClick ? undefined : 'dialog'"
+      :title="navigateOnClick ? '点击前往账号详情' : '点击放大'"
       @click.stop="openAccount(account)"
       :style="chipStyle"
     >
@@ -105,7 +105,9 @@ const props = defineProps({
   accounts: { type: Array, default: () => [] },
   emptyText: { type: String, default: '未绑定' },
   showAllAccounts: { type: Boolean, default: false },
+  navigateOnClick: { type: Boolean, default: false },
 })
+const emit = defineEmits(['account-click'])
 
 const metrics = [
   { key: 'follower_count', label: '粉丝' },
@@ -151,6 +153,10 @@ function updateVisibleCount() {
 }
 
 function openAccount(account) {
+  if (props.navigateOnClick) {
+    emit('account-click', account)
+    return
+  }
   showAll.value = false
   selectedAccount.value = account
   expanded.value = true

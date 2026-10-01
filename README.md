@@ -1,12 +1,25 @@
 # TikTok Monitor
 
-TikTok 账号监控与运营管理系统。
+TikTok 账号监控、终端资产与团队运营管理系统。当前版本覆盖账号采集、设备/节点关联、邮箱与卡密资产、数据总览及可配置登录场景。
+
+> 文档更新日期：2026-10-01
 
 ## 技术栈
 
 - 后端：FastAPI、SQLAlchemy、APScheduler
 - 前端：Vue 3、Element Plus、ECharts、Vite
 - 数据库：SQLite（默认）
+
+## 当前功能
+
+- 数据总览：资产状态、人员与终端关联、金额时间维度、数据质量和未关联资产
+- 运营账号：TikTok、YouTube、Instagram、Facebook 账号管理、采集与趋势数据
+- 终端资产：手机/电脑、所属成员、节点和运营账号关联；关联账号以头像卡片展示
+- 代理节点：节点测试、关联管理、CSV/Excel 批量导入导出；新增节点或导入时要求国家和完整采购信息
+- 邮箱资产：批量导入、Gmail 检测、设备/节点及运营账号关联
+- 团队权限：项目、部门、角色、成员和细粒度权限
+- 工作项、备忘提醒与卡密生命周期管理
+- 登录页：全屏三面屏幕场景，屏幕文字可在“系统设置 → 登录屏幕文字”中自定义
 
 ## 本地启动（Windows）
 
@@ -16,6 +29,11 @@ TikTok 账号监控与运营管理系统。
 cd backend
 python -m venv .venv312
 .\.venv312\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+首次安装时复制 `backend/.env.example` 为 `backend/.env`，填写 JWT 密钥、字段加密密钥和管理员密码；已有 `.env` 时不要覆盖。填写完成后，在 `backend` 目录继续执行：
+
+```bat
 .\.venv312\Scripts\python.exe -m alembic upgrade head
 .\.venv312\Scripts\python.exe run.py
 ```
@@ -29,29 +47,35 @@ npm run dev -- --host 0.0.0.0 --port 5174
 ```
 
 前端：<http://localhost:5174/>  
-后端文档：<http://localhost:8001/docs>
+后端文档端口以 `backend/.env` 的 `PORT` 为准，未配置时为 `8000`；本机若配置 `PORT=8801`，则访问 `http://localhost:8801/docs`。
 
 ## 默认账号
 
-用户名 `admin`，密码 `admin123456`。首次登录后请修改密码。
+首次启动创建用户名 `admin`，初始密码取自 `SUPER_ADMIN_PASSWORD`。修改配置不会重置已有管理员的密码；JWT 密钥和管理员密码没有代码内置后备值，缺少配置时后端会拒绝启动。
 
 ## 配置
 
-后端配置文件为 `backend/.env`，默认数据库：
+后端配置文件为 `backend/.env`，可先复制 `backend/.env.example`，再替换所有占位值。默认数据库：
 
 ```env
 DATABASE_URL=sqlite:///./data/monitor.db
 ```
 
-生产环境请修改 JWT 密钥、字段加密密钥和管理员密码，然后执行 `alembic upgrade head`。
+生成字段加密密钥：`python -c "import secrets; print(secrets.token_hex(32))"`；生成 JWT 密钥：`python -c "import secrets; print(secrets.token_urlsafe(48))"`。将输出分别填入 `FIELD_ENCRYPTION_KEY` 和 `JWT_SECRET`，不要提交真实 `.env`。模板中的加密密钥占位符无效，未替换时后端会拒绝启动。
+
+首次部署前配置 JWT 密钥、字段加密密钥和管理员密码，然后执行 `alembic upgrade head`。已有数据升级时必须保留原字段加密密钥，否则历史密码、2FA、备忘和卡密将无法解密；不要直接更换密钥。
+
+当前数据库迁移版本为 `20261001_0016`。升级已有数据时只执行迁移，不删除 `backend/data/`。
 
 ## Docker 部署
+
+首次部署同样需要先准备 `backend/.env` 并替换占位值，再启动容器；已有服务器升级时保留原配置。
 
 ```bash
 docker compose up -d --build
 ```
 
-升级已有服务器时，保留服务器上的 `backend/.env` 和 `data/` 目录，不要用本地空配置覆盖；Compose 会加载 `backend/.env`，后端容器启动时自动执行 `alembic upgrade head`，随后启动 API。升级建议：
+升级已有服务器时，保留服务器上的 `backend/.env` 和 `backend/data/` 目录，不要用本地空配置覆盖；Compose 会加载 `backend/.env`，后端容器启动时自动执行 `alembic upgrade head`，随后启动 API。升级建议：
 
 ```bash
 docker compose up -d --build
@@ -59,18 +83,20 @@ curl http://127.0.0.1:8000/health
 docker compose ps
 ```
 
-SQLite 数据库位于 `data/` 持久化目录，代码更新不会删除该目录。
+也可以使用仓库内脚本：`bash deploy.sh --update`。脚本会拉取 `main`、重建镜像、启动容器并等待健康检查；生产服务器上的 `backend/.env` 和 `backend/data/` 会被保留。
 
-## 功能
+SQLite 数据库位于 `backend/data/` 持久化目录，代码更新不会删除该目录。
 
-- TikTok、YouTube、Instagram、Facebook 运营账号管理
-- 账号监控、趋势数据和视频采集
-- HTTP/HTTPS/SOCKS5 代理节点
-- 项目、部门、角色和成员权限
-- CSV/Excel 导入导出
-- 响应式移动端界面
-- 同一平台禁止重复账号
-- 运营账号可不绑定项目创建
+## 开发检查
+
+```bat
+cd backend
+.\.venv312\Scripts\python.exe -m pytest -q
+cd ..\frontend
+npm run build
+```
+
+后端测试会覆盖权限、迁移、导入、关联、公开设置和安全配置；前端构建使用 Vue 3、Element Plus 和 Vite。
 
 ## 界面预览
 
@@ -80,15 +106,15 @@ SQLite 数据库位于 `data/` 持久化目录，代码更新不会删除该目�
 
 ### 监控账号列表
 
-![监控账号列表](docs/screenshots/monitor-list.png)
+![](orca-paste-1790822883977-1999635b-f947-4ca6-97bb-182b5b545dfc.png)
 
 ### 账号详情与数据趋势
 
-![账号详情](docs/screenshots/account-detail.png)
+![](orca-paste-1790822907070-09353aba-5e3c-4bc4-a3c8-a995239f3a7a.png)
 
 ### 运营账号管理
 
-![运营账号管理](docs/screenshots/op-accounts.png)
+![](orca-paste-1790822933961-24d697b1-15d0-42b5-b3d3-bedad2fd3b3d.png)
 
 ## 许可证
 
@@ -98,7 +124,7 @@ MIT License
 
 欢迎加入交流群，获取使用帮助、版本更新和问题排查信息：
 
-![加入交流群](docs/community/group.png)
+![](orca-paste-1790822953672-cddf4884-7d23-4fc8-82e1-7c862dac32ce.png)
 
 如果这个项目对你有帮助，欢迎通过微信支持项目维护和持续开发：
 

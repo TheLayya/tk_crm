@@ -33,10 +33,34 @@ const router = createRouter({
       meta: { requiresAuth: true, breadcrumb: '账号详情' }
     },
     {
+      path: '/overview',
+      name: 'DataOverview',
+      component: () => import('@/views/DataOverview.vue'),
+      meta: { requiresAuth: true, permission: 'device:view', overviewAccess: true, breadcrumb: '数据总览' }
+    },
+    {
       path: '/op-accounts',
       name: 'OpAccountList',
       component: () => import('../views/OpAccountList.vue'),
       meta: { requiresAuth: true, permission: 'op_account:view', breadcrumb: '运营账号' }
+    },
+    {
+      path: '/emails',
+      name: 'EmailList',
+      component: () => import('../views/EmailList.vue'),
+      meta: { requiresAuth: true, permission: 'email:view', breadcrumb: '邮箱管理' }
+    },
+    {
+      path: '/work-items',
+      name: 'WorkItemList',
+      component: () => import('../views/WorkItemList.vue'),
+      meta: { requiresAuth: true, permission: 'work_item:view', breadcrumb: '备忘管理' }
+    },
+    {
+      path: '/card-keys',
+      name: 'CardKeyList',
+      component: () => import('../views/CardKeyList.vue'),
+      meta: { requiresAuth: true, permission: 'card_key:view', breadcrumb: '卡密管理' }
     },
     {
       path: '/proxy-nodes',
@@ -106,6 +130,7 @@ router.beforeEach((to, _from, next) => {
   if (to.meta.permission && !authStore.hasPermission(to.meta.permission)) {
     return next('/403')
   }
+  if (to.meta.overviewAccess && !['device:view', 'op_account:view', 'proxy_node:view'].every(permission => authStore.hasPermission(permission))) return next('/403')
   if (to.meta.teamAccess) {
     const permissions = ['team:member:view', 'team:dept:view', 'team:role:view', 'team:log:view']
     if (!permissions.some(permission => authStore.hasPermission(permission))) return next('/403')

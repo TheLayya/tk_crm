@@ -9,15 +9,17 @@ import functools
 import io
 import logging
 import shutil
+import sqlite3
+import tempfile
 import smtplib
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 from typing import Callable, Optional
-from uuid import uuid4
 
 import httpx
 from apscheduler.jobstores.base import JobLookupError
@@ -28,6 +30,12 @@ from app.core.config import settings
 from app.models.monitor import MonitorSettings
 
 logger = logging.getLogger(__name__)
+
+
+def _snapshot_database(source: Path, destination: Path) -> None:
+    with closing(sqlite3.connect(source.resolve().as_uri() + '?mode=ro', uri=True)) as original:
+        with closing(sqlite3.connect(destination)) as snapshot:
+            original.backup(snapshot)
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +59,37 @@ class MissingDatabaseError(Exception):
 
 class RestoreIOError(Exception):
     """Raised when the database file replacement operation fails."""
+
+
+class InvalidDatabaseBackupError(Exception):
+    """Raised when the archive does not contain a valid SQLite database."""
+
+
+def _validate_database_snapshot(path: Path) -> None:
+    try:
+        if path.stat().st_size < 100:
+            raise InvalidDatabaseBackupError("备份数据库无效")
+        with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+            if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                raise InvalidDatabaseBackupError("备份数据库完整性校验失败")
+            tables = {
+                row[0] for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            required_tables = {"projects", "users", "monitor_accounts"}
+            if not required_tables <= tables:
+                raise InvalidDatabaseBackupError("备份数据库不是本系统数据库")
+    except sqlite3.DatabaseError as exc:
+        raise InvalidDatabaseBackupError("备份数据库无效") from exc
+
+
+def _replace_database_snapshot(source: Path, destination: Path) -> None:
+    """Restore through SQLite so existing connections and WAL remain consistent."""
+    try:
+        _snapshot_database(source, destination)
+    except (OSError, sqlite3.DatabaseError) as exc:
+        raise RestoreIOError("数据库恢复失败，未能完成 SQLite 快照写入") from exc
 
 
 @dataclass
@@ -88,14 +127,13 @@ async def send_telegram(
                 )
         if not (200 <= response.status_code < 300):
             logger.error(
-                "Telegram notification failed: status=%d, body=%s",
+                "Telegram notification failed: status=%d",
                 response.status_code,
-                response.text,
             )
     except httpx.TimeoutException:
         logger.error("Telegram notification timed out after %ds", timeout)
-    except Exception as exc:
-        logger.error("Telegram notification error: %s", exc)
+    except Exception:
+        logger.error("Telegram notification failed due to an internal error")
 
 
 def _send_email_sync(
@@ -160,8 +198,8 @@ async def send_email(
             file_path,
             subject,
         )
-    except Exception as exc:
-        logger.error("Email notification failed: smtp_host=%s, error=%s", smtp_host, exc)
+    except Exception:
+        logger.error("Email notification failed due to an internal error")
 
 
 class BackupService:
@@ -220,11 +258,10 @@ class BackupService:
                     return None
 
                 # --- 3. Create temp directory and copy DB ---
-                temp_dir = Path(f"/tmp/tiktok_monitor_backup_{uuid4().hex}/")
-                temp_dir.mkdir(parents=True, exist_ok=True)
+                temp_dir = Path(tempfile.mkdtemp(prefix="tiktok_monitor_backup_"))
 
                 db_copy = temp_dir / db_file.name
-                shutil.copy2(db_file, db_copy)
+                _snapshot_database(db_file, db_copy)
 
                 # --- 4. Compress into ZIP ---
                 now = datetime.utcnow()
@@ -309,11 +346,10 @@ class BackupService:
                     )
                     return None
 
-                temp_dir = Path(f"/tmp/tiktok_monitor_backup_{uuid4().hex}/")
-                temp_dir.mkdir(parents=True, exist_ok=True)
+                temp_dir = Path(tempfile.mkdtemp(prefix="tiktok_monitor_backup_"))
 
                 db_copy = temp_dir / db_file.name
-                shutil.copy2(db_file, db_copy)
+                _snapshot_database(db_file, db_copy)
 
                 now = datetime.utcnow()
                 zip_filename = self.generate_backup_filename(now)
@@ -509,28 +545,33 @@ class RestoreService:
                     if 'monitor.db' not in zf.namelist():
                         raise MissingDatabaseError("ZIP archive does not contain monitor.db")
 
-                    # Pre-restore backup
-                    pre_backup: Optional[BackupResult] = None
-                    try:
-                        pre_backup = await backup_service.run_backup(db)
-                        if pre_backup is None:
-                            logger.warning("Pre-restore backup returned None (backup may have failed)")
-                    except Exception as exc:
-                        logger.warning("Pre-restore backup failed, continuing with restore: %s", exc)
-
                     # Extract monitor.db to temp dir
-                    temp_dir = Path(f"/tmp/tiktok_monitor_restore_{uuid4().hex}/")
-                    temp_dir.mkdir(parents=True, exist_ok=True)
-                    zf.extract('monitor.db', temp_dir)
+                    if zf.namelist().count('monitor.db') != 1 or zf.getinfo('monitor.db').is_dir():
+                        raise InvalidDatabaseBackupError("备份数据库条目无效")
+                    temp_dir = Path(tempfile.mkdtemp(prefix="tiktok_monitor_restore_"))
+                    try:
+                        with zf.open('monitor.db') as source, (temp_dir / 'monitor.db').open('wb') as target:
+                            shutil.copyfileobj(source, target)
+                    except (zipfile.BadZipFile, RuntimeError) as exc:
+                        raise InvalidDatabaseBackupError("无法读取备份数据库") from exc
+                    _validate_database_snapshot(temp_dir / 'monitor.db')
+
+                try:
+                    pre_backup = await backup_service.run_backup(db)
+                except Exception as exc:
+                    raise RestoreIOError("恢复前备份失败，已取消恢复") from exc
+                if pre_backup is None:
+                    raise RestoreIOError("恢复前备份失败，已取消恢复")
 
                 # Resolve db path
                 db_url: str = settings.DATABASE_URL
                 db_path = Path(db_url.replace("sqlite:///", ""))
                 extracted_db = temp_dir / 'monitor.db'
 
-                # Atomic replace
                 try:
-                    shutil.copy2(extracted_db, db_path)
+                    _replace_database_snapshot(extracted_db, db_path)
+                except RestoreIOError:
+                    raise
                 except Exception as exc:
                     logger.error("Failed to replace database file: %s", exc)
                     raise RestoreIOError(f"Database file replacement failed: {exc}") from exc

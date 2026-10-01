@@ -2,7 +2,7 @@
   <div class="seller-selector">
     <el-select
       :model-value="modelValue"
-      multiple
+      :multiple="multiple"
       filterable
       clearable
       :placeholder="placeholder"
@@ -31,7 +31,7 @@ import { getMembers } from '@/api/team'
 
 const props = defineProps({
   modelValue: {
-    type: Array,
+    type: [Array, String],
     default: () => []
   },
   placeholder: {
@@ -41,6 +41,10 @@ const props = defineProps({
   disabled: {
     type: Boolean,
     default: false
+  },
+  multiple: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -68,6 +72,10 @@ onMounted(loadMembers)
 </script>
 
 <style scoped>
+.seller-selector {
+  width: 100%;
+  min-width: 0;
+}
 .seller-selector__error {
   margin-top: 4px;
   font-size: 12px;

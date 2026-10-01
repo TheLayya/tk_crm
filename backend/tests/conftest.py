@@ -10,8 +10,11 @@ from app.core.security import create_access_token, hash_password
 from app.main import app
 from app.models.device import Device, DeviceLog  # noqa: F401  确保建表
 from app.models.proxy_node import ProxyNode
+from app.models.work_item import WorkItem, WorkItemCategorySettings
+from app.models.card_key import CardKey, CardKeyProject
+from app.models.op_account import EmailAccount, EmailAccountRelation, EmailAssetRelation
 from app.models.team import (
-    Department, OperationLog, Role, RolePermission, User, UserRole,
+    Department, LoginLog, OperationLog, RefreshToken, Role, RolePermission, User, UserRole,
 )
 
 import app.middleware.operation_log as op_log_module
@@ -58,7 +61,11 @@ def clean_tables(db):
     """每个测试后清空业务表，保证用例隔离。"""
     yield
     for model in (
-        DeviceLog, Device, ProxyNode, OperationLog,
+        CardKey, CardKeyProject,
+        WorkItem,
+        WorkItemCategorySettings,
+        EmailAssetRelation, EmailAccountRelation, EmailAccount,
+        DeviceLog, Device, ProxyNode, LoginLog, OperationLog, RefreshToken,
         UserRole, RolePermission, Role, User,
         Department,
     ):

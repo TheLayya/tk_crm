@@ -6,10 +6,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./data/monitor.db"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     # JWT 认证
-    JWT_SECRET: str = "change-me-in-production"
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     FIELD_ENCRYPTION_KEY: str = ""
 
     # 超级管理员
-    SUPER_ADMIN_PASSWORD: str = "admin123456"
+    SUPER_ADMIN_PASSWORD: str = ""
 
     class Config:
         env_file = ".env"
@@ -34,6 +34,10 @@ class Settings(BaseSettings):
             raise ValueError(
                 "FIELD_ENCRYPTION_KEY 未配置，系统拒绝启动。请在环境变量中设置 64 位 hex 字符串。"
             )
+        if not self.JWT_SECRET.strip():
+            raise ValueError("JWT_SECRET 未配置，系统拒绝启动。请设置随机 JWT 密钥。")
+        if not self.SUPER_ADMIN_PASSWORD.strip():
+            raise ValueError("SUPER_ADMIN_PASSWORD 未配置，系统拒绝启动。请设置管理员初始密码。")
 
 
 settings = Settings()

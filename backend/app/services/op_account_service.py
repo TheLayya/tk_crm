@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Callable, List, Optional
@@ -13,6 +14,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 from app.core.database import SessionLocal
 from app.models.op_account import OpAccount, OpAuditLog, OpCollectTask
 from app.models.team import User
+from app.services.sale_validation_service import validate_sale_information
 from app.services.auth_service import get_user_data_scope, get_dept_member_usernames
 from app.schemas.op_account import (
     OpAccountCreate,
@@ -140,6 +142,7 @@ def create_op_account(db: Session, data: OpAccountCreate, actor=None) -> OpAccou
         from fastapi import HTTPException
         raise HTTPException(status_code=409, detail="该平台账号已存在")
     data_dict = data.model_dump()
+    validate_sale_information(data_dict, "已售", require_date=True)
     normalize_account_relation(db, data_dict)
     # 序列化 sellers 列表为 JSON 字符串
     data_dict['sellers'] = _serialize_sellers(data_dict.get('sellers'))
@@ -169,6 +172,7 @@ def update_op_account(db: Session, id: int, data: OpAccountUpdate, actor=None) -
     if not account:
         return None
     update_data = data.model_dump(exclude_unset=True)
+    validate_sale_information({**{field: getattr(account, field) for field in ("status", "sale_customer", "sale_price", "sale_date", "sellers")}, **update_data}, "已售", require_date=True)
     if {'device_id', 'node_id'} & update_data.keys():
         normalize_account_relation(db, update_data, account)
     if 'sellers' in update_data:
@@ -195,6 +199,9 @@ def delete_op_account(db: Session, id: int) -> bool:
     account = get_op_account(db, id)
     if not account:
         return False
+    from app.models.op_account import EmailAccountRelation
+    if db.query(EmailAccountRelation).filter_by(op_account_id=id).first():
+        raise HTTPException(status_code=409, detail="该账号已有邮箱关联历史，请保留账号以便追溯")
     db.delete(account)
     db.commit()
     return True
@@ -213,8 +220,11 @@ def list_op_accounts(
     limit: int = 50,
     scope_username: Optional[str] = None,
     scope_usernames: Optional[List[str]] = None,
+    exclude_gmail: bool = False,
 ) -> tuple:
     query = db.query(OpAccount)
+    if exclude_gmail:
+        query = query.filter(OpAccount.platform != "gmail")
     if project_id is not None:
         query = query.filter(OpAccount.project_id == project_id)
     if platform:
@@ -258,18 +268,21 @@ def list_op_accounts(
 # Stats
 # ---------------------------------------------------------------------------
 
-def get_op_account_stats(db: Session) -> dict:
+def get_op_account_stats(db: Session, exclude_gmail: bool = False) -> dict:
     """
     统计运营账号的汇总数据：总数、各状态数量、总采购成本、总出售收入、净收益。
     """
     from decimal import Decimal
     from sqlalchemy import func
 
-    total = db.query(OpAccount).count()
+    query = db.query(OpAccount)
+    if exclude_gmail:
+        query = query.filter(OpAccount.platform != "gmail")
+    total = query.count()
 
     # 各状态数量
     status_rows = (
-        db.query(OpAccount.status, func.count(OpAccount.id))
+        query.with_entities(OpAccount.status, func.count(OpAccount.id))
         .group_by(OpAccount.status)
         .all()
     )
@@ -280,7 +293,7 @@ def get_op_account_stats(db: Session) -> dict:
 
     # 各平台数量
     platform_rows = (
-        db.query(OpAccount.platform, func.count(OpAccount.id))
+        query.with_entities(OpAccount.platform, func.count(OpAccount.id))
         .group_by(OpAccount.platform)
         .all()
     )
@@ -289,8 +302,8 @@ def get_op_account_stats(db: Session) -> dict:
         by_platform[platform_val] = cnt
 
     # 成本与收益
-    purchase_sum = db.query(func.sum(OpAccount.purchase_price)).scalar() or Decimal("0")
-    sale_sum = db.query(func.sum(OpAccount.sale_price)).scalar() or Decimal("0")
+    purchase_sum = query.with_entities(func.sum(OpAccount.purchase_price)).scalar() or Decimal("0")
+    sale_sum = query.with_entities(func.sum(OpAccount.sale_price)).scalar() or Decimal("0")
     net_profit = Decimal(str(sale_sum)) - Decimal(str(purchase_sum))
 
     return {
@@ -317,6 +330,7 @@ def batch_update_status(
     sellers: Optional[List[str]] = None,
     actor=None,
 ) -> int:
+    validate_sale_information(dict(status=status, sale_customer=sale_customer, sale_price=sale_price, sale_date=sale_date, sellers=sellers), "已售", require_date=True)
     count = 0
     for account_id in ids:
         account = db.query(OpAccount).filter(OpAccount.id == account_id).first()
@@ -385,7 +399,7 @@ def batch_assign_operator(db: Session, ids: list, operator: str, current_user: U
 # ---------------------------------------------------------------------------
 
 _EXPORT_COLUMNS = [
-    "account", "platform", "password", "totp_secret", "email", "email_password",
+    "account", "platform", "password", "totp_secret", "recovery_email", "account_created_at", "account_created_year", "email", "email_password",
     "email_login_url", "phone", "phone_manage_url", "country", "source", "tags",
     "remark", "status", "registrant", "operator", "tiktok_mid_video",
     "tiktok_showcase", "tiktok_phone_live", "tiktok_partner_live",
@@ -393,12 +407,13 @@ _EXPORT_COLUMNS = [
     "sale_customer", "sale_price", "sale_date", "platform_user_id",
     "platform_sec_uid", "nickname", "follower_count", "following_count",
     "like_count", "video_count", "last_collected_at", "collect_status",
+    "gmail_check_status", "gmail_check_raw_status", "gmail_checked_at",
 ]
 
 # 对外文件使用中文表头；导入同时兼容这些中文表头和历史英文表头。
 _COLUMN_LABELS = {
     "account": "账号", "platform": "平台", "password": "密码", "totp_secret": "双重验证码密钥",
-    "email": "绑定邮箱", "email_password": "邮箱密码", "email_login_url": "邮箱登录地址",
+    "recovery_email": "辅助邮箱", "account_created_at": "注册时间", "account_created_year": "注册年份", "email": "绑定邮箱", "email_password": "邮箱密码", "email_login_url": "邮箱登录地址",
     "phone": "绑定手机", "phone_manage_url": "手机管理链接", "country": "国家/地区",
     "source": "账号来源", "tags": "标签", "remark": "备注", "status": "状态",
     "registrant": "注册人", "operator": "使用人", "tiktok_mid_video": "中视频",
@@ -408,12 +423,13 @@ _COLUMN_LABELS = {
     "platform_user_id": "平台用户ID", "platform_sec_uid": "平台SEC_UID", "nickname": "昵称",
     "follower_count": "粉丝数", "following_count": "关注数", "like_count": "点赞数",
     "video_count": "视频数", "last_collected_at": "最后采集时间", "collect_status": "采集状态",
+    "gmail_check_status": "Gmail检测结果", "gmail_check_raw_status": "Gmail原始结果", "gmail_checked_at": "Gmail最后检测时间",
 }
 _IMPORT_ALIASES = {label: key for key, label in _COLUMN_LABELS.items()}
 _IMPORT_ALIASES.update({key: key for key in _EXPORT_COLUMNS})
 
 _IMPORT_COLUMNS = [
-    "account", "platform", "password", "totp_secret", "email", "email_password", "email_login_url",
+    "account", "platform", "password", "totp_secret", "recovery_email", "account_created_at", "account_created_year", "email", "email_password", "email_login_url",
     "phone", "phone_manage_url", "country", "source", "tags", "remark", "status", "registrant", "operator",
     "tiktok_mid_video", "tiktok_showcase", "tiktok_phone_live", "tiktok_partner_live",
     "purchase_channel", "purchase_price", "purchase_date", "sale_customer", "sale_price", "sale_date",
@@ -451,7 +467,7 @@ def create_import_template() -> bytes:
     notes = workbook.create_sheet("填写说明")
     notes.append(["字段", "是否必填", "填写说明"])
     notes.append(["账号", "是", "平台账号名，例如 demo_account"])
-    notes.append(["平台", "是", "TikTok、YouTube、Instagram 或 Facebook"])
+    notes.append(["平台", "是", "TikTok、YouTube、Instagram、Facebook 或 Gmail"])
     notes.append(["状态", "否", "正常、自用、封禁或已售；不填默认为正常"])
     notes.append(["中视频/橱窗/手机直播/伴侣直播", "否", "填写“是”或“否”"])
     notes.append(["采购日期/出售日期", "否", "格式：YYYY-MM-DD，例如 2026-09-14"])
@@ -507,6 +523,77 @@ def _parse_import_bool(value):
         return value
     return str(value).strip().lower() in {"1", "true", "yes", "y", "是", "有"}
 
+def parse_email_import_line(line: str) -> dict:
+    separator = re.search(r"----|\||:", line)
+    if not separator:
+        raise ValueError("未找到邮箱字段分隔符")
+    delimiter = separator.group()
+    if delimiter == "----":
+        values = [item.strip() for item in line.split(delimiter)]
+    else:
+        values = next(csv.reader([line], delimiter=delimiter, strict=True))
+    if len(values) == 4:
+        account, password, recovery_email, totp_secret = values
+        registered = country = ""
+    else:
+        if len(values) < 6 or (delimiter != ":" and len(values) != 6):
+            raise ValueError("需要四个或六个邮箱字段")
+        account, password, recovery_email, totp_secret = values[:4]
+        registered = ":".join(values[4:-1]).strip()
+        country = values[-1].strip()
+    account = account.strip().lower()
+    if not re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}", account):
+        raise ValueError("邮箱地址无效")
+    registered_year = None
+    if registered:
+        if re.fullmatch(r"\d{4}", registered):
+            registered_year = int(registered)
+            if not 1 <= registered_year <= 9999:
+                raise ValueError("注册年份无效")
+            registered = None
+        else:
+            registered = datetime.fromisoformat(registered)
+    return dict(account=account, password=password or None,
+                recovery_email=recovery_email.strip() or None, totp_secret=totp_secret.strip() or None,
+                account_created_at=registered or None, account_created_year=registered_year, country=country or None)
+
+
+def import_gmail_text(db: Session, content: str, actor=None) -> OpImportResult:
+    rows = []
+    success = duplicates = failed = 0
+    for line_number, line in enumerate(content.lstrip("\ufeff").splitlines(), 1):
+        if not line.strip():
+            continue
+        result = {"platform": "gmail", "line": line_number}
+        try:
+            values = parse_email_import_line(line)
+            account = values["account"]
+            result["account"] = account
+            if not re.fullmatch(r"[a-z0-9._%+\-]+@gmail\.com", account):
+                raise ValueError("邮箱必须是完整 Gmail 地址")
+            if db.query(OpAccount).filter_by(platform="gmail", account=account).first():
+                result["_result"] = "duplicate"
+                duplicates += 1
+            else:
+                account = create_op_account(db, OpAccountCreate(
+                    platform="gmail", **values, registrant=actor,
+                ), actor=actor)
+                result.update(_result="success", _id=account.id)
+                success += 1
+        except (ValueError, csv.Error):
+            db.rollback()
+            result.update(_result="failed", _reason="无法识别此行：支持 |、----、: 分隔四或六字段；注册时间可只填年份。请检查字段数量、邮箱或时间是否有效。")
+            failed += 1
+        except Exception:
+            db.rollback()
+            result.update(_result="failed", _reason="保存失败，请检查是否重复或稍后重试")
+            failed += 1
+        rows.append(result)
+    if not rows:
+        raise ValueError("请输入至少一行 Gmail 账号")
+    return OpImportResult(total=len(rows), success=success, duplicates=duplicates, failed=failed, rows=rows)
+
+
 def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
     reader = csv.DictReader(io.StringIO(csv_content))
     rows = []
@@ -518,7 +605,7 @@ def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
         row = {_IMPORT_ALIASES.get(str(key).strip(), str(key).strip()): value for key, value in row.items()}
         account_val = (row.get("account") or "").strip()
         platform_val = (row.get("platform") or "").strip()
-        platform_val = {"TikTok": "tiktok", "YouTube": "youtube", "Instagram": "instagram", "Facebook": "facebook"}.get(platform_val, platform_val.lower())
+        platform_val = {"TikTok": "tiktok", "YouTube": "youtube", "Instagram": "instagram", "Facebook": "facebook", "Google": "gmail", "Gmail": "gmail", "谷歌邮箱": "gmail"}.get(platform_val, platform_val.lower())
 
         if not account_val or not platform_val:
             rows.append({**row, "_result": "failed", "_reason": "缺少账号或平台"})
@@ -544,6 +631,9 @@ def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
                 account=account_val,
                 password=row.get("password") or None,
                 totp_secret=row.get("totp_secret") or None,
+                recovery_email=row.get("recovery_email") or None,
+                account_created_at=row.get("account_created_at") or None,
+                account_created_year=row.get("account_created_year") or None,
                 email=row.get("email") or None,
                 email_password=row.get("email_password") or None,
                 email_login_url=row.get("email_login_url") or None,
