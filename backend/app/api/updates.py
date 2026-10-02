@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.services.auth_service import get_current_user_from_header, require_permission
+from app.core.config import settings
 from app.version import APP_VERSION, UPDATE_MANIFEST_URL
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ def _validate_package_manifest(data):
 
 
 def _manifest():
-    url = os.getenv("UPDATE_MANIFEST_URL", UPDATE_MANIFEST_URL)
+    url = settings.UPDATE_MANIFEST_URL or os.getenv("UPDATE_MANIFEST_URL", UPDATE_MANIFEST_URL)
     request = Request(url, headers={"User-Agent": "tk-crm-updater"})
     with urlopen(request, timeout=10) as response:
         raw = response.read(256 * 1024 + 1)
@@ -89,12 +90,12 @@ def update_status(_=Depends(require_permission("settings:view"))):
 
 
 def _agent_configured():
-    return bool(os.getenv("UPDATE_AGENT_URL") and os.getenv("UPDATE_AGENT_TOKEN"))
+    return bool(settings.UPDATE_AGENT_URL and settings.UPDATE_AGENT_TOKEN)
 
 
 def _agent_request(method, path, payload=None):
-    url = os.getenv("UPDATE_AGENT_URL", "").rstrip("/") + path
-    request = Request(url, method=method, headers={"Authorization": f"Bearer {os.getenv('UPDATE_AGENT_TOKEN', '')}"})
+    url = settings.UPDATE_AGENT_URL.rstrip("/") + path
+    request = Request(url, method=method, headers={"Authorization": f"Bearer {settings.UPDATE_AGENT_TOKEN}"})
     if payload is not None:
         body = json.dumps(payload).encode()
         request.data = body

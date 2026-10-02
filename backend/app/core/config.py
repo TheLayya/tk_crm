@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     # 超级管理员
     SUPER_ADMIN_PASSWORD: str = ""
 
+    # 本地一键更新代理配置
+    UPDATE_MANIFEST_URL: str = "https://raw.githubusercontent.com/TheLayya/tk_crm/main/version.json"
+    UPDATE_AGENT_URL: str = ""
+    UPDATE_AGENT_TOKEN: str = ""
+
     class Config:
         env_file = ".env"
 
