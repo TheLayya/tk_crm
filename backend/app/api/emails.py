@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.op_account import EmailAccount, EmailAccountRelation, EmailAssetRelation, OpAccount
+from app.models.card_key import CardKeyPlatform
 from app.models.device import Device
 from app.models.proxy_node import ProxyNode
 from app.models.team import User
@@ -25,6 +26,17 @@ from app.services.sale_validation_service import validate_sale_information
 
 
 router = APIRouter(prefix="/emails", tags=["emails"])
+
+
+def _platform_json(row):
+    return {"id": row.id, "name": row.name, "is_active": row.is_active}
+
+
+@router.get("/platforms")
+def list_email_platforms(db: Session = Depends(get_db), _=Depends(require_permission("email:view"))):
+    return [_platform_json(row) for row in db.query(CardKeyPlatform).filter(
+        CardKeyPlatform.is_active.is_(True),
+    ).order_by(CardKeyPlatform.name).all()]
 
 
 def scoped_query(db, model, user):
@@ -67,6 +79,10 @@ def save(db):
 
 def email_response(email, count=0, db=None):
     result = EmailAccountResponse.model_validate(email)
+    try:
+        result.platform_tags = json.loads(email.platform_tags or "[]")
+    except (TypeError, ValueError):
+        result.platform_tags = []
     result.current_relation_count = count
     if db:
         device = db.get(Device, email.device_id) if email.device_id else None
@@ -121,10 +137,15 @@ def prepare_trade(values):
     for field in ("purchase_price", "sale_price"):
         if values.get(field) is not None and values[field] < 0:
             raise HTTPException(status_code=422, detail="采购和出售金额不能为负数")
+    if "platform_tags" in values:
+        values["platform_tags"] = json.dumps(list(dict.fromkeys(
+            tag.strip() for tag in (values["platform_tags"] or []) if tag and tag.strip()
+        )), ensure_ascii=False)
 
 
 @router.get("")
 def list_emails(keyword: str | None = None, management_status: str | None = None,
+                platform: str | None = None,
                 skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
                 db: Session = Depends(get_db), user=Depends(require_permission("email:view"))):
     query = scoped_query(db, EmailAccount, user)
@@ -132,6 +153,8 @@ def list_emails(keyword: str | None = None, management_status: str | None = None
         query = query.filter(or_(EmailAccount.email.ilike(f"%{keyword}%"), EmailAccount.recovery_email.ilike(f"%{keyword}%")))
     if management_status:
         query = query.filter(EmailAccount.management_status == management_status)
+    if platform:
+        query = query.filter(EmailAccount.platform_tags.icontains(json.dumps(platform.strip(), ensure_ascii=False), autoescape=True))
     total = query.count()
     emails = query.order_by(EmailAccount.id.desc()).offset(skip).limit(limit).all()
     counts = dict(db.query(EmailAccountRelation.email_id, func.count(EmailAccountRelation.id)).filter(

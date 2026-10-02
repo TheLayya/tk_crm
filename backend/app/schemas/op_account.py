@@ -179,6 +179,7 @@ class EmailAccountCreate(BaseModel):
     account_created_at: Optional[datetime] = None
     account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
     country: Optional[str] = None
+    platform_tags: Optional[List[str]] = None
     device_id: Optional[int] = None
     node_id: Optional[int] = None
     purchase_channel: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
@@ -202,6 +203,7 @@ class EmailAccountUpdate(BaseModel):
     account_created_at: Optional[datetime] = None
     account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
     country: Optional[str] = None
+    platform_tags: Optional[List[str]] = None
     device_id: Optional[int] = None
     node_id: Optional[int] = None
     purchase_channel: Optional[str] = None
@@ -225,6 +227,10 @@ class EmailAccountResponse(BaseModel):
     account_created_at: Optional[datetime] = None
     account_created_year: Optional[int] = None
     country: Optional[str] = None
+    platform_tags: List[str] = []
+    claimed_by: Optional[str] = None
+    claimed_at: Optional[datetime] = None
+    claimed_platform: Optional[str] = None
     device_id: Optional[int] = None
     node_id: Optional[int] = None
     device_name: Optional[str] = None
@@ -249,6 +255,18 @@ class EmailAccountResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @field_validator("platform_tags", mode="before")
+    @classmethod
+    def normalize_platform_tags(cls, value):
+        if isinstance(value, str):
+            try:
+                import json
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+        return value or []
 
     @field_validator("sellers", mode="before")
     @classmethod

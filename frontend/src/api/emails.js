@@ -10,3 +10,4 @@ export const getEmailRelations = (id) => request({ url: `/emails/${id}/relations
 export const getEmailAccountOptions = (keyword = '') => request({ url: '/emails/account-options', method: 'get', params: { keyword } })
 export const bindEmailAccount = (emailId, data) => request({ url: `/emails/${emailId}/relations`, method: 'post', data })
 export const unbindEmailAccount = (emailId, relationId) => request({ url: `/emails/${emailId}/relations/${relationId}`, method: 'delete' })
+export const getEmailPlatforms = () => request({ url: '/emails/platforms', method: 'get' })

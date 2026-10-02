@@ -6,8 +6,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.card_keys import claim_key, consume_key, release_key, import_keys, ImportBody
+from app.api.card_keys import _totp_code
 from app.core.security import create_access_token
 from app.models.card_key import CardKey, CardKeyProject
+from app.models.op_account import EmailAccount
 from app.models.team import Role, RolePermission, User, UserRole
 
 
@@ -36,6 +38,91 @@ def project(client, admin, members):
         'name': ' 团队任务 ', 'description': '一行一份', 'members': members})
     assert response.status_code == 201, response.text
     return response.json()['id']
+
+
+def test_totp_standard_vector_and_invalid_secrets(monkeypatch):
+    monkeypatch.setattr('app.api.card_keys.time.time', lambda: 59)
+    assert _totp_code('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ') == ('287082', 1)
+    for secret in (None, '', '---', 'invalid!'):
+        assert _totp_code(secret) == (None, None)
+
+
+def test_claimed_email_totp_access(client, db, super_admin, normal_user, monkeypatch):
+    grant(db, normal_user, 'card_key:view')
+    project_id = project(client, super_admin, ['__all__'])
+    db.query(CardKeyProject).filter_by(id=project_id).update({'target_platform': 'TikTok'})
+    email = EmailAccount(email='totp@gmail.com', claimed_by=normal_user.username,
+                         claimed_platform='TikTok', totp_secret='GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ')
+    db.add(email)
+    db.commit()
+    monkeypatch.setattr('app.api.card_keys.time.time', lambda: 59)
+    path = f'/api/card-keys/{project_id}/email/totp'
+    result = client.get(path, headers=headers(normal_user))
+    assert result.status_code == 200, result.text
+    assert result.json() == {'code': '287082', 'remaining': 1}
+    assert result.headers['cache-control'] == 'no-store'
+    assert client.get(path, headers=headers(super_admin)).status_code == 404
+    email.totp_secret = 'invalid!'
+    db.commit()
+    assert client.get(path, headers=headers(normal_user)).status_code == 422
+
+
+def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    response = client.post('/api/card-keys', headers=headers(super_admin), json={
+        'name': '邮箱注册', 'members': [normal_user.username], 'target_platform': 'TikTok'})
+    assert response.status_code == 201
+    project_id = response.json()['id']
+    db.add_all([
+        EmailAccount(email='registered@gmail.com', platform_tags='["tiktok"]'),
+        EmailAccount(email='locked@gmail.com', management_status='锁定'),
+        EmailAccount(email='available@gmail.com', password='secret', totp_secret='TESTKEY'),
+    ])
+    db.commit()
+    path = f'/api/card-keys/{project_id}/email'
+    member_headers = headers(normal_user)
+    claimed = client.post(path + '/claim', headers=member_headers)
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()['email'] == 'available@gmail.com'
+    assert claimed.json()['password'] == 'secret'
+    assert client.post(path + '/claim', headers=member_headers).json()['id'] == claimed.json()['id']
+    assert client.get(path, headers=member_headers).json()['id'] == claimed.json()['id']
+    assert client.post(path + '/claim', headers=headers(super_admin)).status_code == 409
+    assert client.post(path + '/complete', headers=member_headers, json={'platform': 'wrong'}).status_code == 422
+    assert client.post(path + '/complete', headers=member_headers, json={'platform': ' '}).status_code == 422
+    result = client.post(path + '/complete', headers=member_headers, json={'platform': 'TikTok'})
+    assert result.status_code == 200, result.text
+    assert result.json()['platform_tags'] == ['TikTok']
+    assert result.json()['claimed_by'] is None
+    assert client.get(path, headers=member_headers).json() is None
+    assert client.post(path + '/claim', headers=member_headers).status_code == 409
+    filtered = client.get('/api/emails?platform=tiktok', headers=headers(super_admin)).json()
+    assert filtered['total'] == 2
+    db.query(EmailAccount).filter_by(email='registered@gmail.com').update({'management_status': '锁定'})
+    db.commit()
+    changed = client.put(f'/api/card-keys/{project_id}', headers=headers(super_admin), json={
+        'name': '邮箱注册', 'members': [normal_user.username], 'target_platform': 'Instagram'})
+    assert changed.status_code == 200
+    reused = client.post(path + '/claim', headers=member_headers)
+    assert reused.status_code == 200
+    assert reused.json()['id'] == claimed.json()['id']
+    assert client.post(path + '/release', headers=member_headers).status_code == 200
+    assert client.get(path, headers=member_headers).json() is None
+    db.expire_all()
+    assert db.query(EmailAccount).filter_by(email='available@gmail.com').one().platform_tags == '["TikTok"]'
+
+
+def test_email_platform_tags_create_and_update(client, super_admin):
+    auth = headers(super_admin)
+    response = client.post('/api/emails', headers=auth, json={
+        'email': 'tags@gmail.com', 'purchase_channel': '供应商', 'purchase_price': 0,
+        'platform_tags': [' TikTok ', 'TikTok', 'Instagram']})
+    assert response.status_code == 200, response.text
+    assert response.json()['platform_tags'] == ['TikTok', 'Instagram']
+    email_id = response.json()['id']
+    response = client.put(f'/api/emails/{email_id}', headers=auth, json={'platform_tags': ['YouTube']})
+    assert response.status_code == 200
+    assert response.json()['platform_tags'] == ['YouTube']
 
 
 def test_import_counts_deduplication_and_encryption(client, db, super_admin):

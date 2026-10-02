@@ -2,7 +2,7 @@
   <div class="card-key-page">
     <div class="page-heading">
       <div><h2>卡密管理</h2><span>按项目统一领取，避免遗漏和重复使用</span></div>
-      <el-button v-if="canManage" type="primary" @click="openProject()">＋新建项目</el-button>
+      <div class="heading-actions"><el-button v-if="canManage" @click="platformVisible = true">平台管理</el-button><el-button v-if="canManage" type="primary" @click="openProject()">＋新建项目</el-button></div>
     </div>
     <el-card shadow="never" class="project-card">
       <div class="toolbar">
@@ -12,6 +12,7 @@
         <el-tag v-if="selected" type="success">可领取 {{ selected.available }}</el-tag>
         <el-tag v-if="selected" type="info">已领取 {{ selected.claimed }}</el-tag>
         <el-tag v-if="selected">已消耗 {{ selected.consumed }}</el-tag>
+        <el-tag v-if="selected?.target_platform" type="warning">邮箱平台：{{ selected.target_platform }}</el-tag>
         <span class="project-description" :title="selected?.description">{{ selected?.description }}</span>
         <el-button v-if="canManage && selected" :disabled="!selected.is_active" @click="openImport">批量导入</el-button>
         <el-button v-if="canManage && selected" @click="openProject(selected)">编辑项目</el-button>
@@ -27,6 +28,11 @@
         <el-button size="small" @click="copy(pendingKey.content)">复制</el-button>
         <el-button size="small" type="primary" :loading="consuming" @click="consume(pendingKey)">确认已消耗</el-button>
         <el-button size="small" :disabled="consuming" @click="release(pendingKey)">归还未使用</el-button>
+      </div>
+      <div v-if="selected" class="email-claim-bar">
+        <div><strong>注册邮箱</strong><span v-if="selected.target_platform">{{ selected.target_platform }}</span><span v-else class="email-platform-empty">未设置目标平台</span><small>{{ pendingEmail ? '注册完成后标记平台并释放' : selected.target_platform ? '领取未注册该平台的闲置邮箱' : '请先设置目标平台，才能领取对应邮箱' }}</small></div>
+        <div v-if="!pendingEmail"><el-button v-if="selected.target_platform" type="primary" plain :disabled="!selected.can_claim" :loading="claimingEmail" @click="claimEmailAction">领取邮箱</el-button><el-button v-else-if="canManage" type="primary" plain @click="openProject(selected)">设置目标平台</el-button><el-tag v-else type="info">等待管理员设置</el-tag></div>
+        <div v-else class="email-actions"><code>{{ pendingEmail.email }}</code><el-button size="small" @click="copy(pendingEmail.email)">复制邮箱</el-button><el-button v-if="pendingEmail.password" size="small" @click="copy(pendingEmail.password)">复制密码</el-button><el-button v-if="pendingEmail.recovery_email" size="small" @click="copy(pendingEmail.recovery_email)">辅助邮箱</el-button><el-button v-if="totp" size="small" type="success" @click="copy(totp.code)">验证码 {{ totp.code }}（{{ totp.remaining }}s）</el-button><el-button v-else-if="pendingEmail.totp_secret" size="small" @click="copy(pendingEmail.totp_secret)">复制 2FA 密钥</el-button><el-button size="small" type="primary" @click="completeEmailAction">注册完成</el-button><el-button size="small" type="warning" @click="releaseEmailAction">归还</el-button></div>
       </div>
       <div v-if="selected" class="record-filters">
         <strong>{{ canManage ? '卡密记录' : '我的领取记录' }}</strong>
@@ -48,26 +54,37 @@
       <el-table :data="historyRow?.history || []" size="small"><el-table-column label="操作" width="85"><template #default="{ row }">{{ { claim: '领取', release: '归还', consume: '消耗' }[row.action] }}</template></el-table-column><el-table-column prop="username" label="操作人" /><el-table-column label="时间" width="190"><template #default="{ row }">{{ formatDate(row.time) }}</template></el-table-column></el-table>
     </el-dialog>
     <el-dialog v-model="projectVisible" :title="editing ? '编辑项目' : '新建项目'" width="min(600px, 94vw)">
-      <el-form label-width="90px"><el-form-item label="项目名称" required><el-input v-model="projectForm.name" /></el-form-item><el-form-item label="任务说明"><el-input v-model="projectForm.description" type="textarea" :rows="3" /></el-form-item><el-form-item label="协助成员" required><el-select v-model="projectForm.members" multiple filterable style="width:100%" @change="normalizeMembers"><el-option label="全员" value="__all__" /><el-option v-for="member in members" :key="member.username" :label="member.real_name ? `${member.username}（${member.real_name}）` : member.username" :value="member.username" /></el-select></el-form-item><el-form-item label="项目状态"><el-switch v-model="projectForm.is_active" active-text="进行中" inactive-text="已结束" /></el-form-item></el-form>
+      <el-form label-width="90px"><el-form-item label="项目名称" required><el-input v-model="projectForm.name" /></el-form-item><el-form-item label="任务说明"><el-input v-model="projectForm.description" type="textarea" :rows="3" /></el-form-item><el-form-item label="目标平台"><el-select v-model="projectForm.target_platform" filterable clearable placeholder="选择目标平台" style="width:100%"><el-option v-for="platform in activePlatforms" :key="platform.id" :label="platform.name" :value="platform.name" /></el-select><div class="form-hint">没有合适的平台？关闭此窗口后点击“平台管理”创建。</div></el-form-item><el-form-item label="协助成员" required><el-select v-model="projectForm.members" multiple filterable style="width:100%" @change="normalizeMembers"><el-option label="全员" value="__all__" /><el-option v-for="member in members" :key="member.username" :label="member.real_name ? `${member.username}（${member.real_name}）` : member.username" :value="member.username" /></el-select></el-form-item><el-form-item label="项目状态"><el-switch v-model="projectForm.is_active" active-text="进行中" inactive-text="已结束" /></el-form-item></el-form>
       <template #footer><el-button @click="projectVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveProject">保存</el-button></template>
+    </el-dialog>
+    <el-dialog v-model="platformVisible" title="平台管理" width="min(620px, 94vw)">
+      <div class="platform-create"><el-input v-model="platformDraft.name" placeholder="例如 TikTok" @keyup.enter="savePlatform" /><el-button type="primary" :loading="platformSaving" @click="savePlatform">{{ platformDraft.id ? '保存修改' : '新增平台' }}</el-button><el-button v-if="platformDraft.id" @click="resetPlatformDraft">取消编辑</el-button></div>
+      <el-table :data="platforms" size="small" empty-text="还没有平台配置"><el-table-column prop="name" label="平台" /><el-table-column label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? '启用' : '停用' }}</el-tag></template></el-table-column><el-table-column label="操作" width="180"><template #default="{ row }"><el-button link type="primary" @click="editPlatform(row)">编辑</el-button><el-button link :type="row.is_active ? 'warning' : 'success'" @click="togglePlatform(row)">{{ row.is_active ? '停用' : '启用' }}</el-button></template></el-table-column></el-table>
+      <template #footer><el-button @click="platformVisible=false">关闭</el-button></template>
     </el-dialog>
     <el-dialog v-model="importVisible" title="批量导入卡密" width="min(620px, 94vw)"><p>导入项目：<strong>{{ importTarget.name }}</strong></p><p class="hint">一行一份，支持字符串或链接；重复内容会自动跳过。</p><el-input v-model="importText" type="textarea" :rows="12" placeholder="每行粘贴一份卡密或链接" /><template #footer><el-button @click="importVisible=false">取消</el-button><el-button type="primary" :loading="importing" @click="saveImport">导入</el-button></template></el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { getCardKeyProjects, getCardKeyMembers, createCardKeyProject, updateCardKeyProject, importCardKeys, getCardKeys, claimCardKey, consumeCardKey, releaseCardKey } from '@/api/card_keys'
+import { getCardKeyProjects, getCardKeyMembers, createCardKeyProject, updateCardKeyProject, importCardKeys, getCardKeys, claimCardKey, consumeCardKey, releaseCardKey, getClaimedEmail, getClaimedEmailTotp, claimEmail, releaseEmail, completeEmail, getCardKeyPlatforms, createCardKeyPlatform, updateCardKeyPlatform } from '@/api/card_keys'
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('card_key:manage'))
 const username = computed(() => auth.user?.username)
 const projects = ref([]); const members = ref([]); const keys = ref([]); const selectedId = ref(null); const loading = ref(false); const claiming = ref(false); const saving = ref(false); const importing = ref(false); const projectVisible = ref(false); const importVisible = ref(false); const editing = ref(false); const importText = ref('')
-const projectForm = reactive({ id: null, name: '', description: '', members: [], is_active: true }); const selected = computed(() => projects.value.find(x => x.id === selectedId.value))
+const projectForm = reactive({ id: null, name: '', description: '', target_platform: '', members: [], is_active: true }); const selected = computed(() => projects.value.find(x => x.id === selectedId.value))
 const filters = reactive({ page: 1, page_size: 30, status: '', mine: false })
 const total = ref(0)
 const pendingKey = ref(null)
+const pendingEmail = ref(null)
+const totp = ref(null)
+let totpTimer = null
+const claimingEmail = ref(false)
+const platforms = ref([]); const platformVisible = ref(false); const platformSaving = ref(false); const platformDraft = reactive({ id: null, name: '' })
+const activePlatforms = computed(() => platforms.value.filter(platform => platform.is_active))
 const consuming = ref(false)
 const historyRow = ref(null)
 const importTarget = reactive({ id: null, name: '' })
@@ -81,15 +98,17 @@ const clearData = () => {
   keys.value = []
   total.value = 0
   pendingKey.value = null
+  pendingEmail.value = null
   historyRow.value = null
   filters.page = 1
 }
 const load = async () => {
   const version = ++projectRequestVersion
   try {
-    const result = await getCardKeyProjects()
+    const [result, platformResult] = await Promise.all([getCardKeyProjects(), getCardKeyPlatforms()])
     if (version !== projectRequestVersion) return
     projects.value = result
+    platforms.value = platformResult
     if (!projects.value.some(project => project.id === selectedId.value)) {
       selectedId.value = projects.value[0]?.id || null
       filters.page = 1
@@ -106,32 +125,70 @@ const load = async () => {
 }
 const loadKeys = async () => {
   const version = ++requestVersion
-  if (!selectedId.value) { keys.value = []; total.value = 0; pendingKey.value = null; loading.value = false; return }
+  if (!selectedId.value) { keys.value = []; total.value = 0; pendingKey.value = null; pendingEmail.value = null; loading.value = false; return }
   loading.value = true
   try {
-    const [result, pending] = await Promise.all([
+    const [result, pending, email] = await Promise.all([
       getCardKeys(selectedId.value, filters),
-      getCardKeys(selectedId.value, { mine: true, status: 'claimed', page_size: 1 })
+      getCardKeys(selectedId.value, { mine: true, status: 'claimed', page_size: 1 }),
+      selected.value?.target_platform ? getClaimedEmail(selectedId.value) : Promise.resolve(null)
     ])
     if (version !== requestVersion) return
     keys.value = result.items
     total.value = result.total
     pendingKey.value = pending.items[0] || null
+    pendingEmail.value = email
+    await refreshTotp()
   } catch (error) {
     if (version === requestVersion) {
       keys.value = []
       total.value = 0
       pendingKey.value = null
+      pendingEmail.value = null
       historyRow.value = null
     }
     throw error
   } finally { if (version === requestVersion) loading.value = false }
 }
-const reloadKeys = () => { filters.page = 1; keys.value = []; total.value = 0; pendingKey.value = null; loadKeys() }
-const openProject = (row) => { editing.value = !!row; Object.assign(projectForm, row ? { ...row, members: [...row.members] } : { id: null, name: '', description: '', members: [], is_active: true }); projectVisible.value = true }
+const refreshTotp = async () => {
+  const projectId = selectedId.value
+  const emailId = pendingEmail.value?.id
+  totp.value = null
+  if (!projectId || !pendingEmail.value?.totp_secret) return
+  try { const result = await getClaimedEmailTotp(projectId); if (selectedId.value === projectId && pendingEmail.value?.id === emailId) totp.value = { ...result, expiresAt: Date.now() + result.remaining * 1000 } }
+  catch { if (selectedId.value === projectId && pendingEmail.value?.id === emailId) totp.value = null }
+}
+const reloadKeys = () => { filters.page = 1; keys.value = []; total.value = 0; pendingKey.value = null; pendingEmail.value = null; totp.value = null; loadKeys() }
+const openProject = (row) => { editing.value = !!row; Object.assign(projectForm, row ? { ...row, members: [...row.members] } : { id: null, name: '', description: '', target_platform: '', members: [], is_active: true }); projectVisible.value = true }
 const normalizeMembers = (values) => { if (values.includes('__all__')) projectForm.members = ['__all__'] }
 const memberLabel = (values) => values.includes('__all__') ? '全员' : values.join('、')
-const saveProject = async () => { if (!projectForm.name.trim() || !projectForm.members.length) return ElMessage.warning('请填写项目名称并选择协助成员'); saving.value = true; try { const data = { name: projectForm.name, description: projectForm.description, members: projectForm.members, is_active: projectForm.is_active }; const result = editing.value ? await updateCardKeyProject(projectForm.id, data) : await createCardKeyProject(data); projectVisible.value = false; await load(); selectedId.value = result.id; await loadKeys() } finally { saving.value = false } }
+const saveProject = async () => { if (!projectForm.name.trim() || !projectForm.members.length) return ElMessage.warning('请填写项目名称并选择协助成员'); saving.value = true; try { const data = { name: projectForm.name, description: projectForm.description, target_platform: projectForm.target_platform, members: projectForm.members, is_active: projectForm.is_active }; const result = editing.value ? await updateCardKeyProject(projectForm.id, data) : await createCardKeyProject(data); projectVisible.value = false; await load(); selectedId.value = result.id; await loadKeys() } finally { saving.value = false } }
+const claimEmailAction = async () => {
+  const projectId = selectedId.value
+  claimingEmail.value = true
+  try { const email = await claimEmail(projectId); if (selectedId.value === projectId) { pendingEmail.value = email; await refreshTotp() }; ElMessage.success('已锁定邮箱，请注册完成后释放') }
+  finally { claimingEmail.value = false }
+}
+const resetPlatformDraft = () => Object.assign(platformDraft, { id: null, name: '' })
+const editPlatform = (row) => Object.assign(platformDraft, { id: row.id, name: row.name })
+const savePlatform = async () => {
+  if (!platformDraft.name.trim()) return ElMessage.warning('请填写平台名称')
+  platformSaving.value = true
+  try { const data = { name: platformDraft.name, is_active: true }; if (platformDraft.id) await updateCardKeyPlatform(platformDraft.id, data); else await createCardKeyPlatform(data); await load(); resetPlatformDraft(); ElMessage.success('平台已保存') }
+  finally { platformSaving.value = false }
+}
+const togglePlatform = async (row) => { await updateCardKeyPlatform(row.id, { name: row.name, is_active: !row.is_active }); await load(); ElMessage.success(row.is_active ? '平台已停用' : '平台已启用') }
+const releaseEmailAction = async () => {
+  const projectId = selectedId.value
+  try { await ElMessageBox.confirm('确认尚未注册该平台？已注册请使用“注册完成”，避免重复分配。', '归还邮箱', { type: 'warning' }) } catch { return }
+  await releaseEmail(projectId); await loadKeys(); ElMessage.success('邮箱已归还，未添加平台标签')
+}
+const completeEmailAction = async () => {
+  const projectId = selectedId.value
+  const platform = selected.value.target_platform
+  try { await ElMessageBox.confirm(`确认已完成 ${platform} 注册？将添加平台标签并释放邮箱。`, '注册完成', { type: 'warning' }) } catch { return }
+  await completeEmail(projectId, platform); await loadKeys(); ElMessage.success('已添加平台标签并释放邮箱')
+}
 const openImport = () => { if (!selected.value) return; Object.assign(importTarget, { id: selected.value.id, name: selected.value.name }); importText.value = ''; importVisible.value = true }
 const saveImport = async () => { if (!importText.value.trim()) return ElMessage.warning('请粘贴卡密内容'); importing.value = true; try { const result = await importCardKeys(importTarget.id, importText.value); ElMessage.success(`导入 ${result.added} 份，跳过重复 ${result.duplicates} 份`); importVisible.value = false; await load() } finally { importing.value = false } }
 const claim = async () => {
@@ -165,10 +222,29 @@ const release = async (row) => {
   finally { consuming.value = false }
 }
 const formatDate = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'; const statusLabel = value => ({ available: '可领取', claimed: '已领取', consumed: '已消耗' }[value] || value); const statusType = value => ({ available: 'success', claimed: 'warning', consumed: 'info' }[value] || '')
-onMounted(async () => { await load(); if (canManage.value) members.value = await getCardKeyMembers() })
+onMounted(async () => {
+  totpTimer = window.setInterval(() => {
+    if (!pendingEmail.value) { totp.value = null; return }
+    if (!totp.value) return
+    totp.value.remaining = Math.max(0, Math.ceil((totp.value.expiresAt - Date.now()) / 1000))
+    if (!totp.value.remaining) refreshTotp()
+  }, 1000)
+  await load()
+  if (canManage.value) members.value = await getCardKeyMembers()
+})
+onBeforeUnmount(() => { if (totpTimer) window.clearInterval(totpTimer) })
 </script>
 
 <style scoped>
+.email-claim-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px; margin:12px 0; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; }
+.email-claim-bar span,.email-claim-bar small { margin-left:10px; color:#64748b; }
+.email-claim-bar .email-platform-empty { color:#e6a23c; }
+.email-actions { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.email-actions .el-button { margin-left:0; }
+.heading-actions { display:flex; gap:8px; }
+.platform-create { display:flex; gap:8px; margin-bottom:14px; }
+.platform-create .el-input { flex:1; }
+.form-hint { color:#909399; font-size:12px; line-height:1.5; margin-top:5px; }
 .card-key-page { max-width: 1500px; margin: 0 auto; }.page-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }.page-heading h2 { margin:0 0 6px; color:#1f2937; }.page-heading span,.hint,.muted { color:#909399; font-size:13px; }.project-card,.project-list-card { margin-bottom:16px; }.toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }.project-description { color:#909399; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }.claim-bar { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-top:1px solid #ebeef5; border-bottom:1px solid #ebeef5; margin-bottom:10px; }.claim-bar span,.claim-bar small { margin-left:12px; color:#606266; }.claim-bar small { color:#909399; } code { color:#303133; word-break:break-all; white-space:pre-wrap; }
 .pending-key { display:flex; align-items:center; gap:10px; padding:10px 12px; margin:10px 0; border:1px solid #d9ecff; background:#ecf5ff; border-radius:6px; }.pending-key code { flex:1; min-width:0; }.record-filters { display:flex; align-items:center; gap:12px; margin:12px 0; }.pagination { justify-content:flex-end; margin-top:12px; } @media(max-width:768px) { .claim-bar { align-items:flex-start; gap:8px; }.claim-bar small { display:block; margin:5px 0; }.pending-key { flex-wrap:wrap; }.pending-key code { flex-basis:75%; }.page-heading { gap:10px; }.project-description { flex-basis:100%; } }
 </style>

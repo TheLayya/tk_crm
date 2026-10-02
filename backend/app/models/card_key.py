@@ -12,9 +12,20 @@ class CardKeyProject(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
+    target_platform = Column(String(100), nullable=True, index=True)
     member_usernames = Column(Text, nullable=False, default="")
     is_active = Column(Boolean, nullable=False, default=True)
     created_by = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CardKeyPlatform(Base):
+    __tablename__ = "card_key_platforms"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False, unique=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 

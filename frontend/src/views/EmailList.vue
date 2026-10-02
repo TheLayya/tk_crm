@@ -14,6 +14,7 @@
 
     <el-card class="filter-card" shadow="never">
       <div class="filters">
+        <el-select v-model="filters.platform" clearable filterable placeholder="已注册平台标签" @change="page = 1; load()"><el-option v-for="platform in platforms" :key="platform.id" :label="platform.name" :value="platform.name" /></el-select>
         <el-input v-model="filters.keyword" clearable placeholder="搜索邮箱/辅助邮箱" @keyup.enter="load" @clear="load" />
         <el-select v-model="filters.management_status" clearable placeholder="使用状态" @change="load">
           <el-option v-for="status in statuses" :key="status" :label="status" :value="status" />
@@ -65,6 +66,7 @@
           <template #default="{ row }"><el-button class="email-name" link @click="tableRef.toggleRowExpansion(row)">{{ row.email }}</el-button></template>
         </el-table-column>
         <el-table-column prop="country" label="国家" width="110" />
+        <el-table-column label="平台注册 / 领取" min-width="190"><template #default="{ row }"><el-tag v-for="tag in row.platform_tags" :key="tag" size="small" style="margin:2px">{{ tag }}</el-tag><span v-if="!row.platform_tags?.length">未标记</span><div v-if="row.claimed_by" class="remark">{{ row.claimed_by }} 正在注册 {{ row.claimed_platform }}</div></template></el-table-column>
         <el-table-column label="检测状态" width="120">
           <template #default="{ row }"><el-tag size="small" :type="checkTag(row.gmail_check_status)">{{ row.gmail_check_status || '未检测' }}</el-tag></template>
         </el-table-column>
@@ -98,6 +100,7 @@
         <el-form-item label="注册时间"><el-input v-model="form.account_created_at" placeholder="YYYY-MM-DD 或 YYYY-MM-DD HH:mm:ss，也可只填年份" /></el-form-item>
         <el-form-item label="国家"><el-input v-model="form.country" /></el-form-item>
         <el-form-item label="使用状态"><el-select v-model="form.management_status"><el-option v-for="status in statuses" :key="status" :label="status" :value="status" /></el-select></el-form-item>
+        <el-form-item label="已注册平台"><el-select v-model="form.platform_tags" multiple filterable placeholder="选择已注册的平台" style="width:100%"><el-option v-for="platform in platforms" :key="platform.id" :label="platform.name" :value="platform.name" /></el-select></el-form-item>
         <el-row :gutter="16">
           <el-col :span="12"><el-form-item label="绑定手机"><el-select v-model="form.device_id" filterable clearable @visible-change="loadAssetOptions"><el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" /></el-select></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="绑定节点"><el-select v-model="form.node_id" filterable clearable @visible-change="loadAssetOptions"><el-option v-for="node in nodes" :key="node.id" :label="`${node.ip}:${node.port}`" :value="node.id" /></el-select></el-form-item></el-col>
@@ -124,7 +127,7 @@
         <el-col :span="12"><el-form-item label="采购渠道" required><el-input v-model="importPurchaseChannel" placeholder="例如：供应商" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item label="采购成本（每个）" required><el-input-number v-model="importPurchasePrice" :min="0" :precision="2" placeholder="单个邮箱成本" controls-position="right" style="width:100%" /></el-form-item></el-col>
       </el-row>
-      <div class="import-tip">采购渠道和单个邮箱成本必填，会应用到整批邮箱；免费来源请明确填写 0。每行自动识别 |、---- 或 :，支持四项或六项，注册时间可只填年份。导入后自动检测新 Gmail，仅发送邮箱地址，不发送密码或 2FA。</div>
+      <div class="import-tip">采购渠道和单个邮箱成本必填，会应用到整批邮箱；免费来源请明确填写 0。每行自动识别 |、---- 或 :，支持四项或六项，注册时间可只填年份。导入后可自动进行邮箱状态检测。</div>
       <div v-if="importResult" class="import-result">成功 {{ importResult.success }} · 重复 {{ importResult.duplicates }} · 失败 {{ importResult.failed }}{{ checkingImport ? ' · 正在检测新 Gmail…' : (importCheckResult ? ` · 已检测 ${importCheckResult.checked} 个` : '') }}</div>
       <div v-for="result in importResult?.rows?.filter(row => row._result === 'failed') || []" :key="result.line" class="import-result">第 {{ result.line }} 行：{{ result._reason }}</div>
       <template #footer><el-button @click="importVisible = false">取消</el-button><el-button type="primary" :loading="importing" @click="importData">导入</el-button></template>
@@ -143,7 +146,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listEmails, createEmail, updateEmail, deleteEmail, importEmails, checkEmails, getEmailRelations, getEmailAccountOptions, bindEmailAccount, unbindEmailAccount } from '@/api/emails'
+import { listEmails, createEmail, updateEmail, deleteEmail, importEmails, checkEmails, getEmailRelations, getEmailAccountOptions, bindEmailAccount, unbindEmailAccount, getEmailPlatforms } from '@/api/emails'
 import { useAuthStore } from '@/stores/auth'
 import request from '@/api/request'
 import { getDevices } from '@/api/devices'
@@ -159,6 +162,7 @@ const selected = ref([])
 const checking = ref(false)
 const tableRef = ref(null)
 const statuses = ['闲置', '使用中', '锁定', '已出售', '废弃']
+const platforms = ref([])
 const devices = ref([])
 const nodes = ref([])
 const tradeDefaults = () => ({ device_id: null, node_id: null, purchase_channel: '', purchase_price: null, purchase_date: null, sale_customer: '', sale_price: null, sale_date: null, sellers: [], operator: '' })
@@ -168,10 +172,10 @@ const loadAssetOptions = async (visible) => {
   if (auth.hasPermission('device:view')) devices.value = (await getDevices({ limit: 200, device_type: 'phone' })).items
   if (auth.hasPermission('proxy_node:view')) nodes.value = (await getProxyNodes({ limit: 500 })).items.filter(node => ['idle', 'active'].includes(node.status))
 }
-const filters = reactive({ keyword: '', management_status: '' })
+const filters = reactive({ keyword: '', management_status: '', platform: '' })
 const items = ref([]); const total = ref(0); const page = ref(1); const pageSize = ref(50); const loading = ref(false)
 const formVisible = ref(false); const editing = ref(false); const saving = ref(false)
-const form = reactive({ email: '', password: '', recovery_email: '', totp_secret: '', account_created_at: '', account_created_year: null, country: '', management_status: '闲置', remark: '' })
+const form = reactive({ email: '', password: '', recovery_email: '', totp_secret: '', account_created_at: '', account_created_year: null, country: '', management_status: '闲置', platform_tags: [], remark: '' })
 const importVisible = ref(false); const importText = ref(''); const importPurchaseChannel = ref(''); const importPurchasePrice = ref(null); const importResult = ref(null); const importing = ref(false); const checkingImport = ref(false); const importCheckResult = ref(null)
 const bindVisible = ref(false); const binding = ref(false); const bindEmail = ref(null); const bindAccountId = ref(null); const bindRemark = ref(''); const accountOptions = ref([])
 
@@ -181,7 +185,7 @@ const statusTag = (value) => ({ '使用中': 'success', '已出售': 'warning', 
 const checkTag = (value) => ({ 正常: 'success', 封禁: 'danger', 验证: 'warning', 未注册: 'info' }[value] || 'info')
 const load = async () => { loading.value = true; try { const data = await listEmails({ ...filters, skip: (page.value - 1) * pageSize.value, limit: pageSize.value }); items.value = data.items; total.value = data.total } finally { loading.value = false } }
 const handleExpand = async (row, expanded) => { if (expanded.some(item => item.id === row.id)) { row.relations = await getEmailRelations(row.id); row.assetHistory = await request.get(`/emails/${row.id}/asset-history`) } }
-const resetForm = () => Object.assign(form, { email: '', password: '', recovery_email: '', totp_secret: '', account_created_at: '', account_created_year: null, country: '', management_status: '闲置', remark: '' })
+const resetForm = () => Object.assign(form, { email: '', password: '', recovery_email: '', totp_secret: '', account_created_at: '', account_created_year: null, country: '', management_status: '闲置', platform_tags: [], remark: '' })
 const openCreate = () => { editing.value = false; resetForm(); Object.assign(form, tradeDefaults()); formVisible.value = true }
 const openEdit = (row) => { editing.value = true; resetForm(); Object.assign(form, tradeDefaults(), row, { password: '', totp_secret: '', account_created_at: row.account_created_at || String(row.account_created_year || '') }); formVisible.value = true }
 const save = async () => {
@@ -195,7 +199,7 @@ const save = async () => {
   }
   saving.value = true
   try {
-    const data = Object.fromEntries(['email', 'password', 'recovery_email', 'totp_secret', 'country', 'management_status', 'remark'].map(field => [field, form[field]]))
+    const data = Object.fromEntries(['email', 'password', 'recovery_email', 'totp_secret', 'country', 'management_status', 'platform_tags', 'remark'].map(field => [field, form[field]]))
     for (const field of Object.keys(tradeDefaults())) data[field] = form[field] ?? null
     data.device_id = form.device_id || null
     data.node_id = form.node_id || null
@@ -239,7 +243,7 @@ const checkSelected = () => checkRows(selected.value)
 const check = (row) => checkRows([row])
 const checkRows = async (rows) => {
   if (rows.length > 50 || rows.some(row => !row.email.endsWith('@gmail.com'))) return ElMessage.warning('每次请选择 1-50 个 Gmail 邮箱')
-  try { await ElMessageBox.confirm('仅把邮箱地址发送至 gmail0918.top，不发送密码或 2FA。结果是第三方探测，不代表可登录。是否继续？', '第三方检测', { type: 'warning' }) } catch { return }
+  try { await ElMessageBox.confirm('检测仅用于判断邮箱状态，不会发送密码或 2FA。结果来自第三方探测，不代表邮箱一定可以登录。是否继续？', '邮箱状态检测', { type: 'warning' }) } catch { return }
   checking.value = true
   try { await checkEmails(rows.map(row => row.id)); ElMessage.success('检测完成'); await load() }
   finally { checking.value = false }
@@ -249,7 +253,7 @@ const openBind = async (row) => { bindEmail.value = row; bindAccountId.value = n
 const searchAccounts = async (keyword) => { accountOptions.value = await getEmailAccountOptions(keyword) }
 const bind = async () => { if (!bindAccountId.value) return ElMessage.warning('请选择运营账号'); binding.value = true; try { await bindEmailAccount(bindEmail.value.id, { op_account_id: bindAccountId.value, remark: bindRemark.value }); bindEmail.value.relations = await getEmailRelations(bindEmail.value.id); bindVisible.value = false; await load(); ElMessage.success('已关联') } finally { binding.value = false } }
 const unbind = async (row, relation) => { await ElMessageBox.confirm(`确认解绑 ${relation.account}？历史记录会保留。`, '解除关联', { type: 'warning' }); await unbindEmailAccount(row.id, relation.id); row.relations = await getEmailRelations(row.id); await load(); ElMessage.success('已解绑') }
-onMounted(load)
+onMounted(async () => { platforms.value = await getEmailPlatforms(); await load() })
 </script>
 
 <style scoped>

@@ -125,6 +125,7 @@ class OpAuditLog(Base):
 
 class EmailAccount(Base):
     __tablename__ = "email_accounts"
+    __table_args__ = (Index("uq_email_pending_platform", "claimed_by", "claimed_platform", unique=True),)
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), nullable=False, unique=True, index=True)
@@ -134,6 +135,10 @@ class EmailAccount(Base):
     account_created_at = Column(DateTime, nullable=True)
     account_created_year = Column(Integer, nullable=True)
     country = Column(String(100), nullable=True)
+    platform_tags = Column(Text, nullable=True)
+    claimed_by = Column(String(255), nullable=True, index=True)
+    claimed_at = Column(DateTime, nullable=True)
+    claimed_platform = Column(String(100), nullable=True)
     device_id = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True, index=True)
     node_id = Column(Integer, ForeignKey("proxy_nodes.id", ondelete="SET NULL"), nullable=True, index=True)
     purchase_channel = Column(String(255), nullable=True)

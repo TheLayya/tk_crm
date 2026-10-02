@@ -1257,7 +1257,7 @@ const handleGmailCheck = async (ids) => {
   if (gmailCheckLoading.value) return
   if (!ids.length || ids.length > 50) return ElMessage.warning('每次请选择 1–50 个 Gmail 账号')
   try {
-    await ElMessageBox.confirm('将把所选邮箱地址发送至 gmail0918.top 检测，不发送密码或 2FA。结果仅为第三方探测，不覆盖管理状态。是否继续？', 'Gmail 第三方检测', { type: 'warning' })
+    await ElMessageBox.confirm('检测仅用于判断邮箱状态，不会发送密码或 2FA。结果来自第三方探测，不覆盖管理状态。是否继续？', '邮箱状态检测', { type: 'warning' })
   } catch { return }
   gmailCheckLoading.value = true
   try {
