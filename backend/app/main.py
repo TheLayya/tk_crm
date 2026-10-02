@@ -19,6 +19,8 @@ from app.api import proxy_nodes
 from app.api import devices
 from app.api import emails
 from app.api import work_items, card_keys, overview
+from app.api import updates
+from app.version import APP_VERSION
 from app.middleware.rate_limit import limiter
 from app.middleware.operation_log import OperationLogMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -67,7 +69,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="TikTok Monitor",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan
 )
 
@@ -105,6 +107,7 @@ app.include_router(emails.router, prefix="/api")
 app.include_router(work_items.router, prefix="/api")
 app.include_router(card_keys.router, prefix="/api")
 app.include_router(overview.router, prefix="/api")
+app.include_router(updates.router, prefix="/api")
 
 
 @app.get("/health")

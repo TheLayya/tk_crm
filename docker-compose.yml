@@ -11,6 +11,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
+      - UPDATE_AGENT_URL=${UPDATE_AGENT_URL:-http://host.docker.internal:8765}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Keep the database location used by the existing server deployment.
       - ./backend/data:/app/data

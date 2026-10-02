@@ -33,3 +33,15 @@ export function updateSettings(data) {
     data
   })
 }
+
+export function checkUpdate() {
+  return request({ url: '/updates/check', method: 'get' })
+}
+
+export function applyUpdate() {
+  return request({ url: '/updates/apply', method: 'post' })
+}
+
+export function getUpdateStatus() {
+  return request({ url: '/updates/status', method: 'get' })
+}

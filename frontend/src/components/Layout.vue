@@ -60,6 +60,10 @@
           <template #title><span>系统设置</span></template>
         </el-menu-item>
       </el-menu>
+      <button class="sidebar-version" type="button" @click="versionDrawerVisible = true">
+        <span v-if="!sidebarCollapsed">版本 {{ APP_VERSION }}</span>
+        <span v-else>v{{ APP_VERSION }}</span>
+      </button>
     </el-aside>
 
     <el-container>
@@ -98,6 +102,33 @@
     <!-- 移动端底部 Tab Bar -->
     <FloatingTableScrollbar />
     <MobileTabBar v-if="isMobile" />
+
+    <el-drawer v-model="versionDrawerVisible" title="更新日志" size="420px">
+      <div class="version-history">
+        <div class="version-actions">
+          <span v-if="updateInfo">
+            当前 v{{ updateInfo.current_version }}<template v-if="updateInfo.has_update">，发现 v{{ updateInfo.latest_version }}</template>
+          </span>
+          <span v-else>检查服务器是否有新版本</span>
+          <el-button size="small" :loading="updateChecking" @click="handleCheckUpdate">检查更新</el-button>
+          <el-button v-if="updateInfo?.has_update" type="primary" size="small" :disabled="!updateInfo.configured || updateInfo.updating" :loading="updateApplying" @click="handleApplyUpdate">立即更新</el-button>
+        </div>
+        <el-alert v-if="updateInfo?.has_update" type="info" :closable="false" title="有新版本可用" />
+        <el-alert v-if="updateInfo && !updateInfo.configured" type="warning" :closable="false" title="本机尚未初始化更新器，暂不能自动更新" />
+        <ul v-if="updateInfo?.has_update" class="update-changes">
+          <li v-for="change in updateInfo.changes" :key="change">{{ change }}</li>
+        </ul>
+        <article v-for="release in RELEASES" :key="release.version" class="release-item">
+          <div class="release-heading">
+            <strong>v{{ release.version }}</strong>
+            <span>{{ release.date }}</span>
+          </div>
+          <ul>
+            <li v-for="item in release.items" :key="item">{{ item }}</li>
+          </ul>
+        </article>
+      </div>
+    </el-drawer>
   </el-container>
 </template>
 
@@ -105,7 +136,8 @@
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Monitor, Setting, Briefcase, UserFilled, SwitchButton, Connection, Iphone, Message, Memo } from '@element-plus/icons-vue'
-import { getPublicSettings } from '@/api/settings'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getPublicSettings, checkUpdate, applyUpdate, getUpdateStatus } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import Breadcrumb from '@/components/Breadcrumb.vue'
 import MobileTabBar from '@/components/MobileTabBar.vue'
@@ -115,6 +147,69 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const APP_VERSION = '1.1.0'
+const versionDrawerVisible = ref(false)
+const RELEASES = [
+  {
+    version: APP_VERSION,
+    date: '2026-10-02',
+    items: ['卡密项目支持邮箱领取、注册归因与 2FA 验证码', '增加成员工作量报表、卡密备注、搜索和操作追踪', '优化登录页与部署稳定性']
+  },
+  {
+    version: '1.0.0',
+    date: '2026-10-01',
+    items: ['团队资产、运营账号、邮箱、节点和卡密统一管理', '上线数据总览与人员、终端关联视图']
+  }
+]
+const updateInfo = ref(null)
+const updateChecking = ref(false)
+const updateApplying = ref(false)
+let updateTimer = null
+
+const handleCheckUpdate = async () => {
+  updateChecking.value = true
+  try {
+    updateInfo.value = await checkUpdate()
+  } finally {
+    updateChecking.value = false
+  }
+}
+
+const handleApplyUpdate = async () => {
+  try {
+    await ElMessageBox.confirm(
+      `确认更新到 v${updateInfo.value.latest_version}？更新期间服务会短暂重启。`,
+      '确认更新',
+      { type: 'warning', confirmButtonText: '开始更新', cancelButtonText: '取消' }
+    )
+  } catch (_) {
+    return
+  }
+  updateApplying.value = true
+  try {
+    await applyUpdate()
+    updateInfo.value = { ...(updateInfo.value || {}), updating: true }
+    updateTimer = window.setInterval(async () => {
+      try {
+        const status = await getUpdateStatus()
+        if (status.status === 'failed') {
+          window.clearInterval(updateTimer)
+          updateTimer = null
+          updateInfo.value = { ...(updateInfo.value || {}), updating: false, update_status: status }
+          ElMessage.error(`更新失败：${status.message || '请检查服务日志'}`)
+        } else if (status.status === 'completed') {
+          window.clearInterval(updateTimer)
+          updateTimer = null
+          window.location.reload()
+        }
+      } catch (_) {
+        // The backend may restart during a successful update.
+      }
+    }, 3000)
+  } finally {
+    updateApplying.value = false
+  }
+}
 
 // 响应式断点状态
 const windowWidth = ref(window.innerWidth)
@@ -195,7 +290,10 @@ onMounted(() => {
   loadSettings()
   window.addEventListener('site-settings-updated', handleSiteSettingsUpdated)
 })
-onUnmounted(() => window.removeEventListener('site-settings-updated', handleSiteSettingsUpdated))
+onUnmounted(() => {
+  window.removeEventListener('site-settings-updated', handleSiteSettingsUpdated)
+  if (updateTimer) window.clearInterval(updateTimer)
+})
 </script>
 
 <style scoped>
@@ -253,6 +351,82 @@ onUnmounted(() => window.removeEventListener('site-settings-updated', handleSite
   border-right: none;
   background-color: #304156;
   flex: 1;
+}
+
+.sidebar-version {
+  flex-shrink: 0;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: #91a1b5;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-version:hover {
+  color: #fff;
+  background-color: #263445;
+}
+
+.sidebar-collapsed .sidebar-version {
+  padding: 0;
+  text-align: center;
+}
+
+.version-history {
+  color: #303133;
+}
+
+.version-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.version-actions > span {
+  flex: 1;
+  color: #606266;
+  font-size: 13px;
+}
+
+.update-changes {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: #606266;
+  line-height: 1.8;
+}
+
+.release-item + .release-item {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid #ebeef5;
+}
+
+.release-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.release-heading strong {
+  font-size: 18px;
+}
+
+.release-heading span {
+  color: #909399;
+  font-size: 13px;
+}
+
+.release-item ul {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: #606266;
+  line-height: 1.8;
 }
 
 .sidebar-menu .el-menu-item,

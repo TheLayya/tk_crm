@@ -1,0 +1,11 @@
+{
+  "stop": [["powershell", "-NoProfile", "-Command", "<replace with your service stop command>"]],
+  "migrate": [
+    [".\\backend\\.venv312\\Scripts\\python.exe", "-m", "alembic", "upgrade", "head"],
+    ["npm.cmd", "--prefix", "frontend", "run", "build"]
+  ],
+  "start": [["powershell", "-NoProfile", "-Command", "<replace with your service start command>"]],
+  "health_url": "http://127.0.0.1:8000/health",
+  "health_timeout": 180,
+  "command_timeout": 1800
+}

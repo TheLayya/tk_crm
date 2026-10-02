@@ -1,0 +1,11 @@
+{
+  "stop": [["docker", "compose", "stop", "backend", "frontend"]],
+  "migrate": [
+    ["docker", "compose", "build", "backend", "frontend"],
+    ["docker", "compose", "run", "--rm", "backend", "alembic", "upgrade", "head"]
+  ],
+  "start": [["docker", "compose", "up", "-d", "--build"]],
+  "health_url": "http://127.0.0.1:8000/health",
+  "health_timeout": 180,
+  "command_timeout": 1800
+}
