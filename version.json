@@ -1,8 +1,8 @@
 {
   "version": "1.1.2",
   "date": "2026-10-02",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.1/release-v1.1.1.tar.gz",
-  "sha256": "3fec2b06948f5e453979943d57462cc63b83527aa1719b8e46686521b10f05a3",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.2/release-v1.1.2.tar.gz",
+  "sha256": "fe6d9b3aa6b1759f6608c749cedb891a2a19da6552bb10a993809687a2a93727",
   "changes": [
     "增加后台自动检查更新和新版本红点提醒",
     "修复 Windows 更新代理端口冲突和本地启动配置读取",
