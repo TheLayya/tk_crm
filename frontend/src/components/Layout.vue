@@ -60,9 +60,10 @@
           <template #title><span>系统设置</span></template>
         </el-menu-item>
       </el-menu>
-      <button class="sidebar-version" type="button" @click="versionDrawerVisible = true">
+      <button class="sidebar-version" type="button" @click="openVersionDrawer">
         <span v-if="!sidebarCollapsed">版本 {{ APP_VERSION }}</span>
         <span v-else>v{{ APP_VERSION }}</span>
+        <i v-if="hasUpdate" class="version-update-dot" aria-label="有新版本" />
       </button>
     </el-aside>
 
@@ -107,14 +108,15 @@
       <div class="version-history">
         <div class="version-actions">
           <span v-if="updateInfo">
-            当前 v{{ updateInfo.current_version }}<template v-if="updateInfo.has_update">，发现 v{{ updateInfo.latest_version }}</template>
+            <template v-if="updateInfo.error">{{ updateInfo.error }}</template>
+            <template v-else>当前 v{{ updateInfo.current_version }}<template v-if="updateInfo.has_update">，发现 v{{ updateInfo.latest_version }}</template><template v-else>，已是最新版本</template></template>
           </span>
           <span v-else>检查服务器是否有新版本</span>
           <el-button size="small" :loading="updateChecking" @click="handleCheckUpdate">检查更新</el-button>
           <el-button v-if="updateInfo?.has_update" type="primary" size="small" :disabled="!updateInfo.configured || updateInfo.updating" :loading="updateApplying" @click="handleApplyUpdate">立即更新</el-button>
         </div>
         <el-alert v-if="updateInfo?.has_update" type="info" :closable="false" title="有新版本可用" />
-        <el-alert v-if="updateInfo && !updateInfo.configured" type="warning" :closable="false" title="本机尚未初始化更新器，暂不能自动更新" />
+        <el-alert v-if="updateInfo && !updateInfo.error && !updateInfo.configured" type="warning" :closable="false" title="本机尚未初始化更新器，暂不能自动更新" />
         <ul v-if="updateInfo?.has_update" class="update-changes">
           <li v-for="change in updateInfo.changes" :key="change">{{ change }}</li>
         </ul>
@@ -165,14 +167,39 @@ const updateInfo = ref(null)
 const updateChecking = ref(false)
 const updateApplying = ref(false)
 let updateTimer = null
+let updateCheckTimer = null
+const hasUpdate = computed(() => Boolean(updateInfo.value?.has_update))
 
 const handleCheckUpdate = async () => {
   updateChecking.value = true
   try {
-    updateInfo.value = await checkUpdate()
+    const result = await checkUpdate()
+    updateInfo.value = result
+    if (result.has_update) {
+      ElMessage.success(`发现新版本 v${result.latest_version}`)
+    } else {
+      ElMessage.success(`当前已是最新版本 v${result.current_version}`)
+    }
+  } catch (error) {
+    const message = error?.response?.data?.detail || error?.message || '检查更新失败'
+    updateInfo.value = { error: message }
+    ElMessage.error(message)
   } finally {
     updateChecking.value = false
   }
+}
+
+const checkUpdateSilently = async () => {
+  try {
+    updateInfo.value = await checkUpdate()
+  } catch (_) {
+    // Background checks must not interrupt normal application use.
+  }
+}
+
+const openVersionDrawer = () => {
+  versionDrawerVisible.value = true
+  checkUpdateSilently()
 }
 
 const handleApplyUpdate = async () => {
@@ -221,8 +248,15 @@ const sidebarCollapsed = computed(() => isTablet.value)
 const handleResize = () => {
   windowWidth.value = window.innerWidth
 }
-onMounted(() => window.addEventListener('resize', handleResize))
-onUnmounted(() => window.removeEventListener('resize', handleResize))
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+  checkUpdateSilently()
+  updateCheckTimer = window.setInterval(checkUpdateSilently, 10 * 60 * 1000)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  if (updateCheckTimer) window.clearInterval(updateCheckTimer)
+})
 
 // 当前页面标题（移动端顶部栏用）
 const currentPageTitle = computed(() => {
@@ -369,6 +403,17 @@ onUnmounted(() => {
 .sidebar-version:hover {
   color: #fff;
   background-color: #263445;
+}
+
+.version-update-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #f56c6c;
+  box-shadow: 0 0 0 2px rgba(245, 108, 108, 0.16);
+  vertical-align: middle;
 }
 
 .sidebar-collapsed .sidebar-version {
