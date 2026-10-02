@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 MAX_PACKAGE_BYTES = 128 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 512 * 1024 * 1024
 MAX_MEMBERS = 20000
-CODE_ROOTS = {"backend", "frontend", "tools"}
+CODE_ROOTS = {"backend", "frontend", "tools", "docs"}
 CODE_FILES = {
     ".gitattributes",
     ".gitignore",
@@ -123,7 +123,7 @@ def is_code_file(relative):
         return False
     if Path(relative).suffix.lower() in {".db", ".sqlite", ".sqlite3", ".log"}:
         return False
-    return parts[0] in CODE_ROOTS or (len(parts) == 1 and parts[0] in CODE_FILES)
+    return parts[0] in CODE_ROOTS or (len(parts) == 1 and parts[0] in CODE_FILES) or relative.name in {".env.example"}
 
 
 def prepare_release(archive, destination, expected_version):
