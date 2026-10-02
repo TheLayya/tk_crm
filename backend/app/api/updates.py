@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -14,6 +15,7 @@ from app.version import APP_VERSION, UPDATE_MANIFEST_URL
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/updates", tags=["Updates"])
+HISTORY_PATH = Path(__file__).resolve().parents[2] / "data" / "update-history.json"
 
 
 def _version_tuple(value):
@@ -59,6 +61,17 @@ def _manifest():
 @router.get("/version")
 def current_version(_=Depends(get_current_user_from_header)):
     return {"current_version": APP_VERSION}
+
+
+@router.get("/history")
+def update_history(_=Depends(require_permission("settings:view"))):
+    if not HISTORY_PATH.is_file():
+        return {"items": []}
+    try:
+        history = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        history = []
+    return {"items": history if isinstance(history, list) else []}
 
 
 @router.get("/check")

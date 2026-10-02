@@ -45,3 +45,7 @@ export function applyUpdate() {
 export function getUpdateStatus() {
   return request({ url: '/updates/status', method: 'get' })
 }
+
+export function getUpdateHistory() {
+  return request({ url: '/updates/history', method: 'get' })
+}

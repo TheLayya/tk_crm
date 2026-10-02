@@ -120,13 +120,13 @@
         <ul v-if="updateInfo?.has_update" class="update-changes">
           <li v-for="change in updateInfo.changes" :key="change">{{ change }}</li>
         </ul>
-        <article v-for="release in RELEASES" :key="release.version" class="release-item">
+        <article v-for="release in displayReleases" :key="`${release.version}-${release.installed_at || release.date}`" class="release-item">
           <div class="release-heading">
             <strong>v{{ release.version }}</strong>
-            <span>{{ release.date }}</span>
+            <span>{{ release.installed_at || release.date }}</span>
           </div>
           <ul>
-            <li v-for="item in release.items" :key="item">{{ item }}</li>
+            <li v-for="item in (release.items || release.changes)" :key="item">{{ item }}</li>
           </ul>
         </article>
       </div>
@@ -139,7 +139,7 @@ import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Monitor, Setting, Briefcase, UserFilled, SwitchButton, Connection, Iphone, Message, Memo } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getPublicSettings, checkUpdate, applyUpdate, getUpdateStatus } from '@/api/settings'
+import { getPublicSettings, checkUpdate, applyUpdate, getUpdateStatus, getUpdateHistory } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import Breadcrumb from '@/components/Breadcrumb.vue'
 import MobileTabBar from '@/components/MobileTabBar.vue'
@@ -164,17 +164,32 @@ const RELEASES = [
   }
 ]
 const updateInfo = ref(null)
+const releaseHistory = ref([])
 const updateChecking = ref(false)
 const updateApplying = ref(false)
 let updateTimer = null
 let updateCheckTimer = null
 const hasUpdate = computed(() => Boolean(updateInfo.value?.has_update))
+const displayReleases = computed(() => {
+  const recorded = new Map(releaseHistory.value.map((release) => [release.version, release]))
+  return [...releaseHistory.value, ...RELEASES.filter((release) => !recorded.has(release.version))]
+})
+
+const loadUpdateHistory = async () => {
+  try {
+    const result = await getUpdateHistory()
+    releaseHistory.value = Array.isArray(result?.items) ? result.items : []
+  } catch (_) {
+    releaseHistory.value = []
+  }
+}
 
 const handleCheckUpdate = async () => {
   updateChecking.value = true
   try {
     const result = await checkUpdate()
     updateInfo.value = result
+    await loadUpdateHistory()
     if (result.has_update) {
       ElMessage.success(`发现新版本 v${result.latest_version}`)
     } else {
@@ -192,6 +207,7 @@ const handleCheckUpdate = async () => {
 const checkUpdateSilently = async () => {
   try {
     updateInfo.value = await checkUpdate()
+    await loadUpdateHistory()
   } catch (_) {
     // Background checks must not interrupt normal application use.
   }
@@ -227,6 +243,7 @@ const handleApplyUpdate = async () => {
         } else if (status.status === 'completed') {
           window.clearInterval(updateTimer)
           updateTimer = null
+          await loadUpdateHistory()
           window.location.reload()
         }
       } catch (_) {

@@ -8,6 +8,7 @@ from tools.updater import prepare_release, safe_extract, validate_manifest, vers
 from tools import updater
 import sqlite3
 import subprocess
+from tools.update_agent import Agent
 
 
 def test_release_version_and_manifest_validation():
@@ -46,6 +47,16 @@ def test_service_lifecycle_uses_phase_working_directories(tmp_path, monkeypatch)
         (["migrate"], tmp_path / "backend"),
         (["build"], tmp_path),
     ]
+
+
+def test_update_agent_records_install_history(tmp_path):
+    agent = Agent(tmp_path, "x" * 32, None)
+    agent._record_history({"version": "1.2.3", "date": "2026-10-02", "changes": ["fixed"]})
+
+    history = json.loads((tmp_path / "backend/data/update-history.json").read_text(encoding="utf-8"))
+    assert history[0]["version"] == "1.2.3"
+    assert history[0]["changes"] == ["fixed"]
+    assert history[0]["installed_at"]
 
 
 def test_safe_extract_rejects_path_traversal(tmp_path):

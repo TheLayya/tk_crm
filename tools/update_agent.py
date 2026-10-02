@@ -2,10 +2,14 @@ import argparse
 import json
 import secrets
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from updater import ServiceLifecycle, apply_release, validate_manifest
+try:
+    from .updater import ServiceLifecycle, apply_release, validate_manifest
+except ImportError:
+    from updater import ServiceLifecycle, apply_release, validate_manifest
 
 
 class Agent:
@@ -24,6 +28,7 @@ class Agent:
         def run():
             try:
                 apply_release(self.root, manifest, self.lifecycle)
+                self._record_history(manifest)
                 self.state.update(status="completed", message="Update completed")
             except Exception as exc:
                 self.state.update(status="failed", message=str(exc))
@@ -32,6 +37,26 @@ class Agent:
 
         threading.Thread(target=run, daemon=True).start()
         return True
+
+    def _record_history(self, manifest: dict):
+        history_path = self.root / "backend" / "data" / "update-history.json"
+        try:
+            history = json.loads(history_path.read_text(encoding="utf-8")) if history_path.is_file() else []
+        except (OSError, ValueError):
+            history = []
+        if not isinstance(history, list):
+            history = []
+        history = [item for item in history if isinstance(item, dict)]
+        history.insert(0, {
+            "version": manifest["version"],
+            "date": manifest.get("date"),
+            "changes": manifest.get("changes", []),
+            "installed_at": datetime.now().isoformat(timespec="seconds"),
+        })
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = history_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(history[:50], ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(history_path)
 
 
 def main():
