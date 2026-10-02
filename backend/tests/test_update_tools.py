@@ -7,6 +7,7 @@ import pytest
 from tools.updater import prepare_release, safe_extract, validate_manifest, version_tuple
 from tools import updater
 import sqlite3
+import subprocess
 
 
 def test_release_version_and_manifest_validation():
@@ -24,6 +25,27 @@ def test_release_version_and_manifest_validation():
         validate_manifest({**manifest, "sha256": "0"})
     with pytest.raises(ValueError):
         validate_manifest({**manifest, "package_url": "https://example.com/app.tar.gz"})
+
+
+def test_service_lifecycle_uses_phase_working_directories(tmp_path, monkeypatch):
+    from tools.updater import ServiceLifecycle
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda command, cwd, **kwargs: calls.append((command, cwd)))
+    lifecycle = ServiceLifecycle({
+        "stop": [["stop"]],
+        "migrate": [["migrate"], ["build"]],
+        "migrate_cwds": ["backend", "."],
+        "start": [["start"]],
+        "health_url": "http://127.0.0.1:1/health",
+    })
+
+    lifecycle("migrate", tmp_path)
+
+    assert calls == [
+        (["migrate"], tmp_path / "backend"),
+        (["build"], tmp_path),
+    ]
 
 
 def test_safe_extract_rejects_path_traversal(tmp_path):

@@ -149,7 +149,7 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.4'
+const APP_VERSION = '1.1.5'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {

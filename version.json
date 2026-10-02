@@ -1,12 +1,10 @@
 {
-  "version": "1.1.4",
+  "version": "1.1.5",
   "date": "2026-10-02",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.4/release-v1.1.4.tar.gz",
-  "sha256": "52e6c59428a7e99ca35b179922197724ba0f47f53bb83da565373cc92adfe48b",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.5/release-v1.1.5.tar.gz",
+  "sha256": "",
   "changes": [
-    "增加后台自动检查更新和新版本红点提醒",
-    "修复 Windows 更新代理端口冲突、发布包校验和本地启动配置读取",
-    "发布包自动排除本地临时截图和运行产物",
-    "保留数据库自动备份、迁移、健康检查和失败回滚"
+    "修复 Windows 一键更新时 Alembic 迁移工作目录错误",
+    "更新前自动备份数据库，失败自动回滚并恢复服务"
   ]
 }

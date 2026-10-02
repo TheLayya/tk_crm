@@ -130,6 +130,7 @@ def setup_local_updater(python_exec: str, backend_port: int):
             [python_exec, '-m', 'alembic', '-c', str(BACKEND_DIR / 'alembic.ini'), 'upgrade', 'head'],
             ['npm.cmd', '--prefix', str(FRONTEND_DIR), 'run', 'build'],
         ],
+        'migrate_cwds': [str(BACKEND_DIR), str(BASE_DIR)],
         'start': [[python_exec, str(BASE_DIR / 'tools/windows_lifecycle.py'), 'start', '--root', str(BASE_DIR)]],
         'health_url': f'http://127.0.0.1:{backend_port}/health',
         'health_timeout': 180,

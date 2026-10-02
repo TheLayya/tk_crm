@@ -288,8 +288,10 @@ class ServiceLifecycle:
                     pass
                 time.sleep(2)
             raise RuntimeError("Service failed health check")
-        for command in self.config[phase]:
-            subprocess.run(command, cwd=root, check=True, timeout=self.config.get("command_timeout", 900))
+        cwds = self.config.get(f"{phase}_cwds", [])
+        for index, command in enumerate(self.config[phase]):
+            cwd = root / cwds[index] if index < len(cwds) else root
+            subprocess.run(command, cwd=cwd, check=True, timeout=self.config.get("command_timeout", 900))
 
 
 def main():
