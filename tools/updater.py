@@ -28,6 +28,7 @@ CODE_FILES = {
     "README.md",
     "deploy.sh",
     "docker-compose.yml",
+    "start.py",
     "version.json",
 }
 PRESERVED_PARTS = {"data", "backups", "logs", "node_modules", "venv", "__pycache__", ".git"}

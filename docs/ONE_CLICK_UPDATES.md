@@ -12,11 +12,21 @@
 6. 启动服务并检查 `/health`。
 7. 迁移或健康检查失败时恢复代码和数据库，并重新启动旧版本。
 
-## 首次配置
+## Windows 本地运行
 
-每台安装只需要配置一次更新代理。生成一个至少 32 位的随机令牌，并把同一个令牌写入后端的 `UPDATE_AGENT_TOKEN`。更新代理只监听本机地址 `127.0.0.1`；Docker 后端通过 `host.docker.internal` 访问宿主机代理。
+Windows 原生运行不需要用户编辑 JSON，也不需要手动启动更新代理。继续使用原来的启动方式：
 
-更新代理的生命周期配置必须使用固定参数数组，不能从网页传入命令。这样可以明确控制停止、迁移和启动动作。
+```powershell
+python start.py
+```
+
+`start.py` 会自动生成本地随机令牌、写入 `backend/.env`、启动更新代理，并记录后端和前端进程。以后从网页点击版本号即可检查和更新；更新器会自动停止当前进程、迁移数据库并重新启动 `start.py`。
+
+更新代理只监听本机地址 `127.0.0.1`。用户只需要保证 Python、Node.js 和项目依赖可正常启动即可。
+
+## 高级配置
+
+只有不使用 `start.py`、而是通过 NSSM、任务计划程序或自定义服务管理器启动项目时，才需要提供固定生命周期配置。网页不能传入任意 shell 命令。
 
 ## Docker
 
@@ -37,21 +47,6 @@ $env:UPDATE_AGENT_TOKEN = "replace-with-a-long-random-token"
 docker compose up -d --build
 python tools/update_agent.py --root $PWD --lifecycle tools/lifecycle.docker.json --token $env:UPDATE_AGENT_TOKEN
 ```
-
-## Windows 原生运行
-
-复制 `tools/lifecycle.native.windows.example.json` 为本机配置，替换其中的停止和启动命令。命令必须能可靠地停止并重新启动当前后端、前端服务；如果是两个终端手动运行，建议先改为 NSSM、任务计划程序或统一的服务脚本。
-
-```powershell
-$env:UPDATE_AGENT_TOKEN = "replace-with-a-long-random-token"
-.\tools\start-update-agent.ps1 `
-  -Root (Get-Location).Path `
-  -Python ".\backend\.venv312\Scripts\python.exe" `
-  -Lifecycle ".\tools\lifecycle.native.windows.json" `
-  -Token $env:UPDATE_AGENT_TOKEN
-```
-
-原生 Windows 后端使用 `UPDATE_AGENT_URL=http://127.0.0.1:8765`。更新器不会替换 `backend/.env`、`backend/data` 或 `backend/.venv312`。
 
 ## 发布新版本
 

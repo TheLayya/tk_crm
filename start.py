@@ -9,6 +9,8 @@ import socket
 import sys
 import re
 import os
+import json
+import secrets
 import time
 import threading
 import webbrowser
@@ -17,6 +19,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 BACKEND_DIR = BASE_DIR / "backend"
 FRONTEND_DIR = BASE_DIR / "frontend"
+RUNTIME_DIR = BACKEND_DIR / "data"
+UPDATE_AGENT_PORT = 8765
+BACKGROUND = "--background" in sys.argv
 
 
 def is_port_free(port: int) -> bool:
@@ -40,6 +45,16 @@ def find_available_port(start_port: int, max_attempts: int = 10) -> int:
         if is_port_free(port):
             return port
     return None
+
+
+def preferred_or_available_port(env_file: Path, key: str, start_port: int) -> int:
+    if env_file.exists():
+        match = re.search(rf'^{re.escape(key)}=(\d+)$', env_file.read_text(encoding='utf-8'), re.MULTILINE)
+        if match:
+            preferred = int(match.group(1))
+            if is_port_free(preferred):
+                return preferred
+    return find_available_port(start_port)
 
 
 def is_port_in_use(port: int) -> bool:
@@ -71,6 +86,62 @@ def update_env_frontend(env_file: Path, backend_port: int):
     else:
         content = new_url + '\n'
     env_file.write_text(content, encoding='utf-8')
+
+
+def update_env_setting(env_file: Path, key: str, value: str):
+    content = env_file.read_text(encoding='utf-8') if env_file.exists() else ''
+    line = f'{key}={value}'
+    if re.search(rf'^{re.escape(key)}=.*$', content, flags=re.MULTILINE):
+        content = re.sub(rf'^{re.escape(key)}=.*$', line, content, flags=re.MULTILINE)
+    else:
+        content = content.rstrip() + f'\n{line}\n'
+    env_file.write_text(content, encoding='utf-8')
+
+
+def setup_local_updater(python_exec: str, backend_port: int):
+    env_file = BACKEND_DIR / '.env'
+    token_match = re.search(r'^UPDATE_AGENT_TOKEN=(.*)$', env_file.read_text(encoding='utf-8'), re.MULTILINE) if env_file.exists() else None
+    token = token_match.group(1).strip() if token_match else ''
+    if len(token) < 32:
+        token = secrets.token_urlsafe(48)
+        update_env_setting(env_file, 'UPDATE_AGENT_TOKEN', token)
+    update_env_setting(env_file, 'UPDATE_AGENT_URL', f'http://127.0.0.1:{UPDATE_AGENT_PORT}')
+    os.environ['UPDATE_AGENT_TOKEN'] = token
+    os.environ['UPDATE_AGENT_URL'] = f'http://127.0.0.1:{UPDATE_AGENT_PORT}'
+
+    lifecycle_path = RUNTIME_DIR / 'windows-update-lifecycle.json'
+    lifecycle_path.parent.mkdir(parents=True, exist_ok=True)
+    lifecycle = {
+        'stop': [[python_exec, str(BASE_DIR / 'tools/windows_lifecycle.py'), 'stop', '--root', str(BASE_DIR)]],
+        'migrate': [
+            [python_exec, '-m', 'alembic', '-c', str(BACKEND_DIR / 'alembic.ini'), 'upgrade', 'head'],
+            ['npm.cmd', '--prefix', str(FRONTEND_DIR), 'run', 'build'],
+        ],
+        'start': [[python_exec, str(BASE_DIR / 'tools/windows_lifecycle.py'), 'start', '--root', str(BASE_DIR)]],
+        'health_url': f'http://127.0.0.1:{backend_port}/health',
+        'health_timeout': 180,
+        'command_timeout': 1800,
+    }
+    lifecycle_path.write_text(json.dumps(lifecycle, indent=2), encoding='utf-8')
+    if is_port_in_use(UPDATE_AGENT_PORT):
+        return None
+    agent = subprocess.Popen(
+        [python_exec, str(BASE_DIR / 'tools/update_agent.py'), '--root', str(BASE_DIR), '--lifecycle', str(lifecycle_path), '--token', token, '--port', str(UPDATE_AGENT_PORT)],
+        cwd=BASE_DIR,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return agent
+
+
+def write_runtime_pids(backend_proc, frontend_proc):
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    (RUNTIME_DIR / 'windows-runtime.json').write_text(json.dumps({
+        'launcher_pid': os.getpid(),
+        'backend_pid': backend_proc.pid,
+        'frontend_pid': frontend_proc.pid,
+    }), encoding='utf-8')
 
 
 def get_python_executable() -> str:
@@ -133,12 +204,12 @@ def stream_output(proc, prefix, use_stderr=False):
 print("TikTok Monitor starting...")
 print("-" * 45)
 
-backend_port = find_available_port(8000)
+backend_port = preferred_or_available_port(BACKEND_DIR / '.env', 'PORT', 8000)
 if not backend_port:
     print("ERROR: no available port in range 8000-8009")
     sys.exit(1)
 
-frontend_port = find_available_port(5173)
+frontend_port = preferred_or_available_port(FRONTEND_DIR / '.env', 'VITE_DEV_PORT', 5173)
 if not frontend_port:
     print("ERROR: no available port in range 5173-5182")
     sys.exit(1)
@@ -150,10 +221,14 @@ if frontend_port != 5173:
 
 update_env_port(BACKEND_DIR / '.env', backend_port)
 update_env_frontend(FRONTEND_DIR / '.env', backend_port)
+update_env_setting(FRONTEND_DIR / '.env', 'VITE_DEV_PORT', str(frontend_port))
 
 # ── 检查后端依赖 ──────────────────────────────────────────
 python_exec = get_python_executable()
 print(f"Using Python: {python_exec}")
+
+# 在启动后端前完成更新器初始化，让后端进程能读取 UPDATE_AGENT_TOKEN。
+update_agent_proc = setup_local_updater(python_exec, backend_port)
 
 result = subprocess.run(
     [python_exec, '-c', 'import uvicorn, fastapi, sqlalchemy'],
@@ -205,6 +280,9 @@ if backend_proc.poll() is not None:
     sys.exit(1)
 print(f"Backend started on port {backend_port}")
 
+if update_agent_proc:
+    print(f"Update agent started on port {UPDATE_AGENT_PORT}")
+
 # ── 启动前端 ──────────────────────────────────────────────
 print(f"\nStarting frontend on port {frontend_port}...")
 
@@ -213,6 +291,7 @@ frontend_proc = subprocess.Popen(
     cwd=FRONTEND_DIR,
     shell=True
 )
+write_runtime_pids(backend_proc, frontend_proc)
 
 print("Waiting for frontend...")
 for _ in range(60):
@@ -233,8 +312,9 @@ print(f"  API Docs : http://localhost:{backend_port}/docs")
 print("-" * 45)
 print("Press Ctrl+C to stop all services\n")
 
-time.sleep(1)
-webbrowser.open(f"http://localhost:{frontend_port}")
+if not BACKGROUND:
+    time.sleep(1)
+    webbrowser.open(f"http://localhost:{frontend_port}")
 
 try:
     backend_proc.wait()
