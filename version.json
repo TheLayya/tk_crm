@@ -2,7 +2,7 @@
   "version": "1.1.4",
   "date": "2026-10-02",
   "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.4/release-v1.1.4.tar.gz",
-  "sha256": "13e87cb6f6bce6349f8d9805a10d5ed4b476ff52200057c83d86311d0d8afd6e",
+  "sha256": "52e6c59428a7e99ca35b179922197724ba0f47f53bb83da565373cc92adfe48b",
   "changes": [
     "增加后台自动检查更新和新版本红点提醒",
     "修复 Windows 更新代理端口冲突、发布包校验和本地启动配置读取",
