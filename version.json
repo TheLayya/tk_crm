@@ -1,10 +1,11 @@
 {
-  "version": "1.1.5",
+  "version": "1.1.6",
   "date": "2026-10-02",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.5/release-v1.1.5.tar.gz",
-  "sha256": "4d8a2f6c38da9cf4c2571a8355e190eec2b7a385c00c4c9e90243b4654f53ed6",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.6/release-v1.1.6.tar.gz",
+  "sha256": "",
   "changes": [
     "修复 Windows 一键更新时 Alembic 迁移工作目录错误",
-    "更新前自动备份数据库，失败自动回滚并恢复服务"
+    "更新前自动备份数据库，失败自动回滚并恢复服务",
+    "成功更新后持久化版本日志和安装时间"
   ]
 }
