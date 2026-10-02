@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     UPDATE_MANIFEST_URL: str = "https://raw.githubusercontent.com/TheLayya/tk_crm/main/version.json"
     UPDATE_AGENT_URL: str = ""
     UPDATE_AGENT_TOKEN: str = ""
+    UPDATE_AGENT_PORT: int = 8765
 
     class Config:
         env_file = ".env"

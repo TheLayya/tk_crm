@@ -1,11 +1,11 @@
 {
-  "version": "1.1.1",
+  "version": "1.1.2",
   "date": "2026-10-02",
   "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.1/release-v1.1.1.tar.gz",
   "sha256": "3fec2b06948f5e453979943d57462cc63b83527aa1719b8e46686521b10f05a3",
   "changes": [
     "增加后台自动检查更新和新版本红点提醒",
-    "点击检查更新时显示明确的成功或失败反馈",
+    "修复 Windows 更新代理端口冲突和本地启动配置读取",
     "保留数据库自动备份、迁移、健康检查和失败回滚"
   ]
 }

@@ -20,8 +20,21 @@ BASE_DIR = Path(__file__).parent
 BACKEND_DIR = BASE_DIR / "backend"
 FRONTEND_DIR = BASE_DIR / "frontend"
 RUNTIME_DIR = BACKEND_DIR / "data"
-UPDATE_AGENT_PORT = 8765
 BACKGROUND = "--background" in sys.argv
+
+
+def env_value(env_file: Path, key: str, default: str) -> str:
+    if env_file.exists():
+        match = re.search(rf'^{re.escape(key)}=(.*)$', env_file.read_text(encoding='utf-8'), re.MULTILINE)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+    return default
+
+
+UPDATE_AGENT_PORT = int(os.environ.get(
+    'UPDATE_AGENT_PORT',
+    env_value(BACKEND_DIR / '.env', 'UPDATE_AGENT_PORT', '8765'),
+))
 
 
 def is_port_free(port: int) -> bool:
