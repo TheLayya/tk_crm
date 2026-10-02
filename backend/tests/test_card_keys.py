@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.api.card_keys import claim_key, consume_key, release_key, import_keys, ImportBody
 from app.api.card_keys import _totp_code
 from app.core.security import create_access_token
-from app.models.card_key import CardKey, CardKeyProject
-from app.models.op_account import EmailAccount
+from app.models.card_key import CardKey, CardKeyEmailUsage, CardKeyProject
+from app.models.op_account import EmailAccount, EmailAccountRelation, OpAccount
 from app.models.team import Role, RolePermission, User, UserRole
 
 
@@ -68,7 +68,7 @@ def test_claimed_email_totp_access(client, db, super_admin, normal_user, monkeyp
 
 
 def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_user):
-    grant(db, normal_user, 'card_key:view')
+    grant(db, normal_user, 'card_key:view', 'op_account:create')
     response = client.post('/api/card-keys', headers=headers(super_admin), json={
         'name': '邮箱注册', 'members': [normal_user.username], 'target_platform': 'TikTok'})
     assert response.status_code == 201
@@ -90,10 +90,22 @@ def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_
     assert client.post(path + '/claim', headers=headers(super_admin)).status_code == 409
     assert client.post(path + '/complete', headers=member_headers, json={'platform': 'wrong'}).status_code == 422
     assert client.post(path + '/complete', headers=member_headers, json={'platform': ' '}).status_code == 422
-    result = client.post(path + '/complete', headers=member_headers, json={'platform': 'TikTok'})
+    result = client.post(path + '/complete', headers=member_headers, json={
+        'platform': 'TikTok', 'account': '@created-user', 'password': 'account-password'})
     assert result.status_code == 200, result.text
     assert result.json()['platform_tags'] == ['TikTok']
     assert result.json()['claimed_by'] is None
+    account = db.get(OpAccount, result.json()['op_account_id'])
+    assert account.platform == 'tiktok'
+    assert account.account == 'created-user'
+    assert account.password == 'account-password'
+    assert account.email == 'available@gmail.com'
+    assert account.operator == normal_user.username
+    assert db.query(EmailAccountRelation).filter_by(email_id=claimed.json()['id'], op_account_id=account.id).count() == 1
+    assert db.query(CardKeyEmailUsage).filter_by(project_id=project_id, username=normal_user.username).count() == 1
+    stats = client.get('/api/card-keys', headers=member_headers).json()[0]
+    assert stats['emails_completed'] == 1
+    assert stats['member_stats'][0]['emails_completed'] == 1
     assert client.get(path, headers=member_headers).json() is None
     assert client.post(path + '/claim', headers=member_headers).status_code == 409
     filtered = client.get('/api/emails?platform=tiktok', headers=headers(super_admin)).json()
@@ -110,6 +122,23 @@ def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_
     assert client.get(path, headers=member_headers).json() is None
     db.expire_all()
     assert db.query(EmailAccount).filter_by(email='available@gmail.com').one().platform_tags == '["TikTok"]'
+
+
+def test_card_key_search_and_invalid_after_sales_note(client, db, super_admin):
+    project_id = project(client, super_admin, ['__all__'])
+    base = f'/api/card-keys/{project_id}'
+    client.post(base + '/import', headers=headers(super_admin), json={'content': 'supplier-order-abc\nother-key'})
+    found = client.get(base + '/keys?keyword=ABC', headers=headers(super_admin))
+    assert found.status_code == 200
+    assert found.json()['total'] == 1
+    assert found.json()['items'][0]['content'] == 'supplier-order-abc'
+    invalid = client.post(base + f"/keys/{found.json()['items'][0]['id']}/invalid", headers=headers(super_admin), json={'remark': '兑换失败，已提交上游售后'})
+    assert invalid.status_code == 200, invalid.text
+    assert invalid.json()['status'] == 'invalid'
+    assert invalid.json()['remark'] == '兑换失败，已提交上游售后'
+    assert invalid.json()['history'][-1]['action'] == 'invalid'
+    assert client.get(base + '/keys?status=available', headers=headers(super_admin)).json()['total'] == 1
+    assert client.get(base + '/keys?status=invalid', headers=headers(super_admin)).json()['total'] == 1
 
 
 def test_email_platform_tags_create_and_update(client, super_admin):

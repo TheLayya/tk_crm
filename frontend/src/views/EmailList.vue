@@ -66,7 +66,7 @@
           <template #default="{ row }"><el-button class="email-name" link @click="tableRef.toggleRowExpansion(row)">{{ row.email }}</el-button></template>
         </el-table-column>
         <el-table-column prop="country" label="国家" width="110" />
-        <el-table-column label="平台注册 / 领取" min-width="190"><template #default="{ row }"><el-tag v-for="tag in row.platform_tags" :key="tag" size="small" style="margin:2px">{{ tag }}</el-tag><span v-if="!row.platform_tags?.length">未标记</span><div v-if="row.claimed_by" class="remark">{{ row.claimed_by }} 正在注册 {{ row.claimed_platform }}</div></template></el-table-column>
+        <el-table-column label="平台注册 / 领取" min-width="220"><template #default="{ row }"><el-tag v-for="tag in row.platform_tags" :key="tag" size="small" style="margin:2px">{{ tag }}<span v-if="row.platform_registrants?.[tag]"> · {{ row.platform_registrants[tag] }}</span></el-tag><span v-if="!row.platform_tags?.length">未标记</span><div v-if="row.claimed_by" class="remark">{{ row.claimed_by }} 正在注册 {{ row.claimed_platform }}</div></template></el-table-column>
         <el-table-column label="检测状态" width="120">
           <template #default="{ row }"><el-tag size="small" :type="checkTag(row.gmail_check_status)">{{ row.gmail_check_status || '未检测' }}</el-tag></template>
         </el-table-column>

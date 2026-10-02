@@ -132,3 +132,8 @@ MIT License
 项目交流与作者联系方式：
 
 ![作者微信](docs/community/author-wechat.png)
+
+
+交流群：
+
+![](orca-paste-1790930327639-35d0b30e-4dae-40f0-80e6-928883e156af.png)

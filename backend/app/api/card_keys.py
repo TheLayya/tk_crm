@@ -4,7 +4,7 @@ import base64
 import hmac
 import struct
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, case, func, or_, update
@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
-from app.models.card_key import CardKey, CardKeyPlatform, CardKeyProject
-from app.models.op_account import EmailAccount
+from app.models.card_key import CardKey, CardKeyEmailUsage, CardKeyPlatform, CardKeyProject
+from app.models.op_account import EmailAccount, EmailAccountRelation, OpAccount
 from app.models.team import User
 from app.services.auth_service import require_permission, _get_user_permissions
 
@@ -56,12 +56,38 @@ def _project_json(project, db, user=None):
         func.sum(case((CardKey.status == "claimed", 1), else_=0)),
         func.sum(case((CardKey.status == "consumed", 1), else_=0)),
     ).filter(CardKey.project_id == project.id).one()
+    platform = (project.target_platform or "").strip()
+    email_available = email_claimed = 0
+    email_normal_available = 0
+    if platform:
+        email_query = db.query(EmailAccount).filter(EmailAccount.management_status == "闲置")
+        email_available = email_query.filter(EmailAccount.claimed_by.is_(None), or_(EmailAccount.platform_tags.is_(None), ~EmailAccount.platform_tags.icontains(json.dumps(platform, ensure_ascii=False), autoescape=True))).count()
+        email_claimed = db.query(EmailAccount).filter(EmailAccount.claimed_platform == platform, EmailAccount.claimed_by.isnot(None)).count()
+        email_normal_available = email_query.filter(EmailAccount.claimed_by.is_(None), EmailAccount.gmail_check_status == "正常", or_(EmailAccount.platform_tags.is_(None), ~EmailAccount.platform_tags.icontains(json.dumps(platform, ensure_ascii=False), autoescape=True))).count()
+    members = _members(project)
+    member_stats = []
+    usernames = {row.username for row in db.query(User).filter(User.is_active.is_(True)).all()} if "__all__" in members else set(members)
+    key_rows = db.query(CardKey.claimed_by, CardKey.status, func.count(CardKey.id)).filter(CardKey.project_id == project.id, CardKey.claimed_by.isnot(None)).group_by(CardKey.claimed_by, CardKey.status).all()
+    email_rows = db.query(CardKeyEmailUsage.username, func.count(CardKeyEmailUsage.id)).filter(CardKeyEmailUsage.project_id == project.id).group_by(CardKeyEmailUsage.username).all()
+    key_stats = {}
+    for username, status, count in key_rows:
+        if status in {"claimed", "consumed"}:
+            key_stats.setdefault(username, {"claimed": 0, "consumed": 0})[status] += count
+    email_stats = dict(email_rows)
+    usernames.update(key_stats)
+    usernames.update(email_stats)
+    for username in sorted(usernames):
+        values = key_stats.get(username, {"claimed": 0, "consumed": 0})
+        member_stats.append({"username": username, "claimed": values["claimed"], "consumed": values["consumed"], "emails_completed": email_stats.get(username, 0)})
     return {"id": project.id, "name": project.name, "description": project.description or "",
             "target_platform": project.target_platform or "",
-            "members": _members(project), "total": total or 0, "available": available or 0,
+            "members": members, "total": total or 0, "available": available or 0,
             "claimed": claimed or 0, "consumed": consumed or 0, "created_by": project.created_by,
             "created_at": _time_json(project.created_at), "is_active": project.is_active,
-            "can_claim": bool(user and _allowed(project, user, db) and project.is_active)}
+            "can_claim": bool(user and _allowed(project, user, db) and project.is_active),
+            "email_available": email_available, "email_normal_available": email_normal_available,
+            "email_claimed": email_claimed, "member_stats": member_stats,
+            "emails_completed": sum(email_stats.values())}
 
 
 def _time_json(value):
@@ -75,7 +101,7 @@ def _platform_json(platform):
 def _key_json(key):
     return {"id": key.id, "content": key.content, "status": key.status,
             "claimed_by": key.claimed_by, "claimed_at": _time_json(key.claimed_at),
-            "consumed_at": _time_json(key.consumed_at), "history": key.history or []}
+            "consumed_at": _time_json(key.consumed_at), "history": key.history or [], "remark": key.remark}
 
 
 def _email_json(email):
@@ -203,6 +229,21 @@ def update_project(project_id: int, body: ProjectBody, db: Session = Depends(get
     return _project_json(project, db)
 
 
+@router.delete("/{project_id}")
+def delete_project(project_id: int, db: Session = Depends(get_db), _=Depends(require_permission("card_key:manage"))):
+    project = db.get(CardKeyProject, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if db.query(CardKey).filter(CardKey.project_id == project_id, CardKey.status != "available").first() or db.query(CardKeyEmailUsage).filter_by(project_id=project_id).first():
+        raise HTTPException(409, "项目已有领取或完成记录，请结束项目以保留历史")
+    if project.target_platform and db.query(EmailAccount).filter(EmailAccount.claimed_platform == project.target_platform, EmailAccount.claimed_by.isnot(None)).first():
+        raise HTTPException(409, "该平台有领取中的邮箱，请先完成注册或归还")
+    db.query(CardKey).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.delete(project)
+    db.commit()
+    return {"deleted": True}
+
+
 @router.post("/{project_id}/import")
 def import_keys(project_id: int, body: ImportBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:manage"))):
     project = db.get(CardKeyProject, project_id)
@@ -231,7 +272,7 @@ def import_keys(project_id: int, body: ImportBody, db: Session = Depends(get_db)
 
 @router.get("/{project_id}/keys")
 def list_keys(project_id: int, page: int = Query(1, ge=1), page_size: int = Query(30, ge=1, le=100),
-              status: str = "", mine: bool = False,
+              status: str = "", mine: bool = False, keyword: str = "",
               db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
     project = db.get(CardKeyProject, project_id)
     if not project:
@@ -244,11 +285,17 @@ def list_keys(project_id: int, page: int = Query(1, ge=1), page_size: int = Quer
         CardKey.project_id == project_id, CardKey.claimed_by == user.username).first():
         raise HTTPException(403, "你不是该项目协助成员")
     if status:
-        if status not in ("available", "claimed", "consumed"):
+        if status not in ("available", "claimed", "consumed", "invalid"):
             raise HTTPException(422, "无效状态")
         query = query.filter(CardKey.status == status)
-    return {"items": [_key_json(key) for key in query.order_by(CardKey.id.desc()).offset((page - 1) * page_size).limit(page_size)],
-            "total": query.count()}
+    if not keyword.strip():
+        return {"items": [_key_json(key) for key in query.order_by(CardKey.id.desc()).offset((page - 1) * page_size).limit(page_size)], "total": query.count()}
+    rows = query.order_by(CardKey.id.desc()).all()
+    if keyword.strip():
+        needle = keyword.strip().casefold()
+        rows = [key for key in rows if needle in (key.content or "").casefold()]
+    start = (page - 1) * page_size
+    return {"items": [_key_json(key) for key in rows[start:start + page_size]], "total": len(rows)}
 
 
 @router.post("/{project_id}/claim")
@@ -337,6 +384,85 @@ def release_key(project_id: int, key_id: int, db: Session = Depends(get_db), use
     return {"id": key.id, "status": "available"}
 
 
+class InvalidKeyBody(BaseModel):
+    remark: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/{project_id}/keys/{key_id}/invalid")
+def mark_key_invalid(project_id: int, key_id: int, body: InvalidKeyBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+    key = db.query(CardKey).filter(CardKey.id == key_id, CardKey.project_id == project_id).first()
+    if not key:
+        raise HTTPException(404, "卡密不存在")
+    if not _manager(user, db) and (key.status != "claimed" or key.claimed_by != user.username):
+        raise HTTPException(403, "只能报告自己领取的卡密")
+    if not body.remark.strip():
+        raise HTTPException(422, "请填写无效原因")
+    if key.status == "invalid":
+        return _key_json(key)
+    if key.status not in {"available", "claimed"}:
+        raise HTTPException(409, "已消耗卡密不能标记无效")
+    now = datetime.utcnow()
+    history = _history(key, "invalid", user.username, now)
+    history[-1]["remark"] = body.remark.strip()
+    changed = db.execute(update(CardKey).where(CardKey.id == key.id, CardKey.status == key.status, CardKey.history == (key.history or [])).values(status="invalid", pending_owner=None, remark=body.remark.strip(), history=history)).rowcount
+    if changed != 1:
+        db.rollback()
+        raise HTTPException(409, "卡密状态已变化，请刷新后重试")
+    db.commit()
+    db.refresh(key)
+    return _key_json(key)
+
+
+class KeyRemarkBody(BaseModel):
+    remark: str = Field(max_length=2000)
+
+
+@router.put("/{project_id}/keys/{key_id}/remark")
+def update_key_remark(project_id: int, key_id: int, body: KeyRemarkBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+    key = db.query(CardKey).filter_by(id=key_id, project_id=project_id).first()
+    if not key:
+        raise HTTPException(404, "卡密不存在")
+    if not _manager(user, db) and key.claimed_by != user.username:
+        raise HTTPException(403, "只能备注自己领取的卡密")
+    history = _history(key, "remark", user.username, datetime.utcnow())
+    history[-1]["remark"] = body.remark.strip()
+    changed = db.execute(update(CardKey).where(CardKey.id == key.id, CardKey.history == (key.history or [])).values(remark=body.remark.strip(), history=history)).rowcount
+    if changed != 1:
+        db.rollback()
+        raise HTTPException(409, "记录已变化，请刷新后重试")
+    db.commit()
+    db.refresh(key)
+    return _key_json(key)
+
+
+@router.get("/{project_id}/work-report")
+def work_report(project_id: int, date_from: date | None = None, date_to: date | None = None, db: Session = Depends(get_db), user=Depends(require_permission("card_key:manage"))):
+    if not db.get(CardKeyProject, project_id):
+        raise HTTPException(404, "项目不存在")
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(422, "开始日期不能晚于结束日期")
+    start = datetime.combine(date_from, datetime.min.time()) - timedelta(hours=8) if date_from else None
+    end = datetime.combine(date_to, datetime.min.time()) + timedelta(days=1, hours=-8) if date_to else None
+    items = []
+    keys = db.query(CardKey).filter_by(project_id=project_id, status="consumed")
+    usages = db.query(CardKeyEmailUsage, EmailAccount.email).outerjoin(EmailAccount, CardKeyEmailUsage.email_id == EmailAccount.id).filter(CardKeyEmailUsage.project_id == project_id)
+    if start:
+        keys = keys.filter(CardKey.consumed_at >= start)
+        usages = usages.filter(CardKeyEmailUsage.completed_at >= start)
+    if end:
+        keys = keys.filter(CardKey.consumed_at < end)
+        usages = usages.filter(CardKeyEmailUsage.completed_at < end)
+    for key in keys.all():
+        items.append({"kind": "卡密消耗", "record_id": key.id, "username": key.claimed_by, "time": _time_json(key.consumed_at), "reference": f"卡密 #{key.id}"})
+    for usage, email in usages.all():
+        items.append({"kind": "平台注册", "record_id": usage.id, "username": usage.username, "time": _time_json(usage.completed_at), "reference": f"{usage.platform} · {email or '邮箱已删除'}"})
+    totals = {}
+    for item in items:
+        values = totals.setdefault(item["username"], {"username": item["username"], "keys_consumed": 0, "emails_completed": 0})
+        values["keys_consumed" if item["kind"] == "卡密消耗" else "emails_completed"] += 1
+    return {"members": sorted(totals.values(), key=lambda row: row["username"] or ""), "items": sorted(items, key=lambda row: row["time"] or "", reverse=True)}
+
+
 @router.get("/{project_id}/email")
 def get_claimed_email(project_id: int, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
     project = db.get(CardKeyProject, project_id)
@@ -420,6 +546,9 @@ def release_email(project_id: int, db: Session = Depends(get_db), user=Depends(r
 
 class CompleteEmailBody(BaseModel):
     platform: str = Field(min_length=1, max_length=100)
+    account: str | None = Field(default=None, max_length=255)
+    password: str | None = Field(default=None, max_length=255)
+    totp_secret: str | None = Field(default=None, max_length=255)
 
 
 @router.post("/{project_id}/email/complete")
@@ -434,6 +563,15 @@ def complete_email(project_id: int, body: CompleteEmailBody, db: Session = Depen
                                            EmailAccount.claimed_platform == project.target_platform).first()
     if not email:
         raise HTTPException(404, "没有找到你领取的邮箱")
+    account_name = (body.account or "").strip().lstrip("@")
+    platform_key = platform.casefold()
+    supported = platform_key in {"tiktok", "youtube", "instagram", "facebook"}
+    if supported and not account_name:
+        raise HTTPException(422, "请填写刚注册的平台用户名")
+    if supported and not user.is_super_admin and "op_account:create" not in _get_user_permissions(db, user.id):
+        raise HTTPException(403, "需要创建运营账号权限才能完成该平台注册")
+    if supported and db.query(OpAccount).filter(OpAccount.platform == platform_key, OpAccount.account == account_name).first():
+        raise HTTPException(409, "该平台账号已存在，请更换账号或在运营账号中关联")
     import json
     tags = _email_json(email)["platform_tags"]
     if platform.casefold() not in {tag.casefold() for tag in tags}:
@@ -442,11 +580,26 @@ def complete_email(project_id: int, body: CompleteEmailBody, db: Session = Depen
         EmailAccount.id == email.id, EmailAccount.claimed_by == user.username,
         EmailAccount.claimed_platform == platform, EmailAccount.claimed_at == email.claimed_at,
         EmailAccount.platform_tags == email.platform_tags,
-    ).values(platform_tags=json.dumps(tags, ensure_ascii=False), claimed_by=None, claimed_at=None,
-             claimed_platform=None)).rowcount
+    ).values(platform_tags=json.dumps(tags, ensure_ascii=False), claimed_by=None, claimed_at=None, claimed_platform=None)).rowcount
     if changed != 1:
         db.rollback()
-        raise HTTPException(409, "邮箱状态已变化，请刷新后重试")
+        raise HTTPException(409, "邮箱领取状态已变化，请刷新后重试")
+    operation_account = None
+    if supported:
+        operation_account = OpAccount(
+            platform=platform_key, account=account_name, password=body.password or None,
+            totp_secret=body.totp_secret or None, email=email.email,
+            registrant=user.username, operator=user.username,
+            account_created_at=datetime.utcnow(), status="正常", source="项目注册",
+        )
+        db.add(operation_account)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "该平台账号已存在，请刷新后重试") from None
+        db.add(EmailAccountRelation(email_id=email.id, op_account_id=operation_account.id, operator=user.username))
+    db.add(CardKeyEmailUsage(project_id=project.id, email_id=email.id, username=user.username, platform=platform))
     db.commit()
     db.refresh(email)
-    return _email_json(email)
+    return {**_email_json(email), "op_account_id": operation_account.id if operation_account else None, "op_account": account_name if operation_account else None}

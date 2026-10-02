@@ -9,7 +9,7 @@ from app.core.security import hash_password
 from app.core.config import settings
 from app.models.team import User
 from app.models.work_item import WorkItem  # noqa: F401
-from app.models.card_key import CardKeyPlatform, CardKeyProject, CardKey  # noqa: F401
+from app.models.card_key import CardKeyEmailUsage, CardKeyPlatform, CardKeyProject, CardKey  # noqa: F401
 # 显式导入确保 Base.metadata.create_all 建出 devices/device_logs 表
 from app.models import device  # noqa: F401
 from app.api import projects, accounts, history, proxies, videos, import_export, op_accounts, auth, team

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.op_account import EmailAccount, EmailAccountRelation, EmailAssetRelation, OpAccount
-from app.models.card_key import CardKeyPlatform
+from app.models.card_key import CardKeyEmailUsage, CardKeyPlatform
 from app.models.device import Device
 from app.models.proxy_node import ProxyNode
 from app.models.team import User
@@ -77,13 +77,14 @@ def save(db):
         raise HTTPException(status_code=409, detail="邮箱已存在") from None
 
 
-def email_response(email, count=0, db=None):
+def email_response(email, count=0, db=None, platform_registrants=None):
     result = EmailAccountResponse.model_validate(email)
     try:
         result.platform_tags = json.loads(email.platform_tags or "[]")
     except (TypeError, ValueError):
         result.platform_tags = []
     result.current_relation_count = count
+    result.platform_registrants = platform_registrants or {}
     if db:
         device = db.get(Device, email.device_id) if email.device_id else None
         node = db.get(ProxyNode, email.node_id) if email.node_id else None
@@ -157,11 +158,16 @@ def list_emails(keyword: str | None = None, management_status: str | None = None
         query = query.filter(EmailAccount.platform_tags.icontains(json.dumps(platform.strip(), ensure_ascii=False), autoescape=True))
     total = query.count()
     emails = query.order_by(EmailAccount.id.desc()).offset(skip).limit(limit).all()
+    email_ids = [email.id for email in emails]
     counts = dict(db.query(EmailAccountRelation.email_id, func.count(EmailAccountRelation.id)).filter(
-        EmailAccountRelation.email_id.in_([email.id for email in emails]),
+        EmailAccountRelation.email_id.in_(email_ids),
         EmailAccountRelation.unbound_at.is_(None),
     ).group_by(EmailAccountRelation.email_id).all())
-    return {"total": total, "items": [email_response(email, counts.get(email.id, 0), db) for email in emails]}
+    registrations = {}
+    if email_ids:
+        for email_id, platform_name, username in db.query(CardKeyEmailUsage.email_id, CardKeyEmailUsage.platform, CardKeyEmailUsage.username).filter(CardKeyEmailUsage.email_id.in_(email_ids)).order_by(CardKeyEmailUsage.completed_at.desc()).all():
+            registrations.setdefault(email_id, {}).setdefault(platform_name, username)
+    return {"total": total, "items": [email_response(email, counts.get(email.id, 0), db, registrations.get(email.id)) for email in emails]}
 
 
 @router.post("", response_model=EmailAccountResponse)

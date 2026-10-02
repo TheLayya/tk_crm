@@ -10,7 +10,7 @@ import Layout from './components/Layout.vue'
 import { getPublicSettings } from '@/api/settings'
 
 const route = useRoute()
-const isAuthPage = computed(() => ['/login', '/403'].includes(route.path))
+const isAuthPage = computed(() => ['/login', '/403'].includes(route.path.replace(/\/+$/, '') || '/'))
 
 const updateSiteMeta = (settings) => {
   if (settings?.site_name) document.title = settings.site_name

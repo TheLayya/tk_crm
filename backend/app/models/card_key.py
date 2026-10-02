@@ -30,6 +30,17 @@ class CardKeyPlatform(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class CardKeyEmailUsage(Base):
+    __tablename__ = "card_key_email_usages"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("card_key_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    email_id = Column(Integer, ForeignKey("email_accounts.id", ondelete="SET NULL"), nullable=True, index=True)
+    username = Column(String(255), nullable=False, index=True)
+    platform = Column(String(100), nullable=False)
+    completed_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
 class CardKey(Base):
     __tablename__ = "card_keys"
 
@@ -43,6 +54,7 @@ class CardKey(Base):
     claimed_at = Column(DateTime, nullable=True)
     consumed_at = Column(DateTime, nullable=True)
     history = Column(JSON, nullable=False, default=list)
+    remark = Column(Text, nullable=True)
     created_by = Column(String(64), nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

@@ -228,6 +228,7 @@ class EmailAccountResponse(BaseModel):
     account_created_year: Optional[int] = None
     country: Optional[str] = None
     platform_tags: List[str] = []
+    platform_registrants: dict[str, str] = {}
     claimed_by: Optional[str] = None
     claimed_at: Optional[datetime] = None
     claimed_platform: Optional[str] = None
