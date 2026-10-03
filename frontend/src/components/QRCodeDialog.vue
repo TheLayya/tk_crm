@@ -28,6 +28,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import QRCode from 'qrcode'
+import { copyText } from '@/utils/clipboard'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -78,7 +79,7 @@ async function renderQRCode() {
 async function copyUri() {
   if (!props.uri) return
   try {
-    await navigator.clipboard.writeText(props.uri)
+    await copyText(props.uri)
     ElMessage.success('URI 已复制')
   } catch {
     ElMessage.error('复制失败')

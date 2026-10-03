@@ -75,6 +75,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import CardKeyWorkReport from '@/components/CardKeyWorkReport.vue'
+import { copyText } from '@/utils/clipboard'
 import { updateCardKeyRemark } from '@/api/card_keys'
 import { getCardKeyProjects, getCardKeyMembers, createCardKeyProject, updateCardKeyProject, deleteCardKeyProject, importCardKeys, getCardKeys, claimCardKey, consumeCardKey, releaseCardKey, markCardKeyInvalid, getClaimedEmail, getClaimedEmailTotp, claimEmail, releaseEmail, completeEmail, getCardKeyPlatforms, createCardKeyPlatform, updateCardKeyPlatform } from '@/api/card_keys'
 const auth = useAuthStore()
@@ -217,8 +218,8 @@ const claim = async () => {
   } finally { claiming.value = false }
 }
 const copy = async (content) => {
-  try { await navigator.clipboard.writeText(content); ElMessage.success('已复制') }
-  catch { ElMessage.warning('浏览器不支持复制，请选择卡密手动复制') }
+  try { await copyText(content); ElMessage.success('已复制') }
+  catch { ElMessage.warning('复制失败，请手动复制') }
 }
 const consume = async (row) => {
   const projectId = selectedId.value
