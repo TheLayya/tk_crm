@@ -609,7 +609,7 @@ def complete_email(project_id: int, body: CompleteEmailBody, db: Session = Depen
         EmailAccount.id == email.id, EmailAccount.claimed_by == user.username,
         EmailAccount.claimed_platform == platform, EmailAccount.claimed_at == email.claimed_at,
         EmailAccount.platform_tags == email.platform_tags,
-    ).values(platform_tags=json.dumps(tags, ensure_ascii=False), claimed_by=None, claimed_at=None, claimed_platform=None)).rowcount
+    ).values(platform_tags=json.dumps(tags, ensure_ascii=False), claimed_by=None, claimed_at=None, claimed_platform=None, operator=user.username)).rowcount
     if changed != 1:
         db.rollback()
         raise HTTPException(409, "邮箱领取状态已变化，请刷新后重试")

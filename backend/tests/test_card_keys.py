@@ -110,6 +110,10 @@ def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_
     assert client.post(path + '/claim', headers=member_headers).status_code == 409
     filtered = client.get('/api/emails?platform=tiktok', headers=headers(super_admin)).json()
     assert filtered['total'] == 2
+    completed_email = next(item for item in filtered['items'] if item['email'] == 'available@gmail.com')
+    assert completed_email['operator'] == normal_user.username
+    assert completed_email['platform_tags'] == ['TikTok']
+    assert completed_email['platform_registrants'] == {'TikTok': normal_user.username}
     db.query(EmailAccount).filter_by(email='registered@gmail.com').update({'management_status': '锁定'})
     db.commit()
     changed = client.put(f'/api/card-keys/{project_id}', headers=headers(super_admin), json={

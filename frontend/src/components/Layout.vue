@@ -149,11 +149,16 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.6'
+const APP_VERSION = '1.1.7'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
+    date: '2026-10-03',
+    items: ['修复平台注册完成后邮箱管理不显示注册人的问题', '邮箱平台标签与成员注册归因保持一致', '增加邮箱注册失败备注并移出可领取池']
+  },
+  {
+    version: '1.1.6',
     date: '2026-10-02',
     items: ['卡密项目支持邮箱领取、注册归因与 2FA 验证码', '增加成员工作量报表、卡密备注、搜索和操作追踪', '优化登录页与部署稳定性']
   },

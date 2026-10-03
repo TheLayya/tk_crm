@@ -1,11 +1,11 @@
 {
-  "version": "1.1.6",
-  "date": "2026-10-02",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.6/release-v1.1.6.tar.gz",
-  "sha256": "efee0e36fa9f654f03373eccefc320967d28ca8b71fc9c125978177e9ad50e3c",
+  "version": "1.1.7",
+  "date": "2026-10-03",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.7/release-v1.1.7.tar.gz",
+  "sha256": "",
   "changes": [
-    "修复 Windows 一键更新时 Alembic 迁移工作目录错误",
-    "更新前自动备份数据库，失败自动回滚并恢复服务",
-    "成功更新后持久化版本日志和安装时间"
+    "修复平台注册完成后邮箱管理不显示注册人的问题",
+    "邮箱平台标签与成员注册归因保持一致",
+    "增加邮箱注册失败备注并移出可领取池"
   ]
 }
