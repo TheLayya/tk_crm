@@ -37,10 +37,18 @@ export UPDATE_AGENT_TOKEN="replace-with-a-long-random-token"
 python3 tools/update_agent.py \
   --root "$PWD" \
   --lifecycle "$PWD/tools/lifecycle.docker.json" \
-  --token "$UPDATE_AGENT_TOKEN"
+  --token "$UPDATE_AGENT_TOKEN" \
+  --host 0.0.0.0
 ```
 
-然后在 `backend/.env` 或 Compose 环境中设置同一个 `UPDATE_AGENT_TOKEN`，重启后端容器。Windows PowerShell 可用：
+Docker Compose 必须把同一个令牌传给后端容器；建议在项目根目录的 `.env` 中配置，避免把令牌写入提交的文件：
+
+```dotenv
+UPDATE_AGENT_URL=http://host.docker.internal:8765
+UPDATE_AGENT_TOKEN=replace-with-a-long-random-token
+```
+
+更新代理监听 `0.0.0.0` 是为了让容器通过 `host.docker.internal` 访问宿主机；端口应使用防火墙限制为内部访问，并始终启用令牌鉴权。生产环境建议把代理注册为 systemd 服务，确保重启后自动恢复。Windows PowerShell 可用：
 
 ```powershell
 $env:UPDATE_AGENT_TOKEN = "replace-with-a-long-random-token"

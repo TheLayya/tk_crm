@@ -15,6 +15,8 @@ import time
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 BASE_DIR = Path(__file__).parent
 BACKEND_DIR = BASE_DIR / "backend"
@@ -75,6 +77,18 @@ def is_port_in_use(port: int) -> bool:
         return s.connect_ex(('127.0.0.1', port)) == 0
 
 
+def is_existing_update_agent(port: int, token: str) -> bool:
+    try:
+        request = Request(
+            f'http://127.0.0.1:{port}/status',
+            headers={'Authorization': f'Bearer {token}'},
+        )
+        with urlopen(request, timeout=1) as response:
+            return response.status == 200
+    except (OSError, URLError):
+        return False
+
+
 def is_our_backend_ready(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(1)
@@ -118,9 +132,15 @@ def setup_local_updater(python_exec: str, backend_port: int):
     if len(token) < 32:
         token = secrets.token_urlsafe(48)
         update_env_setting(env_file, 'UPDATE_AGENT_TOKEN', token)
-    update_env_setting(env_file, 'UPDATE_AGENT_URL', f'http://127.0.0.1:{UPDATE_AGENT_PORT}')
+    update_port = UPDATE_AGENT_PORT
+    if is_port_in_use(update_port) and not is_existing_update_agent(update_port, token):
+        update_port = find_available_port(update_port + 1)
+        if not update_port:
+            return None
+    update_url = f'http://127.0.0.1:{update_port}'
+    update_env_setting(env_file, 'UPDATE_AGENT_URL', update_url)
     os.environ['UPDATE_AGENT_TOKEN'] = token
-    os.environ['UPDATE_AGENT_URL'] = f'http://127.0.0.1:{UPDATE_AGENT_PORT}'
+    os.environ['UPDATE_AGENT_URL'] = update_url
 
     lifecycle_path = RUNTIME_DIR / 'windows-update-lifecycle.json'
     lifecycle_path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,10 +157,10 @@ def setup_local_updater(python_exec: str, backend_port: int):
         'command_timeout': 1800,
     }
     lifecycle_path.write_text(json.dumps(lifecycle, indent=2), encoding='utf-8')
-    if is_port_in_use(UPDATE_AGENT_PORT):
+    if is_port_in_use(update_port):
         return None
     agent = subprocess.Popen(
-        [python_exec, str(BASE_DIR / 'tools/update_agent.py'), '--root', str(BASE_DIR), '--lifecycle', str(lifecycle_path), '--token', token, '--port', str(UPDATE_AGENT_PORT)],
+        [python_exec, str(BASE_DIR / 'tools/update_agent.py'), '--root', str(BASE_DIR), '--lifecycle', str(lifecycle_path), '--token', token, '--port', str(update_port)],
         cwd=BASE_DIR,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

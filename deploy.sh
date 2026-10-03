@@ -46,6 +46,43 @@ wait_for_services() {
   done
 }
 
+configure_update_agent() {
+  local install_dir="$1"
+  local env_file="$install_dir/backend/.env"
+  local token
+  if [ -f "$env_file" ] && grep -q '^UPDATE_AGENT_TOKEN=' "$env_file"; then
+    token=$(sed -n 's/^UPDATE_AGENT_TOKEN=//p' "$env_file" | head -1)
+  else
+    token=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
+    printf '\nUPDATE_AGENT_TOKEN=%s\n' "$token" >> "$env_file"
+  fi
+  if grep -q '^UPDATE_AGENT_URL=' "$env_file"; then
+    sed -i 's#^UPDATE_AGENT_URL=.*#UPDATE_AGENT_URL=http://host.docker.internal:8765#' "$env_file"
+  else
+    printf 'UPDATE_AGENT_URL=http://host.docker.internal:8765\n' >> "$env_file"
+  fi
+  cat > /etc/systemd/system/tiktok-monitor-updater.service << EOF
+[Unit]
+Description=TikTok Monitor Update Agent
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${install_dir}
+EnvironmentFile=${env_file}
+ExecStart=/usr/bin/python3 ${install_dir}/tools/update_agent.py --root ${install_dir} --lifecycle ${install_dir}/tools/lifecycle.docker.json --token \$UPDATE_AGENT_TOKEN --host 0.0.0.0 --port 8765
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now tiktok-monitor-updater.service
+  log "更新代理已配置并启动"
+}
+
 # =============================================================================
 # GitHub Token 管理（首次输入后保存，后续自动读取）
 # =============================================================================
@@ -100,6 +137,7 @@ case "$1" in
     prepare_git_auth
     info "拉取最新代码..."
     git pull
+    configure_update_agent "$PWD"
     info "重新构建并重启服务..."
     docker compose build
     docker compose up -d
@@ -269,6 +307,9 @@ if [ ! -f frontend/.env ]; then
   cp frontend/.env.example frontend/.env
   log "frontend/.env 已生成"
 fi
+
+# --- 6.5. 配置一键更新代理 ---
+configure_update_agent "$INSTALL_DIR"
 
 # --- 7. 创建数据目录 ---
 mkdir -p backend/data
