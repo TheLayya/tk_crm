@@ -90,6 +90,7 @@ const pendingEmail = ref(null)
 const totp = ref(null)
 let totpTimer = null
 const claimingEmail = ref(false)
+const emailUpdating = ref(false)
 const platforms = ref([]); const platformVisible = ref(false); const platformSaving = ref(false); const platformDraft = reactive({ id: null, name: '' })
 const completeVisible = ref(false); const completing = ref(false); const completeForm = reactive({ account: '', password: '', totp_secret: '' })
 const completeTarget = reactive({ id: null, platform: '' })
@@ -163,8 +164,8 @@ const refreshTotp = async () => {
   const projectId = selectedId.value
   const emailId = pendingEmail.value?.id
   totp.value = null
-  if (!projectId || !pendingEmail.value?.totp_secret) return
-  try { const result = await getClaimedEmailTotp(projectId); if (selectedId.value === projectId && pendingEmail.value?.id === emailId) totp.value = { ...result, expiresAt: Date.now() + result.remaining * 1000 } }
+  if (emailUpdating.value || !projectId || !pendingEmail.value?.totp_secret) return
+  try { const result = await getClaimedEmailTotp(projectId); if (!emailUpdating.value && selectedId.value === projectId && pendingEmail.value?.id === emailId) totp.value = { ...result, expiresAt: Date.now() + result.remaining * 1000 } }
   catch { if (selectedId.value === projectId && pendingEmail.value?.id === emailId) totp.value = null }
 }
 const reloadKeys = () => { filters.page = 1; keys.value = []; total.value = 0; pendingKey.value = null; pendingEmail.value = null; totp.value = null; loadKeys() }
@@ -188,33 +189,48 @@ const savePlatform = async () => {
   finally { platformSaving.value = false }
 }
 const togglePlatform = async (row) => { await updateCardKeyPlatform(row.id, { name: row.name, is_active: !row.is_active }); await load(); ElMessage.success(row.is_active ? '平台已停用' : '平台已启用') }
+const runEmailTransition = async (projectId, action) => {
+  emailUpdating.value = true
+  totp.value = null
+  try {
+    const result = await action()
+    if (selectedId.value === projectId) pendingEmail.value = null
+    await load()
+    return result
+  } finally {
+    emailUpdating.value = false
+    await refreshTotp()
+  }
+}
 const releaseEmailAction = async () => {
+  if (emailUpdating.value) return
   const projectId = selectedId.value
   try { await ElMessageBox.confirm('确认尚未注册该平台？已注册请使用“注册完成”，避免重复分配。', '归还邮箱', { type: 'warning' }) } catch { return }
-  await releaseEmail(projectId); await load(); ElMessage.success('邮箱已归还，未添加平台标签')
+  await runEmailTransition(projectId, () => releaseEmail(projectId)); ElMessage.success('邮箱已归还，未添加平台标签')
 }
 const failEmailAction = async () => {
+  if (emailUpdating.value) return
   const projectId = selectedId.value
   let value
   try {
     ({ value } = await ElMessageBox.prompt('邮箱无法完成注册时，请填写失败原因；标记后邮箱将进入废弃状态，不再被领取。', '标记邮箱注册失败', { inputType: 'textarea', inputPlaceholder: '例如：邮箱收不到验证码、密码错误、账号已被限制', inputValidator: text => text?.trim() ? true : '请填写失败原因', confirmButtonText: '确认标记失败' }))
   } catch { return }
-  await failEmail(projectId, value)
-  await load()
+  await runEmailTransition(projectId, () => failEmail(projectId, value))
   ElMessage.success('邮箱已标记为注册失败并移出可领取池')
 }
 const completeEmailAction = async () => {
+  if (emailUpdating.value) return
   const projectId = selectedId.value
   const platform = selected.value.target_platform
   if (!['tiktok', 'youtube', 'instagram', 'facebook'].includes(platform.toLowerCase())) {
     try { await ElMessageBox.confirm('确认已注册完成？将添加平台标签并释放邮箱。', '注册完成', { type: 'warning' }) } catch { return }
-    await completeEmail(projectId, { platform }); await load(); ElMessage.success('已标记注册完成并释放邮箱'); return
+    await runEmailTransition(projectId, () => completeEmail(projectId, { platform })); ElMessage.success('已标记注册完成并释放邮箱'); return
   }
   if (!auth.hasPermission('op_account:create')) return ElMessage.warning('请联系管理员授予创建运营账号权限')
   Object.assign(completeTarget, { id: projectId, platform })
   Object.assign(completeForm, { account: '', password: '', totp_secret: '' }); completeVisible.value = true
 }
-const submitCompleteEmail = async () => { if (!completeForm.account.trim()) return ElMessage.warning('请填写平台账号'); completing.value = true; try { const result = await completeEmail(completeTarget.id, { platform: completeTarget.platform, ...completeForm }); completeVisible.value = false; await load(); ElMessage.success(`已创建运营账号 ${result.op_account}，邮箱已关联并释放`) } finally { completing.value = false } }
+const submitCompleteEmail = async () => { if (emailUpdating.value) return; if (!completeForm.account.trim()) return ElMessage.warning('请填写平台账号'); completing.value = true; try { const result = await runEmailTransition(completeTarget.id, () => completeEmail(completeTarget.id, { platform: completeTarget.platform, ...completeForm })); completeVisible.value = false; ElMessage.success(`已创建运营账号 ${result.op_account}，邮箱已关联并释放`) } finally { completing.value = false } }
 const openImport = () => { if (!selected.value) return; Object.assign(importTarget, { id: selected.value.id, name: selected.value.name }); importText.value = ''; importVisible.value = true }
 const saveImport = async () => { if (!importText.value.trim()) return ElMessage.warning('请粘贴卡密内容'); importing.value = true; try { const result = await importCardKeys(importTarget.id, importText.value); ElMessage.success(`导入 ${result.added} 份，跳过重复 ${result.duplicates} 份`); importVisible.value = false; await load() } finally { importing.value = false } }
 const claim = async () => {

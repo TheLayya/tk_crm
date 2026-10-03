@@ -149,11 +149,16 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.7'
+const APP_VERSION = '1.1.8'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
+    date: '2026-10-04',
+    items: ['修复注册完成后验证码轮询误报“没有找到你的邮箱”', '注册完成、归还和失败处理期间暂停 2FA 刷新', '保留真实注册提交错误提示，避免重复成功/失败提示']
+  },
+  {
+    version: '1.1.7',
     date: '2026-10-03',
     items: ['修复平台注册完成后邮箱管理不显示注册人的问题', '邮箱平台标签与成员注册归因保持一致', '增加邮箱注册失败备注并移出可领取池']
   },

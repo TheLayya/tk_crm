@@ -97,6 +97,10 @@ request.interceptors.response.use(
       }
     }
 
+    if (originalRequest?.ignoredErrorStatuses?.includes(status)) {
+      return Promise.reject(error)
+    }
+
     // 根据 HTTP 状态码显示不同错误信息
     switch (status) {
       case 400:
