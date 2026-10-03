@@ -2,7 +2,7 @@
   "version": "1.1.7",
   "date": "2026-10-03",
   "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.7/release-v1.1.7.tar.gz",
-  "sha256": "",
+  "sha256": "3fac312a5693b735b58c7b03e26521f53a7e96f65570aaebaae953e5698cdb01",
   "changes": [
     "修复平台注册完成后邮箱管理不显示注册人的问题",
     "邮箱平台标签与成员注册归因保持一致",
