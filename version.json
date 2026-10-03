@@ -2,7 +2,7 @@
   "version": "1.1.8",
   "date": "2026-10-04",
   "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.8/release-v1.1.8.tar.gz",
-  "sha256": "",
+  "sha256": "cbdec3748d09ee53a992f517b3ac52e31e06485b15408c0736d1d615c429103c",
   "changes": [
     "修复注册完成后验证码轮询误报没有找到你的邮箱",
     "注册完成、归还和失败处理期间暂停 2FA 刷新",
