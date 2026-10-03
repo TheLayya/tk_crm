@@ -34,7 +34,7 @@
       <div v-if="selected" class="email-claim-bar">
         <div><strong>注册邮箱</strong><span v-if="selected.target_platform">{{ selected.target_platform }}</span><span v-else class="email-platform-empty">未设置目标平台</span><small>{{ pendingEmail ? '注册完成后标记平台并释放' : selected.target_platform ? '领取未注册该平台的闲置邮箱' : '请先设置目标平台，才能领取对应邮箱' }}</small></div>
         <div v-if="!pendingEmail"><el-button v-if="selected.target_platform" type="primary" plain :disabled="!selected.can_claim" :loading="claimingEmail" @click="claimEmailAction">领取邮箱</el-button><el-button v-else-if="canManage" type="primary" plain @click="openProject(selected)">设置目标平台</el-button><el-tag v-else type="info">等待管理员设置</el-tag></div>
-        <div v-else class="email-actions"><code>{{ pendingEmail.email }}</code><el-button size="small" @click="copy(pendingEmail.email)">复制邮箱</el-button><el-button v-if="pendingEmail.password" size="small" @click="copy(pendingEmail.password)">复制密码</el-button><el-button v-if="pendingEmail.recovery_email" size="small" @click="copy(pendingEmail.recovery_email)">辅助邮箱</el-button><el-button v-if="totp" size="small" type="success" @click="copy(totp.code)">验证码 {{ totp.code }}（{{ totp.remaining }}s）</el-button><el-button v-else-if="pendingEmail.totp_secret" size="small" @click="copy(pendingEmail.totp_secret)">复制 2FA 密钥</el-button><el-button size="small" type="primary" @click="completeEmailAction">注册完成</el-button><el-button size="small" type="warning" @click="releaseEmailAction">归还</el-button></div>
+        <div v-else class="email-actions"><code>{{ pendingEmail.email }}</code><el-button size="small" @click="copy(pendingEmail.email)">复制邮箱</el-button><el-button v-if="pendingEmail.password" size="small" @click="copy(pendingEmail.password)">复制密码</el-button><el-button v-if="pendingEmail.recovery_email" size="small" @click="copy(pendingEmail.recovery_email)">辅助邮箱</el-button><el-button v-if="totp" size="small" type="success" @click="copy(totp.code)">验证码 {{ totp.code }}（{{ totp.remaining }}s）</el-button><el-button v-else-if="pendingEmail.totp_secret" size="small" @click="copy(pendingEmail.totp_secret)">复制 2FA 密钥</el-button><el-button size="small" type="primary" @click="completeEmailAction">注册完成</el-button><el-button size="small" type="warning" @click="releaseEmailAction">归还</el-button><el-button size="small" type="danger" plain @click="failEmailAction">注册失败</el-button></div>
       </div>
       <div v-if="selected" class="record-filters">
         <strong>{{ canManage ? '卡密记录' : '我的领取记录' }}</strong>
@@ -77,7 +77,7 @@ import { useAuthStore } from '@/stores/auth'
 import CardKeyWorkReport from '@/components/CardKeyWorkReport.vue'
 import { copyText } from '@/utils/clipboard'
 import { updateCardKeyRemark } from '@/api/card_keys'
-import { getCardKeyProjects, getCardKeyMembers, createCardKeyProject, updateCardKeyProject, deleteCardKeyProject, importCardKeys, getCardKeys, claimCardKey, consumeCardKey, releaseCardKey, markCardKeyInvalid, getClaimedEmail, getClaimedEmailTotp, claimEmail, releaseEmail, completeEmail, getCardKeyPlatforms, createCardKeyPlatform, updateCardKeyPlatform } from '@/api/card_keys'
+import { getCardKeyProjects, getCardKeyMembers, createCardKeyProject, updateCardKeyProject, deleteCardKeyProject, importCardKeys, getCardKeys, claimCardKey, consumeCardKey, releaseCardKey, markCardKeyInvalid, getClaimedEmail, getClaimedEmailTotp, claimEmail, releaseEmail, failEmail, completeEmail, getCardKeyPlatforms, createCardKeyPlatform, updateCardKeyPlatform } from '@/api/card_keys'
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('card_key:manage'))
 const username = computed(() => auth.user?.username)
@@ -192,6 +192,16 @@ const releaseEmailAction = async () => {
   const projectId = selectedId.value
   try { await ElMessageBox.confirm('确认尚未注册该平台？已注册请使用“注册完成”，避免重复分配。', '归还邮箱', { type: 'warning' }) } catch { return }
   await releaseEmail(projectId); await load(); ElMessage.success('邮箱已归还，未添加平台标签')
+}
+const failEmailAction = async () => {
+  const projectId = selectedId.value
+  let value
+  try {
+    ({ value } = await ElMessageBox.prompt('邮箱无法完成注册时，请填写失败原因；标记后邮箱将进入废弃状态，不再被领取。', '标记邮箱注册失败', { inputType: 'textarea', inputPlaceholder: '例如：邮箱收不到验证码、密码错误、账号已被限制', inputValidator: text => text?.trim() ? true : '请填写失败原因', confirmButtonText: '确认标记失败' }))
+  } catch { return }
+  await failEmail(projectId, value)
+  await load()
+  ElMessage.success('邮箱已标记为注册失败并移出可领取池')
 }
 const completeEmailAction = async () => {
   const projectId = selectedId.value

@@ -124,6 +124,30 @@ def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_
     assert db.query(EmailAccount).filter_by(email='available@gmail.com').one().platform_tags == '["TikTok"]'
 
 
+def test_project_email_claim_failure_discards_email_with_remark(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    project_id = project(client, super_admin, [normal_user.username])
+    db.query(CardKeyProject).filter_by(id=project_id).update({'target_platform': 'TikTok'})
+    db.add(EmailAccount(email='failed-registration@gmail.com', password='secret'))
+    db.commit()
+    headers_ = headers(normal_user)
+    path = f'/api/card-keys/{project_id}/email'
+    claimed = client.post(path + '/claim', headers=headers_)
+    assert claimed.status_code == 200
+
+    failed = client.post(path + '/fail', headers=headers_, json={'remark': '收不到注册验证码'})
+    assert failed.status_code == 200, failed.text
+    assert failed.json()['management_status'] == '废弃'
+    assert failed.json()['remark'] == '收不到注册验证码'
+    assert client.get(path, headers=headers_).json() is None
+    assert client.post(path + '/claim', headers=headers_).status_code == 409
+    email = db.query(EmailAccount).filter_by(email='failed-registration@gmail.com').one()
+    assert email.management_status == '废弃'
+    assert email.claimed_by is None
+    assert email.claimed_platform is None
+    assert email.remark == '收不到注册验证码'
+
+
 def test_card_key_search_and_invalid_after_sales_note(client, db, super_admin):
     project_id = project(client, super_admin, ['__all__'])
     base = f'/api/card-keys/{project_id}'

@@ -16,6 +16,7 @@ export const getCardKeyWorkReport = (projectId, params) => request.get(`/card-ke
 export const getClaimedEmail = (projectId) => request.get(`/card-keys/${projectId}/email`)
 export const claimEmail = (projectId) => request.post(`/card-keys/${projectId}/email/claim`)
 export const releaseEmail = (projectId) => request.post(`/card-keys/${projectId}/email/release`)
+export const failEmail = (projectId, remark) => request.post(`/card-keys/${projectId}/email/fail`, { remark })
 export const completeEmail = (projectId, data) => request.post(`/card-keys/${projectId}/email/complete`, data)
 export const getClaimedEmailTotp = (projectId) => request.get(`/card-keys/${projectId}/email/totp`)
 export const getCardKeyPlatforms = () => request.get('/card-keys/platforms')

@@ -544,6 +544,35 @@ def release_email(project_id: int, db: Session = Depends(get_db), user=Depends(r
     return {"released": True}
 
 
+class EmailFailureBody(BaseModel):
+    remark: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/{project_id}/email/fail")
+def fail_email(project_id: int, body: EmailFailureBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+    project = db.get(CardKeyProject, project_id)
+    if not project or not _allowed(project, user, db):
+        raise HTTPException(404, "项目不存在或无权访问")
+    platform = (project.target_platform or "").strip()
+    if not platform:
+        raise HTTPException(422, "请先为项目设置目标平台")
+    email = db.query(EmailAccount).filter(
+        EmailAccount.claimed_by == user.username,
+        EmailAccount.claimed_platform == platform,
+    ).first()
+    if not email:
+        raise HTTPException(404, "没有找到你领取的邮箱")
+    remark = body.remark.strip()
+    email.management_status = "废弃"
+    email.remark = remark
+    email.claimed_by = None
+    email.claimed_at = None
+    email.claimed_platform = None
+    email.operator = user.username
+    db.commit()
+    return {"failed": True, "email_id": email.id, "management_status": email.management_status, "remark": email.remark}
+
+
 class CompleteEmailBody(BaseModel):
     platform: str = Field(min_length=1, max_length=100)
     account: str | None = Field(default=None, max_length=255)
