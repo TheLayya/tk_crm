@@ -119,7 +119,7 @@ def is_code_file(relative):
         return False
     if any(part in PRESERVED_PARTS or part.startswith(".venv") for part in parts):
         return False
-    if any(part == ".env" or part.startswith(".env.") for part in parts):
+    if any(part == ".env" or (part.startswith(".env.") and part != ".env.example") for part in parts):
         return False
     if Path(relative).suffix.lower() in {".db", ".sqlite", ".sqlite3", ".log"}:
         return False

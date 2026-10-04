@@ -88,6 +88,26 @@ def test_prepare_release_accepts_only_code_package(tmp_path):
     assert (package / "backend/app/main.py").is_file()
 
 
+def test_prepare_release_accepts_nested_env_templates(tmp_path):
+    source = tmp_path / "package"
+    (source / "backend").mkdir(parents=True)
+    (source / "frontend").mkdir()
+    (source / "backend/app").mkdir()
+    (source / "backend/app/main.py").write_text("app = True", encoding="utf-8")
+    (source / "backend/alembic.ini").write_text("[alembic]", encoding="utf-8")
+    (source / "frontend/package.json").write_text("{}", encoding="utf-8")
+    (source / "docker-compose.yml").write_text("services: {}", encoding="utf-8")
+    (source / "version.json").write_text(json.dumps({"version": "1.2.3"}), encoding="utf-8")
+    (source / "backend/.env.example").write_text("KEY=value", encoding="utf-8")
+    (source / "frontend/.env.example").write_text("VITE_KEY=value", encoding="utf-8")
+    archive = tmp_path / "release.tar.gz"
+    with tarfile.open(archive, "w:gz") as handle:
+        for item in source.rglob("*"):
+            handle.add(item, item.relative_to(source.parent), recursive=False)
+    package = prepare_release(archive, tmp_path / "staging", "1.2.3")
+    assert (package / "backend/.env.example").is_file()
+
+
 def test_update_rollback_removes_new_database(tmp_path, monkeypatch):
     root = tmp_path / "fresh"
     (root / "backend/app").mkdir(parents=True)
