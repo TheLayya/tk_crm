@@ -2,7 +2,7 @@
   "version": "1.1.10",
   "date": "2026-10-04",
   "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.10/release-v1.1.10.tar.gz",
-  "sha256": "8a7bfbeab94f230836b2bad5a8a57076cc1785da1c62718c27d405518e26d4e2",
+  "sha256": "64404e1cfd8e49362633f9440b7f952da43e0959383518156e1b439a9450c20f",
   "changes": [
     "修复一键更新误拒绝合法环境模板的问题",
     "发布包排除临时截图等运行时文件",
