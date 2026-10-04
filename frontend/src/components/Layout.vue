@@ -149,13 +149,13 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.9'
+const APP_VERSION = '1.1.10'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
     date: '2026-10-04',
-    items: ['领取邮箱仅允许领取检测正常的闲置邮箱', '修复异常或未检测邮箱被误领取的问题', '固定新部署管理员初始密码并完善部署说明']
+    items: ['修复一键更新误拒绝合法环境模板的问题', '发布包排除临时截图等运行时文件', '保留数据、配置和管理员密码不变']
   },
   {
     version: '1.1.7',
