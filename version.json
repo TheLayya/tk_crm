@@ -2,7 +2,7 @@
   "version": "1.1.9",
   "date": "2026-10-04",
   "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.9/release-v1.1.9.tar.gz",
-  "sha256": "",
+  "sha256": "b9be3040c05aba16497754437f71b00ea8b755284b2976f788e0106ce1646eaa",
   "changes": [
     "领取邮箱仅允许领取检测正常的闲置邮箱",
     "修复异常或未检测邮箱被误领取的问题",
