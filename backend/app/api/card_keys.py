@@ -489,13 +489,15 @@ def claim_email(project_id: int, db: Session = Depends(get_db), user=Depends(req
         raise HTTPException(409, "项目已结束，不能领取新邮箱")
     candidates = db.query(EmailAccount).filter(
         EmailAccount.management_status == "闲置", EmailAccount.claimed_by.is_(None),
+        EmailAccount.gmail_check_status == "正常",
         or_(EmailAccount.platform_tags.is_(None), ~EmailAccount.platform_tags.icontains(json.dumps(platform, ensure_ascii=False), autoescape=True)),
     ).order_by(EmailAccount.id).all()
     for candidate in candidates:
         try:
             changed = db.execute(update(EmailAccount).where(
                 EmailAccount.id == candidate.id, EmailAccount.management_status == "闲置",
-                EmailAccount.claimed_by.is_(None), EmailAccount.platform_tags == candidate.platform_tags,
+                EmailAccount.claimed_by.is_(None), EmailAccount.gmail_check_status == "正常",
+                EmailAccount.platform_tags == candidate.platform_tags,
             ).values(claimed_by=user.username, claimed_at=datetime.utcnow(), claimed_platform=platform)).rowcount
         except IntegrityError:
             db.rollback()

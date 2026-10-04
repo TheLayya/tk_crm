@@ -76,7 +76,9 @@ def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_
     db.add_all([
         EmailAccount(email='registered@gmail.com', platform_tags='["tiktok"]'),
         EmailAccount(email='locked@gmail.com', management_status='锁定'),
-        EmailAccount(email='available@gmail.com', password='secret', totp_secret='TESTKEY'),
+        EmailAccount(email='available@gmail.com', password='secret', totp_secret='TESTKEY', gmail_check_status='正常'),
+        EmailAccount(email='unchecked@gmail.com', gmail_check_status=None),
+        EmailAccount(email='blocked@gmail.com', gmail_check_status='封禁'),
     ])
     db.commit()
     path = f'/api/card-keys/{project_id}/email'
@@ -128,11 +130,25 @@ def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_
     assert db.query(EmailAccount).filter_by(email='available@gmail.com').one().platform_tags == '["TikTok"]'
 
 
+def test_project_email_claim_requires_normal_gmail_check(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    response = client.post('/api/card-keys', headers=headers(super_admin), json={
+        'name': '仅领取正常邮箱', 'members': [normal_user.username], 'target_platform': 'TikTok'})
+    project_id = response.json()['id']
+    db.add_all([
+        EmailAccount(email='unchecked-only@gmail.com'),
+        EmailAccount(email='blocked-only@gmail.com', gmail_check_status='封禁'),
+    ])
+    db.commit()
+    result = client.post(f'/api/card-keys/{project_id}/email/claim', headers=headers(normal_user))
+    assert result.status_code == 409
+
+
 def test_project_email_claim_failure_discards_email_with_remark(client, db, super_admin, normal_user):
     grant(db, normal_user, 'card_key:view')
     project_id = project(client, super_admin, [normal_user.username])
     db.query(CardKeyProject).filter_by(id=project_id).update({'target_platform': 'TikTok'})
-    db.add(EmailAccount(email='failed-registration@gmail.com', password='secret'))
+    db.add(EmailAccount(email='failed-registration@gmail.com', password='secret', gmail_check_status='正常'))
     db.commit()
     headers_ = headers(normal_user)
     path = f'/api/card-keys/{project_id}/email'

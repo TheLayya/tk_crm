@@ -8,7 +8,17 @@ from dotenv import dotenv_values
 import pytest
 
 
-@pytest.mark.parametrize('password', ['strong-admin-pass', "a'quoted\\password", 'value$HOME # & | "', '${USER}'])
+def test_new_deployments_share_documented_initial_password():
+    repository = Path(__file__).resolve().parents[2]
+    password = dotenv_values(repository / 'backend/.env.example')['SUPER_ADMIN_PASSWORD']
+    assert password == 'Admin123!'
+    script = (repository / 'deploy.sh').read_text(encoding='utf-8')
+    assert f"ADMIN_PASSWORD='{password}'" in script
+    assert '管理员初始密码' not in script
+    assert f'`{password}`' in (repository / 'README.md').read_text(encoding='utf-8')
+
+
+@pytest.mark.parametrize('password', ['Admin123!', 'strong-admin-pass', "a'quoted\\password", 'value$HOME # & | "', '$' + '{USER}'])
 def test_deploy_configuration_preserves_password_and_replaces_placeholders(tmp_path, password):
     repository = Path(__file__).resolve().parents[2]
     script = (repository / 'deploy.sh').read_text(encoding='utf-8')
@@ -22,7 +32,7 @@ def test_deploy_configuration_preserves_password_and_replaces_placeholders(tmp_p
         [sys.executable, '-c', generation], cwd=tmp_path, capture_output=True,
         env={**os.environ, 'JWT_SECRET': 'b' * 64, 'FIELD_KEY': 'a' * 64, 'ADMIN_PASSWORD': password},
     )
-    if '${' in password:
+    if '$' + '{' in password:
         assert result.returncode != 0
         assert not target.exists()
         password = 'valid-retry-password'

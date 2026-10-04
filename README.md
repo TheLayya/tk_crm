@@ -4,7 +4,7 @@
 
 TikTok 账号监控、终端资产与团队运营管理系统。当前版本覆盖账号采集、设备/节点关联、邮箱与卡密资产、数据总览及可配置登录场景。
 
-> 文档更新日期：2026-10-02
+> 文档更新日期：2026-10-04
 
 ## 技术栈
 
@@ -34,7 +34,7 @@ python -m venv .venv312
 .\.venv312\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-首次安装时复制 `backend/.env.example` 为 `backend/.env`，填写 JWT 密钥、字段加密密钥和管理员密码；已有 `.env` 时不要覆盖。填写完成后，在 `backend` 目录继续执行：
+首次安装时复制 `backend/.env.example` 为 `backend/.env`，填写 JWT 密钥和字段加密密钥；管理员初始密码预设为 `Admin123!`，也可以在首次启动前自行替换。已有 `.env` 时不要覆盖。填写完成后，在 `backend` 目录继续执行：
 
 ```bat
 .\.venv312\Scripts\python.exe -m alembic upgrade head
@@ -57,9 +57,11 @@ npm run dev -- --host 0.0.0.0 --port 5174
 首次启动会创建超级管理员：
 
 - 用户名：`admin`
-- 密码：首次部署时写入 `backend/.env` 的 `SUPER_ADMIN_PASSWORD`
+- 统一初始密码：`Admin123!`
 
-**正式部署没有统一的默认密码。** 使用 `deploy.sh` 安装时，脚本会交互式要求输入“管理员初始密码”；Docker 或手动部署时，则使用你自己填写的 `SUPER_ADMIN_PASSWORD`。请在部署完成后把这组凭据保存到团队密码管理工具中。
+使用当前 `deploy.sh` 新安装，或复制当前 `backend/.env.example` 后首次启动，均使用上述初始密码。**这是公开的初始密码，部署完成后请立即进入“团队管理 → 成员管理”，找到 `admin`，点击“重置密码”，设置自己的强密码；改密前不要向公网开放服务。**
+
+如果首次部署前自定义了 `SUPER_ADMIN_PASSWORD`，则使用自定义密码。升级不会把已有管理员密码改成 `Admin123!`，旧版本部署时设置的密码仍然有效。
 
 如果忘记了部署时填写的密码，可以在服务器安装目录查看配置文件中的密码值（不要把输出发到群聊或提交到 Git）：
 
@@ -95,7 +97,7 @@ DATABASE_URL=sqlite:///./data/monitor.db
 
 生成字段加密密钥：`python -c "import secrets; print(secrets.token_hex(32))"`；生成 JWT 密钥：`python -c "import secrets; print(secrets.token_urlsafe(48))"`。将输出分别填入 `FIELD_ENCRYPTION_KEY` 和 `JWT_SECRET`，不要提交真实 `.env`。模板中的加密密钥占位符无效，未替换时后端会拒绝启动。
 
-首次部署前配置 JWT 密钥、字段加密密钥和管理员密码，然后执行 `alembic upgrade head`。已有数据升级时必须保留原字段加密密钥，否则历史密码、2FA、备忘和卡密将无法解密；不要直接更换密钥。
+首次部署前配置 JWT 密钥和字段加密密钥，然后执行 `alembic upgrade head`。已有数据升级时必须保留原字段加密密钥，否则历史密码、2FA、备忘和卡密将无法解密；不要直接更换密钥。
 
 当前数据库迁移版本为 `20261001_0016`。升级已有数据时只执行迁移，不删除 `backend/data/`。
 

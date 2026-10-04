@@ -237,10 +237,7 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/tiktok-monitor}"
 # 域名（可选）
 read -rp "$(echo -e "${BLUE}[?]${NC} 域名 (例: monitor.example.com，留空则用 IP 访问): ")" DOMAIN
 
-# 管理员密码
-read -rsp "$(echo -e "${BLUE}[?]${NC} 管理员初始密码: ")" ADMIN_PASSWORD
-echo ""
-[ -n "$ADMIN_PASSWORD" ] || error "管理员密码不能为空"
+ADMIN_PASSWORD='Admin123!'
 
 echo ""
 
@@ -380,7 +377,8 @@ fi
 
 echo ""
 echo -e "  ${GREEN}管理员账号:${NC}  admin"
-echo -e "  ${GREEN}管理员密码:${NC}  已按安装时输入的密码设置"
+echo -e "  ${GREEN}新安装初始密码:${NC}  Admin123!"
+echo -e "  ${YELLOW}请立即在团队管理中修改密码；已有配置和管理员密码不会被覆盖。${NC}"
 echo ""
 echo -e "  ${CYAN}安装目录:${NC}  ${INSTALL_DIR}"
 echo ""
