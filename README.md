@@ -52,9 +52,30 @@ npm run dev -- --host 0.0.0.0 --port 5174
 前端：<http://localhost:5174/>  
 后端文档端口以 `backend/.env` 的 `PORT` 为准，未配置时为 `8000`；本机若配置 `PORT=8801`，则访问 `http://localhost:8801/docs`。
 
-## 默认账号
+## 登录账号与初始密码
 
-首次启动创建用户名 `admin`，初始密码取自 `SUPER_ADMIN_PASSWORD`。修改配置不会重置已有管理员的密码；JWT 密钥和管理员密码没有代码内置后备值，缺少配置时后端会拒绝启动。
+首次启动会创建超级管理员：
+
+- 用户名：`admin`
+- 密码：首次部署时写入 `backend/.env` 的 `SUPER_ADMIN_PASSWORD`
+
+**正式部署没有统一的默认密码。** 使用 `deploy.sh` 安装时，脚本会交互式要求输入“管理员初始密码”；Docker 或手动部署时，则使用你自己填写的 `SUPER_ADMIN_PASSWORD`。请在部署完成后把这组凭据保存到团队密码管理工具中。
+
+如果忘记了部署时填写的密码，可以在服务器安装目录查看配置文件中的密码值（不要把输出发到群聊或提交到 Git）：
+
+```bash
+grep '^SUPER_ADMIN_PASSWORD=' backend/.env
+```
+
+Windows PowerShell：
+
+```powershell
+Select-String '^SUPER_ADMIN_PASSWORD=' .\backend\.env
+```
+
+如果配置文件中的密码仍无法登录，说明管理员账号已经创建过，修改 `SUPER_ADMIN_PASSWORD` **不会重置已有管理员密码**；请登录其他超级管理员账号，在“团队管理”中重置密码，或联系维护人员按数据库维护流程处理。不要删除数据库或直接重建管理员，否则可能影响现有数据。
+
+JWT 密钥和管理员密码没有代码内置后备值，缺少配置时后端会拒绝启动。
 
 ## 演示环境
 
