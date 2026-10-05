@@ -51,6 +51,100 @@ def test_email_import_mixed_delimiters(client, super_admin):
     assert response.json()["success"] == 3, response.text
 
 
+def test_email_import_three_field_mixed_batch(client, db, super_admin):
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": "\n".join([
+            "three-dash@gmail.com----dash-password----DASHKEY",
+            "three-pipe@gmail.com|pipe-password|PIPEKEY",
+            'three-colon@gmail.com:"colon:password":COLONKEY',
+            "four-fields@gmail.com----four-password----helper@example.com----FOURKEY",
+        ]),
+        "purchase_channel": "供应商", "purchase_price": 0,
+    })
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert (result["total"], result["success"], result["failed"]) == (4, 4, 0)
+    for suffix, password, key in [
+        ("dash", "dash-password", "DASHKEY"),
+        ("pipe", "pipe-password", "PIPEKEY"),
+        ("colon", "colon:password", "COLONKEY"),
+    ]:
+        email = db.query(EmailAccount).filter_by(email=f"three-{suffix}@gmail.com").one()
+        assert (email.password, email.totp_secret, email.recovery_email) == (password, key, None)
+        assert email.registrant == super_admin.username
+    assert db.query(EmailAccount).filter_by(email="four-fields@gmail.com").one().recovery_email == "helper@example.com"
+
+
+def test_email_import_four_fields_allow_empty_and_null_recovery(client, db, super_admin):
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": "\n".join(
+            f"empty-recovery-{index}@gmail.com----password----{recovery}----KEY"
+            for index, recovery in enumerate(["", "null", "NULL"])
+        ),
+        "import_format": "credentials_4", "delimiter": "----",
+        "purchase_channel": "供应商", "purchase_price": 0,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["success"] == 3, response.text
+    assert all(email.recovery_email is None and email.totp_secret == "KEY" for email in db.query(EmailAccount).all())
+
+
+def test_email_import_selected_format_isolates_mismatch_and_hides_secrets(client, db, super_admin):
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": "\n".join([
+            "selected-valid@gmail.com----valid-password----VALIDKEY",
+            "selected-mismatch@gmail.com----mismatch-secret----helper@example.com----MISMATCHKEY",
+            "invalid-email----invalid-secret----INVALIDKEY",
+        ]),
+        "import_format": "credentials_3", "delimiter": "----",
+        "purchase_channel": "供应商", "purchase_price": 0,
+    })
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert (result["total"], result["success"], result["failed"]) == (3, 1, 2)
+    assert [row["_result"] for row in result["rows"]] == ["success", "failed", "failed"]
+    assert [row["line"] for row in result["rows"]] == [1, 2, 3]
+    assert db.query(EmailAccount).one().email == "selected-valid@gmail.com"
+    for secret in ["valid-password", "VALIDKEY", "mismatch-secret", "MISMATCHKEY", "invalid-secret", "INVALIDKEY"]:
+        assert secret not in response.text
+
+
+def test_email_import_forced_dash_preserves_passwords(client, db, super_admin):
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": "\n".join([
+            "punctuation@gmail.com----secret|with:punctuation----null----PUNCTUATIONKEY",
+            "literal-null@gmail.com----null----NULL----NULLKEY",
+        ]),
+        "import_format": "credentials_4", "delimiter": "----",
+        "purchase_channel": "供应商", "purchase_price": 0,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["success"] == 2, response.text
+    punctuation = db.query(EmailAccount).filter_by(email="punctuation@gmail.com").one()
+    literal_null = db.query(EmailAccount).filter_by(email="literal-null@gmail.com").one()
+    assert punctuation.password == "secret|with:punctuation"
+    assert literal_null.password == "null"
+    assert punctuation.recovery_email is None and literal_null.recovery_email is None
+    stored = db.execute(text("SELECT password FROM email_accounts WHERE id=:id"), {"id": punctuation.id}).scalar_one()
+    assert stored != punctuation.password
+
+
+@pytest.mark.parametrize("delimiter", ["----", "|", ":"])
+def test_email_import_selected_full_format_keeps_iso_time(client, db, super_admin, delimiter):
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": delimiter.join(["full-format@gmail.com", "password", "null", "KEY", "2024-03-02T12:30:45", "France"]),
+        "import_format": "full_6", "delimiter": delimiter,
+        "purchase_channel": "供应商", "purchase_price": 0,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["success"] == 1, response.text
+    email = db.query(EmailAccount).one()
+    assert email.account_created_at.isoformat() == "2024-03-02T12:30:45"
+    assert email.account_created_year is None
+    assert email.country == "France"
+    assert email.recovery_email is None
+
+
 def test_email_create_import_and_secret_round_trip(client, db, super_admin):
     headers = auth_headers(super_admin)
     created = client.post("/api/emails", headers=headers, json={

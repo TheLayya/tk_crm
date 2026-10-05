@@ -138,6 +138,18 @@ def test_gmail_text_accepts_four_field_dash_separator(client, db, super_admin):
     assert account.country is None
 
 
+def test_gmail_text_accepts_three_fields_and_null_recovery(client, db, super_admin):
+    content = "three@gmail.com----password----KEY\nnull-recovery@gmail.com----password----null----KEY"
+    response = client.post("/api/op-accounts/import", headers=auth_headers(super_admin),
+                           files={"file": ("gmail.txt", content.encode("utf-8"), "text/plain")})
+    assert response.status_code == 200, response.text
+    assert response.json()["success"] == 2
+    three = db.query(OpAccount).filter_by(account="three@gmail.com").one()
+    null_recovery = db.query(OpAccount).filter_by(account="null-recovery@gmail.com").one()
+    assert three.recovery_email is None and three.totp_secret == "KEY"
+    assert null_recovery.recovery_email is None and null_recovery.totp_secret == "KEY"
+
+
 def test_gmail_mixed_rows_do_not_share_registration_year(client, db, super_admin):
     content = '\n'.join([
         'mixed-year@gmail.com:pass:helper@example.com:KEY:2024:France',

@@ -1,11 +1,11 @@
 {
-  "version": "1.1.11",
+  "version": "1.1.12",
   "date": "2026-10-05",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.11/release-v1.1.11.tar.gz",
-  "sha256": "7d8cd419122d4fdbafb184d9558c42a28b83b6f27ec5d23d481e5e27d292f297",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.12/release-v1.1.12.tar.gz",
+  "sha256": "PLACEHOLDER",
   "changes": [
-    "修复团队成员导入账号和代理节点后的数据范围显示",
-    "修复终端资产关联账号和代理节点的成员权限校验",
-    "部署后支持管理员从界面检查并执行后续服务器更新"
+    "邮箱导入支持三、四、六字段和手动格式选择",
+    "辅助邮箱可留空或填写 null",
+    "密码保留原值，兼容完整注册时间"
   ]
 }

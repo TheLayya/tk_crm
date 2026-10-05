@@ -151,13 +151,13 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.11'
+const APP_VERSION = '1.1.12'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
     date: '2026-10-05',
-    items: ['修复成员导入账号和节点后的归属显示', '修复终端资产关联账号和节点的成员权限', '完善服务器部署与界面一键更新链路']
+    items: ['邮箱导入支持三、四、六字段和手动格式选择', '辅助邮箱可留空或填写 null', '密码保留原值，兼容完整注册时间']
   },
   {
     version: '1.1.7',

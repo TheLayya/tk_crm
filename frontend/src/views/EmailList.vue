@@ -122,12 +122,13 @@
 
     <el-dialog v-model="importVisible" title="批量导入邮箱" width="620px">
       <el-upload :auto-upload="false" :show-file-list="false" accept=".txt" :on-change="readImportFile"><el-button size="small">读取 TXT 文件</el-button></el-upload>
-      <el-input v-model="importText" type="textarea" :rows="8" placeholder="邮箱|邮箱密码|辅助邮箱|2FA|注册时间|国家&#10;同时支持 |、----、: 分隔；注册时间可只填年份" />
+      <el-input v-model="importText" type="textarea" :rows="8" placeholder="邮箱----密码----辅助邮箱----2FA&#10;邮箱----密码----2FA（无辅助邮箱）&#10;也支持 |、: 分隔；null/空表示无辅助邮箱" />
+      <el-row :gutter="12" class="import-trade-fields"><el-col :span="12"><el-form-item label="字段格式"><el-select v-model="importFormat" style="width:100%"><el-option label="自动识别三/四/六项" value="auto" /><el-option label="三项：邮箱/密码/2FA" value="credentials_3" /><el-option label="四项：邮箱/密码/辅助邮箱/2FA" value="credentials_4" /><el-option label="六项：再加注册时间/国家" value="full_6" /></el-select></el-form-item></el-col><el-col :span="12"><el-form-item label="分隔符"><el-select v-model="importDelimiter" style="width:100%"><el-option label="自动识别" value="auto" /><el-option label="----" value="----" /><el-option label="竖线 |" value="|" /><el-option label="冒号 :" value=":" /></el-select></el-form-item></el-col></el-row>
       <el-row :gutter="12" class="import-trade-fields">
         <el-col :span="12"><el-form-item label="采购渠道" required><el-input v-model="importPurchaseChannel" placeholder="例如：供应商" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item label="采购成本（每个）" required><el-input-number v-model="importPurchasePrice" :min="0" :precision="2" placeholder="单个邮箱成本" controls-position="right" style="width:100%" /></el-form-item></el-col>
       </el-row>
-      <div class="import-tip">采购渠道和单个邮箱成本必填，会应用到整批邮箱；免费来源请明确填写 0。每行自动识别 |、---- 或 :，支持四项或六项，注册时间可只填年份。导入后可自动进行邮箱状态检测。</div>
+      <div class="import-tip">每行自动识别 |、---- 或 : 分隔，支持三项（邮箱/密码/2FA）、四项（邮箱/密码/辅助邮箱/2FA）或六项（再加注册时间/国家）；辅助邮箱可填 null 或留空。采购渠道和单个邮箱成本必填，免费来源请填写 0。</div>
       <div v-if="importResult" class="import-result">成功 {{ importResult.success }} · 重复 {{ importResult.duplicates }} · 失败 {{ importResult.failed }}{{ checkingImport ? ' · 正在检测新 Gmail…' : (importCheckResult ? ` · 已检测 ${importCheckResult.checked} 个` : '') }}</div>
       <div v-for="result in importResult?.rows?.filter(row => row._result === 'failed') || []" :key="result.line" class="import-result">第 {{ result.line }} 行：{{ result._reason }}</div>
       <template #footer><el-button @click="importVisible = false">取消</el-button><el-button type="primary" :loading="importing" @click="importData">导入</el-button></template>
@@ -176,7 +177,7 @@ const filters = reactive({ keyword: '', management_status: '', platform: '' })
 const items = ref([]); const total = ref(0); const page = ref(1); const pageSize = ref(50); const loading = ref(false)
 const formVisible = ref(false); const editing = ref(false); const saving = ref(false)
 const form = reactive({ email: '', password: '', recovery_email: '', totp_secret: '', account_created_at: '', account_created_year: null, country: '', management_status: '闲置', platform_tags: [], remark: '' })
-const importVisible = ref(false); const importText = ref(''); const importPurchaseChannel = ref(''); const importPurchasePrice = ref(null); const importResult = ref(null); const importing = ref(false); const checkingImport = ref(false); const importCheckResult = ref(null)
+const importVisible = ref(false); const importText = ref(''); const importFormat = ref('auto'); const importDelimiter = ref('auto'); const importPurchaseChannel = ref(''); const importPurchasePrice = ref(null); const importResult = ref(null); const importing = ref(false); const checkingImport = ref(false); const importCheckResult = ref(null)
 const bindVisible = ref(false); const binding = ref(false); const bindEmail = ref(null); const bindAccountId = ref(null); const bindRemark = ref(''); const accountOptions = ref([])
 
 const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
@@ -218,7 +219,7 @@ const importData = async () => {
   importing.value = true
   importCheckResult.value = null
   try {
-    importResult.value = await importEmails(importText.value, { purchase_channel: importPurchaseChannel.value.trim(), purchase_price: importPurchasePrice.value })
+    importResult.value = await importEmails(importText.value, { purchase_channel: importPurchaseChannel.value.trim(), purchase_price: importPurchasePrice.value }, { import_format: importFormat.value, delimiter: importDelimiter.value })
     const ids = (importResult.value.rows || []).filter(row => row._result === 'success' && row._id && row.email?.toLowerCase().endsWith('@gmail.com')).map(row => row._id)
     if (ids.length && canCheck.value) {
       checkingImport.value = true

@@ -523,21 +523,38 @@ def _parse_import_bool(value):
         return value
     return str(value).strip().lower() in {"1", "true", "yes", "y", "是", "有"}
 
-def parse_email_import_line(line: str) -> dict:
-    separator = re.search(r"----|\||:", line)
+
+def _optional_import_value(value: str) -> Optional[str]:
+    value = (value or "").strip()
+    return None if value.lower() in {"", "null", "none", "nil", "无", "空", "-"} else value
+
+
+def parse_email_import_line(line: str, import_format: str = "auto", delimiter: str = "auto") -> dict:
+    pattern = {"----": r"----", "|": r"\|", ":": r":"}.get(delimiter, r"----|\||:")
+    separator = re.search(pattern, line)
     if not separator:
         raise ValueError("未找到邮箱字段分隔符")
     delimiter = separator.group()
     if delimiter == "----":
-        values = [item.strip() for item in line.split(delimiter)]
+        values = line.split(delimiter)
     else:
         values = next(csv.reader([line], delimiter=delimiter, strict=True))
-    if len(values) == 4:
+    if import_format == "credentials_3" and len(values) != 3:
+        raise ValueError("当前格式需要三项：邮箱、密码、2FA")
+    if import_format == "credentials_4" and len(values) != 4:
+        raise ValueError("当前格式需要四项：邮箱、密码、辅助邮箱、2FA")
+    if import_format == "full_6" and (len(values) < 6 or (delimiter != ":" and len(values) != 6)):
+        raise ValueError("当前格式需要六项：邮箱、密码、辅助邮箱、2FA、注册时间、国家")
+    if len(values) == 3:
+        account, password, totp_secret = values
+        recovery_email = ""
+        registered = country = ""
+    elif len(values) == 4:
         account, password, recovery_email, totp_secret = values
         registered = country = ""
     else:
         if len(values) < 6 or (delimiter != ":" and len(values) != 6):
-            raise ValueError("需要四个或六个邮箱字段")
+            raise ValueError("需要三、四或六个邮箱字段")
         account, password, recovery_email, totp_secret = values[:4]
         registered = ":".join(values[4:-1]).strip()
         country = values[-1].strip()
@@ -554,7 +571,7 @@ def parse_email_import_line(line: str) -> dict:
         else:
             registered = datetime.fromisoformat(registered)
     return dict(account=account, password=password or None,
-                recovery_email=recovery_email.strip() or None, totp_secret=totp_secret.strip() or None,
+                recovery_email=_optional_import_value(recovery_email), totp_secret=totp_secret.strip() or None,
                 account_created_at=registered or None, account_created_year=registered_year, country=country or None)
 
 
@@ -582,7 +599,7 @@ def import_gmail_text(db: Session, content: str, actor=None) -> OpImportResult:
                 success += 1
         except (ValueError, csv.Error):
             db.rollback()
-            result.update(_result="failed", _reason="无法识别此行：支持 |、----、: 分隔四或六字段；注册时间可只填年份。请检查字段数量、邮箱或时间是否有效。")
+            result.update(_result="failed", _reason="无法识别此行：支持 |、----、: 分隔三、四或六字段；注册时间可只填年份。请检查字段数量、邮箱或时间是否有效。")
             failed += 1
         except Exception:
             db.rollback()

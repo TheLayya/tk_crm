@@ -201,7 +201,7 @@ def import_emails(body: EmailImportRequest, db: Session = Depends(get_db), user=
     for number, line in lines:
         result = {"line": number}
         try:
-            values = parse_email_import_line(line)
+            values = parse_email_import_line(line, body.import_format, body.delimiter)
             values["purchase_channel"] = body.purchase_channel
             values["purchase_price"] = body.purchase_price
             values["email"] = values.pop("account")
@@ -215,7 +215,7 @@ def import_emails(body: EmailImportRequest, db: Session = Depends(get_db), user=
                 result.update(_result="success", _id=email.id)
         except (ValueError, csv.Error):
             db.rollback()
-            result.update(_result="failed", _reason="无法识别邮箱、字段数量或注册时间；支持 |、----、: 四或六字段，时间可填年份或完整日期")
+            result.update(_result="failed", _reason="无法识别邮箱、字段数量或注册时间；请检查所选格式、分隔符和时间")
         except IntegrityError:
             db.rollback()
             result["_result"] = "duplicate"
