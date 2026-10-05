@@ -113,10 +113,12 @@
           </span>
           <span v-else>检查服务器是否有新版本</span>
           <el-button size="small" :loading="updateChecking" @click="handleCheckUpdate">检查更新</el-button>
-          <el-button v-if="updateInfo?.has_update" type="primary" size="small" :disabled="!updateInfo.configured || updateInfo.updating" :loading="updateApplying" @click="handleApplyUpdate">立即更新</el-button>
+          <el-button v-if="updateInfo?.has_update && authStore.hasPermission('settings:edit')" type="primary" size="small" :disabled="!updateInfo.configured || (updateInfo.client_type === 'desktop' && updateInfo.desktop_supported === false) || updateInfo.updating" :loading="updateApplying" @click="handleApplyUpdate">立即更新</el-button>
         </div>
         <el-alert v-if="updateInfo?.has_update" type="info" :closable="false" title="有新版本可用" />
         <el-alert v-if="updateInfo && !updateInfo.error && !updateInfo.configured" type="warning" :closable="false" title="本机尚未初始化更新器，暂不能自动更新" />
+        <el-alert v-if="updateInfo?.has_update && updateInfo.client_type === 'desktop' && updateInfo.desktop_supported === false" type="warning" :closable="false" title="当前发布暂未提供 Windows 安装包，请联系管理员发布桌面安装包" />
+        <el-alert v-if="updateInfo?.has_update && !authStore.hasPermission('settings:edit')" type="warning" :closable="false" title="当前账号只有查看权限，请联系管理员执行更新" />
         <ul v-if="updateInfo?.has_update" class="update-changes">
           <li v-for="change in updateInfo.changes" :key="change">{{ change }}</li>
         </ul>
@@ -149,13 +151,13 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.10'
+const APP_VERSION = '1.1.11'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
-    date: '2026-10-04',
-    items: ['修复一键更新误拒绝合法环境模板的问题', '发布包排除临时截图等运行时文件', '保留数据、配置和管理员密码不变']
+    date: '2026-10-05',
+    items: ['修复成员导入账号和节点后的归属显示', '修复终端资产关联账号和节点的成员权限', '完善服务器部署与界面一键更新链路']
   },
   {
     version: '1.1.7',
@@ -409,6 +411,8 @@ onUnmounted(() => {
 }
 
 .sidebar-menu {
+  min-height: 0;
+  overflow-y: auto;
   border-right: none;
   background-color: #304156;
   flex: 1;

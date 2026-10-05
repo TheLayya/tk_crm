@@ -15,7 +15,7 @@ from app.version import APP_VERSION, UPDATE_MANIFEST_URL
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/updates", tags=["Updates"])
-HISTORY_PATH = Path(__file__).resolve().parents[2] / "data" / "update-history.json"
+HISTORY_PATH = Path(settings.UPDATE_HISTORY_PATH) if settings.UPDATE_HISTORY_PATH else Path(__file__).resolve().parents[2] / "data" / "update-history.json"
 
 
 def _version_tuple(value):
@@ -38,6 +38,28 @@ def _validate_package_manifest(data):
         or not package_url.path.startswith("/TheLayya/tk_crm/releases/download/")
     ):
         raise ValueError("Invalid release package URL")
+
+
+def _has_windows_package(data):
+    package_url = data.get("windows_package_url")
+    checksum = data.get("windows_sha256")
+    if package_url is None and checksum is None:
+        return False
+    if not isinstance(package_url, str) or not isinstance(checksum, str) or not re.fullmatch(r"[a-f0-9]{64}", checksum):
+        raise ValueError("Invalid Windows release package")
+    parsed = urlparse(package_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+        or parsed.query
+        or parsed.hostname != "github.com"
+        or not parsed.path.startswith("/TheLayya/tk_crm/releases/download/")
+        or not parsed.path.lower().endswith(".exe")
+    ):
+        raise ValueError("Invalid Windows release package URL")
+    return True
 
 
 def _manifest():
@@ -80,7 +102,8 @@ def check_update(_=Depends(require_permission("settings:view"))):
         manifest = _manifest()
         latest = manifest["version"]
         has_update = _version_tuple(latest) > _version_tuple(APP_VERSION)
-        if has_update:
+        windows_supported = _has_windows_package(manifest) if settings.UPDATE_CLIENT_TYPE == "desktop" else None
+        if has_update and settings.UPDATE_CLIENT_TYPE != "desktop":
             _validate_package_manifest(manifest)
     except Exception as exc:
         logger.warning("Update check failed: %s", exc)
@@ -92,6 +115,8 @@ def check_update(_=Depends(require_permission("settings:view"))):
         "date": manifest.get("date"),
         "changes": manifest.get("changes", []),
         "configured": _agent_configured(),
+        "desktop_supported": windows_supported,
+        "client_type": settings.UPDATE_CLIENT_TYPE,
     }
 
 
@@ -131,7 +156,11 @@ def apply_update(_=Depends(require_permission("settings:edit"))):
         manifest = _manifest()
         if _version_tuple(manifest["version"]) <= _version_tuple(APP_VERSION):
             raise HTTPException(status_code=409, detail="Already on the latest version")
-        _validate_package_manifest(manifest)
+        if settings.UPDATE_CLIENT_TYPE == "desktop":
+            if not _has_windows_package(manifest):
+                raise HTTPException(status_code=409, detail="This release has no Windows installer")
+        else:
+            _validate_package_manifest(manifest)
     except HTTPException:
         raise
     except Exception as exc:

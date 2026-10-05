@@ -1,11 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from threading import Barrier
 
 from fastapi import HTTPException
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.api.card_keys import claim_key, consume_key, release_key, import_keys, ImportBody
+from app.api.card_keys import claim_key, consume_key, release_key, import_keys, ImportBody, fail_email, EmailFailureBody
 from app.api.card_keys import _totp_code
 from app.core.security import create_access_token
 from app.models.card_key import CardKey, CardKeyEmailUsage, CardKeyProject
@@ -166,6 +167,59 @@ def test_project_email_claim_failure_discards_email_with_remark(client, db, supe
     assert email.claimed_by is None
     assert email.claimed_platform is None
     assert email.remark == '收不到注册验证码'
+
+
+def test_project_email_claim_failure_rejects_blank_remark(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    project_id = project(client, super_admin, [normal_user.username])
+    db.query(CardKeyProject).filter_by(id=project_id).update({'target_platform': 'TikTok'})
+    db.add(EmailAccount(email='blank-failure@gmail.com', gmail_check_status='正常'))
+    db.commit()
+    path = f'/api/card-keys/{project_id}/email'
+    headers_ = headers(normal_user)
+    assert client.post(path + '/claim', headers=headers_).status_code == 200
+    response = client.post(path + '/fail', headers=headers_, json={'remark': '   '})
+    assert response.status_code == 422
+    email = db.query(EmailAccount).filter_by(email='blank-failure@gmail.com').one()
+    assert email.management_status == '闲置'
+    assert email.claimed_by == normal_user.username
+
+
+def test_stale_email_failure_cannot_discard_new_claim(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'stale-email-failure.db'}", connect_args={'timeout': 15})
+    CardKeyProject.__table__.create(engine)
+    EmailAccount.__table__.create(engine)
+    sessions = sessionmaker(bind=engine)
+    user = User(username='alice', is_super_admin=True)
+    with sessions() as session:
+        project_row = CardKeyProject(name='邮箱竞态', target_platform='TikTok', member_usernames='alice', created_by='root')
+        email = EmailAccount(email='stale-failure@gmail.com', gmail_check_status='正常', claimed_by='alice',
+                             claimed_platform='TikTok')
+        session.add_all([project_row, email])
+        session.commit()
+        project_id, email_id = project_row.id, email.id
+
+    class StaleSession(Session):
+        def execute(self, statement, *args, **kwargs):
+            if getattr(statement, 'is_update', False):
+                with sessions() as current:
+                    current.query(EmailAccount).filter_by(id=email_id).update(
+                        {'claimed_by': 'bob', 'claimed_at': datetime.utcnow()})
+                    current.commit()
+            return super().execute(statement, *args, **kwargs)
+
+    with StaleSession(bind=engine) as stale:
+        try:
+            fail_email(project_id, EmailFailureBody(remark='旧请求'), stale, user)
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError('A stale failure must not overwrite a newer claim')
+    with sessions() as session:
+        email = session.get(EmailAccount, email_id)
+        assert email.management_status == '闲置'
+        assert email.claimed_by == 'bob'
+    engine.dispose()
 
 
 def test_card_key_search_and_invalid_after_sales_note(client, db, super_admin):

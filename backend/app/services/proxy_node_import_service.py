@@ -196,7 +196,7 @@ def _validate_row(
         return None, f"第 {line_num} 行: 必填信息缺失或格式不正确: {fields}"
 
 
-def import_from_csv(db: Session, file_content: bytes) -> ProxyNodeImportResult:
+def import_from_csv(db: Session, file_content: bytes, actor: Optional[str] = None) -> ProxyNodeImportResult:
     """
     解析 UTF-8 编码的 CSV（兼容 UTF-8 with BOM），逐行处理并导入节点。
 
@@ -220,7 +220,7 @@ def import_from_csv(db: Session, file_content: bytes) -> ProxyNodeImportResult:
             continue
 
         try:
-            create_node(db, node_data)
+            create_node(db, node_data, actor=actor)
             success_count += 1
         except Exception as e:
             fail_count += 1
@@ -238,7 +238,7 @@ def import_from_csv(db: Session, file_content: bytes) -> ProxyNodeImportResult:
     )
 
 
-def import_from_excel(db: Session, file_content: bytes) -> ProxyNodeImportResult:
+def import_from_excel(db: Session, file_content: bytes, actor: Optional[str] = None) -> ProxyNodeImportResult:
     """
     使用 openpyxl 解析 .xlsx 文件，第一行为列名，从第二行开始处理数据。
 
@@ -274,7 +274,7 @@ def import_from_excel(db: Session, file_content: bytes) -> ProxyNodeImportResult
             continue
 
         try:
-            create_node(db, node_data)
+            create_node(db, node_data, actor=actor)
             success_count += 1
         except Exception as e:
             fail_count += 1

@@ -290,12 +290,43 @@ onBeforeUnmount(() => { if (totpTimer) window.clearInterval(totpTimer) })
 .email-actions { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 .email-actions .el-button { margin-left:0; }
 .project-metrics { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-left:auto; }
+.claim-bar { flex-wrap:wrap; gap:10px; }
+.claim-bar > div { min-width:0; }
+.record-filters { flex-wrap:wrap; }
+.email-actions code { min-width:0; overflow-wrap:anywhere; }
 .member-stat { display:flex; justify-content:space-between; gap:18px; padding:5px 0; border-bottom:1px solid #ebeef5; color:#606266; font-size:13px; }
 .key-remark { max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#909399; font-size:12px; }
 .heading-actions { display:flex; gap:8px; }
 .platform-create { display:flex; gap:8px; margin-bottom:14px; }
 .platform-create .el-input { flex:1; }
 .form-hint { color:#909399; font-size:12px; line-height:1.5; margin-top:5px; }
-.card-key-page { max-width: 1500px; margin: 0 auto; }.page-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }.page-heading h2 { margin:0 0 6px; color:#1f2937; }.page-heading span,.hint,.muted { color:#909399; font-size:13px; }.project-card,.project-list-card { margin-bottom:16px; }.toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }.project-description { color:#909399; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }.claim-bar { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-top:1px solid #ebeef5; border-bottom:1px solid #ebeef5; margin-bottom:10px; }.claim-bar span,.claim-bar small { margin-left:12px; color:#606266; }.claim-bar small { color:#909399; } code { color:#303133; word-break:break-all; white-space:pre-wrap; }
-.pending-key { display:flex; align-items:center; gap:10px; padding:10px 12px; margin:10px 0; border:1px solid #d9ecff; background:#ecf5ff; border-radius:6px; }.pending-key code { flex:1; min-width:0; }.record-filters { display:flex; align-items:center; gap:12px; margin:12px 0; }.pagination { justify-content:flex-end; margin-top:12px; } @media(max-width:768px) { .claim-bar { align-items:flex-start; gap:8px; }.claim-bar small { display:block; margin:5px 0; }.pending-key { flex-wrap:wrap; }.pending-key code { flex-basis:75%; }.page-heading { gap:10px; }.project-description { flex-basis:100%; } }
+ .card-key-page { max-width:1500px; margin:0 auto; min-width:0; }
+ .page-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; }
+ .page-heading h2 { margin:0 0 6px; color:#1f2937; }
+ .page-heading span,.hint,.muted { color:#909399; font-size:13px; }
+ .heading-actions { display:flex; flex-wrap:wrap; gap:8px; }
+ .project-card,.project-list-card { margin-bottom:16px; }
+ .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+ .project-description { color:#909399; flex:1 1 180px; min-width:120px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+ .claim-bar { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-top:1px solid #ebeef5; border-bottom:1px solid #ebeef5; margin-bottom:10px; }
+ .claim-bar > div { min-width:0; }
+ .claim-bar span,.claim-bar small { margin-left:12px; color:#606266; }
+ .claim-bar small { color:#909399; }
+ code { color:#303133; word-break:break-all; white-space:pre-wrap; }
+ .pending-key { display:flex; align-items:center; gap:10px; padding:10px 12px; margin:10px 0; border:1px solid #d9ecff; background:#ecf5ff; border-radius:6px; }
+ .pending-key code { flex:1 1 220px; min-width:0; }
+ .record-filters { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:12px 0; }
+ .pagination { justify-content:flex-end; margin-top:12px; }
+ @media(max-width:768px) {
+   .page-heading { flex-direction:column; gap:10px; }
+   .heading-actions { width:100%; }
+   .heading-actions .el-button { flex:1 1 auto; }
+   .toolbar .el-select { max-width:100%; }
+   .claim-bar { align-items:flex-start; gap:8px; }
+   .claim-bar small { display:block; margin:5px 0; }
+   .pending-key { align-items:flex-start; flex-wrap:wrap; }
+   .pending-key code { flex-basis:100%; }
+   .pending-key .el-button { flex:1 1 auto; }
+   .project-description { flex-basis:100%; }
+ }
 </style>

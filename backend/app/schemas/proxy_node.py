@@ -117,6 +117,7 @@ class ProxyNodeResponse(BaseModel):
     last_test_result: Optional[str] = None
     last_test_latency: Optional[int] = None
     remark: Optional[str] = None
+    created_by: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     device_id: Optional[int] = None

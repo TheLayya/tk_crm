@@ -81,4 +81,7 @@ Thumbs.db
 
 backend/.venv312/
 backend/data/
+docker-local/
+desktop/**/bin/
+desktop/**/obj/
 frontend/dist/

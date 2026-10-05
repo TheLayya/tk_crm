@@ -24,7 +24,7 @@
     </el-card>
 
     <el-card class="table-card" shadow="never">
-      <el-table ref="tableRef" v-loading="loading" :data="items" row-key="id" stripe @expand-change="handleExpand" @selection-change="selected = $event">
+      <el-table class="email-table" ref="tableRef" v-loading="loading" :data="items" row-key="id" stripe @expand-change="handleExpand" @selection-change="selected = $event">
         <el-table-column type="selection" width="40" />
         <el-table-column type="expand" width="42">
           <template #default="{ row }">
@@ -267,14 +267,17 @@ onMounted(async () => { platforms.value = await getEmailPlatforms(); await load(
 .filters .el-input { width:340px; } .filters .el-select { width:140px; }
 .count { color:#409eff; font-weight:700; }
 .email-name { font-weight:600; font-size:12px; }
-.email-expanded { padding:12px 22px 16px 52px; background:#f8fafc; }
-.detail-grid { display:grid; grid-template-columns:repeat(3, minmax(180px, 1fr)); gap:8px 26px; padding-bottom:12px; border-bottom:1px solid #ebeef5; }
+.email-table { container-type:inline-size; }
+.email-expanded { width:100cqw; box-sizing:border-box; position:sticky; left:0; padding:12px 22px 16px 52px; background:#f8fafc; overflow-wrap:anywhere; }
+.detail-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap:8px 26px; padding-bottom:12px; border-bottom:1px solid #ebeef5; }
+.detail-grid > span { min-width:0; }
 .detail-grid b { display:inline-block; width:72px; color:#909399; font-weight:400; }
 .relation-heading { display:flex; align-items:center; gap:10px; padding:12px 0 8px; color:#606266; }
 .relation-heading span { color:#909399; font-size:12px; } .relation-heading .el-button { margin-left:auto; }
 .relation-list { display:flex; flex-direction:column; gap:6px; }
-.relation-item { display:flex; align-items:center; gap:10px; min-height:28px; padding:5px 8px; background:#fff; border:1px solid #ebeef5; border-radius:5px; }
-.relation-main { min-width:250px; font-weight:500; } .relation-time { color:#909399; font-size:12px; }
+.relation-item { display:flex; align-items:center; flex-wrap:wrap; gap:10px; min-height:28px; padding:5px 8px; background:#fff; border:1px solid #ebeef5; border-radius:5px; }
+.relation-item > * { min-width:0; max-width:100%; }
+.relation-main { flex:1 1 250px; font-weight:500; } .relation-time { color:#909399; font-size:12px; }
 .remark { margin-top:10px; color:#909399; font-size:12px; }
 .pager { display:flex; justify-content:flex-end; align-items:center; gap:20px; padding-top:14px; color:#909399; font-size:13px; }
 .import-tip { margin-top:10px; line-height:1.6; } .import-result { margin-top:10px; color:#606266; }

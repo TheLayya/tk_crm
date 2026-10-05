@@ -6,6 +6,7 @@
   ],
   "start": [["docker", "compose", "up", "-d", "--build"]],
   "health_url": "http://127.0.0.1:8000/health",
+  "frontend_health_url": "http://127.0.0.1:80/",
   "health_timeout": 180,
   "command_timeout": 1800
 }

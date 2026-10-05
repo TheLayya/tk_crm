@@ -50,8 +50,10 @@ def relation_overview(db, kind, resource_id, user):
                 raise HTTPException(404, "终端不存在")
         except DeviceServiceError as error:
             raise HTTPException(error.status_code, error.detail)
-    if kind == "node" and not user.is_super_admin and get_user_data_scope(db, user) != "all":
-        if not any(account.node_id == resource_id for account in accounts):
+    if kind == "node" and not user.is_super_admin:
+        scope = get_user_data_scope(db, user)
+        allowed = get_dept_member_usernames(db, user) if scope == "dept" else [user.username]
+        if scope != "all" and resource.created_by not in allowed and not any(account.node_id == resource_id for account in accounts):
             raise HTTPException(403, "无权查看节点关联")
     if kind == "account":
         accounts = [by_id[resource_id]]

@@ -223,5 +223,5 @@ export function getNodeUri(id) {
 }
 
 export function updateNodeRelation(id, data) {
-  return request({ url: `/proxy-nodes/${id}/relation`, method: 'put', data })
+  return request({ url: `/proxy-nodes/${id}/relation`, method: 'put', data, ignoredErrorStatuses: [403] })
 }

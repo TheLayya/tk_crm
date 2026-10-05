@@ -1,5 +1,6 @@
 import json
 import tarfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,110 @@ def test_update_agent_records_install_history(tmp_path):
     assert history[0]["version"] == "1.2.3"
     assert history[0]["changes"] == ["fixed"]
     assert history[0]["installed_at"]
+
+
+def test_update_agent_persists_state_across_restart(tmp_path, monkeypatch):
+    lifecycle = lambda phase, root: None
+    manifest = {"version": "1.2.3", "date": "2026-10-02", "changes": []}
+    monkeypatch.setattr("tools.update_agent.apply_release", lambda *args: None)
+    first = Agent(tmp_path, "x" * 32, lifecycle)
+    assert first.start(manifest)
+    first.lock.acquire()
+    first.lock.release()
+    assert first.snapshot()["status"] == "completed"
+
+    restored = Agent(tmp_path, "x" * 32, lifecycle)
+    assert restored.snapshot()["status"] == "completed"
+    assert restored.snapshot()["latest_version"] == "1.2.3"
+
+
+@pytest.mark.parametrize("update_fails", [False, True])
+def test_update_agent_completion_callback_runs_after_success(tmp_path, monkeypatch, update_fails):
+    completed = []
+    finished = threading.Event()
+
+    def apply(*_):
+        if update_fails:
+            raise RuntimeError("migration failed")
+
+    def on_completed():
+        restored = Agent(tmp_path, "x" * 32, None)
+        assert restored.snapshot()["status"] == "completed"
+        assert not agent.lock.locked()
+        completed.append(True)
+        finished.set()
+
+    monkeypatch.setattr("tools.update_agent.apply_release", apply)
+    agent = Agent(
+        tmp_path,
+        "x" * 32,
+        lambda phase, root: None,
+        on_completed=on_completed,
+    )
+    assert agent.start({"version": "1.2.3", "changes": []})
+    agent.lock.acquire()
+    agent.lock.release()
+    if update_fails:
+        assert agent.snapshot()["status"] == "failed"
+        assert completed == []
+    else:
+        assert finished.wait(2)
+        assert completed == [True]
+
+
+def test_update_agent_marks_interrupted_update_failed(tmp_path):
+    agent = Agent(tmp_path, "x" * 32, None)
+    agent._set_state(status="running", latest_version="1.2.3")
+    restarted = Agent(tmp_path, "x" * 32, None)
+    assert restarted.snapshot()["status"] == "failed"
+    assert restarted.snapshot()["latest_version"] == "1.2.3"
+
+
+@pytest.mark.parametrize("frontend_status", [200, 503])
+def test_service_lifecycle_requires_frontend_health(tmp_path, monkeypatch, frontend_status):
+    from tools.updater import ServiceLifecycle
+
+    responses = {
+        "http://backend/health": (200, {"status": "ok"}),
+        "http://frontend/": (frontend_status, None),
+    }
+    checked = []
+
+    class Response:
+        def __init__(self, status, payload):
+            self.status, self.payload = status, payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self, _):
+            return json.dumps(self.payload).encode()
+
+    def open_url(request, timeout=3):
+        checked.append(request)
+        return Response(*responses[request])
+
+    times = iter([0, 0, 2])
+    monkeypatch.setattr("tools.updater.urlopen", open_url)
+    monkeypatch.setattr("tools.updater.time.monotonic", lambda: next(times))
+    monkeypatch.setattr("tools.updater.time.sleep", lambda _: None)
+    lifecycle = ServiceLifecycle({
+        "stop": [["stop"]],
+        "migrate": [["migrate"]],
+        "start": [["start"]],
+        "health_url": "http://backend/health",
+        "frontend_health_url": "http://frontend/",
+        "health_timeout": 1,
+    })
+    if frontend_status == 200:
+        lifecycle("health", tmp_path)
+    else:
+        with pytest.raises(RuntimeError, match="health check"):
+            lifecycle("health", tmp_path)
+    assert checked == ["http://backend/health", "http://frontend/"]
 
 
 def test_safe_extract_rejects_path_traversal(tmp_path):

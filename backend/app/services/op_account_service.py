@@ -594,7 +594,12 @@ def import_gmail_text(db: Session, content: str, actor=None) -> OpImportResult:
     return OpImportResult(total=len(rows), success=success, duplicates=duplicates, failed=failed, rows=rows)
 
 
-def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
+def import_from_csv(
+    db: Session,
+    csv_content: str,
+    actor: Optional[str] = None,
+    force_actor: bool = False,
+) -> OpImportResult:
     reader = csv.DictReader(io.StringIO(csv_content))
     rows = []
     total = success = duplicates = failed = 0
@@ -644,7 +649,7 @@ def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
                 tags=row.get("tags") or None,
                 remark=row.get("remark") or None,
                 status=row.get("status") or "正常",
-                registrant=row.get("registrant") or None,
+                registrant=actor if force_actor else (row.get("registrant") or actor),
                 operator=row.get("operator") or None,
                 purchase_channel=row.get("purchase_channel") or None,
                 purchase_price=row.get("purchase_price") or None,
@@ -657,7 +662,7 @@ def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
                 tiktok_phone_live=_parse_import_bool(row.get("tiktok_phone_live")),
                 tiktok_partner_live=_parse_import_bool(row.get("tiktok_partner_live")),
             )
-            acc = create_op_account(db, create_data)
+            acc = create_op_account(db, create_data, actor=actor)
             rows.append({**row, "_result": "success", "_id": acc.id})
             success += 1
         except Exception as e:
@@ -668,7 +673,12 @@ def import_from_csv(db: Session, csv_content: str) -> OpImportResult:
     return OpImportResult(total=total, success=success, duplicates=duplicates, failed=failed, rows=rows)
 
 
-def import_from_excel(db: Session, file_content: bytes) -> OpImportResult:
+def import_from_excel(
+    db: Session,
+    file_content: bytes,
+    actor: Optional[str] = None,
+    force_actor: bool = False,
+) -> OpImportResult:
     """Import the same columns produced by export_op_accounts from an Excel file."""
     try:
         import openpyxl
@@ -694,7 +704,12 @@ def import_from_excel(db: Session, file_content: bytes) -> OpImportResult:
     for values in rows[1:]:
         writer.writerow({header: (values[index] if index < len(values) and values[index] is not None else "")
                          for index, header in enumerate(headers)})
-    return import_from_csv(db, csv_content=csv_buffer.getvalue())
+    return import_from_csv(
+        db,
+        csv_content=csv_buffer.getvalue(),
+        actor=actor,
+        force_actor=force_actor,
+    )
 
 
 # ---------------------------------------------------------------------------

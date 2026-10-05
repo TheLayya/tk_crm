@@ -179,12 +179,22 @@ async def import_from_csv(
     filename = (file.filename or "").lower()
     try:
         if filename.endswith(".xlsx"):
-            result = op_account_service.import_from_excel(db, file_content=raw)
+            result = op_account_service.import_from_excel(
+                db,
+                file_content=raw,
+                actor=current_user.username,
+                force_actor=not current_user.is_super_admin,
+            )
         elif filename.endswith(".txt"):
             result = op_account_service.import_gmail_text(db, raw.decode("utf-8-sig"), actor=current_user.username)
         elif filename.endswith(".csv"):
             content = raw.decode("utf-8-sig", errors="replace")
-            result = op_account_service.import_from_csv(db, csv_content=content)
+            result = op_account_service.import_from_csv(
+                db,
+                csv_content=content,
+                actor=current_user.username,
+                force_actor=not current_user.is_super_admin,
+            )
         else:
             raise HTTPException(status_code=422, detail="仅支持 CSV、XLSX 或 Gmail 冒号分隔 TXT 文件")
     except HTTPException:

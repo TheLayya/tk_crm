@@ -12,6 +12,35 @@
   --ios-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
 }
 
+html,
+body,
+#app {
+  min-width: 0;
+}
+
+body {
+  margin: 0;
+}
+
+.layout-container,
+.layout-container > .el-container,
+.main-content,
+.main-content > div {
+  min-width: 0;
+}
+
+.main-content {
+  min-height: 0;
+  box-sizing: border-box;
+  overflow-x: auto;
+}
+
+@media (min-width: 769px) and (max-width: 1180px) {
+  .main-content {
+    padding: 16px;
+  }
+}
+
 /* ===== 移动端主内容区偏移（为固定顶部栏和底部 Tab Bar 留空间）===== */
 @media (max-width: 768px) {
   .main-content {
@@ -33,6 +62,28 @@
   .el-table__body-wrapper {
     overflow-x: auto !important;
   }
+}
+
+.el-dialog {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 48px);
+  margin-top: min(var(--el-dialog-margin-top, 15vh), 24px);
+  display: flex;
+  flex-direction: column;
+}
+
+.el-dialog__header,
+.el-dialog__footer {
+  flex-shrink: 0;
+}
+
+.el-dialog__body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.el-drawer {
+  max-width: 100vw;
 }
 
 /* ===== 移动端对话框全屏覆盖 ===== */

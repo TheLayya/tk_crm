@@ -272,20 +272,39 @@ class ServiceLifecycle:
                 for command in commands
             ):
                 raise ValueError("Lifecycle requires fixed argument arrays for " + phase)
-        if not config.get("health_url"):
-            raise ValueError("Lifecycle health URL is required")
+        health_urls = config.get("health_urls")
+        if health_urls is None:
+            health_urls = []
+            if config.get("health_url"):
+                health_urls.append(config["health_url"])
+            if config.get("frontend_health_url"):
+                health_urls.append(config["frontend_health_url"])
+        if not isinstance(health_urls, list) or not health_urls or not all(
+            isinstance(url, str) and url for url in health_urls
+        ):
+            raise ValueError("Lifecycle requires at least one health URL")
+        self.health_urls = health_urls
+
+    def _health_ok(self, url):
+        try:
+            with urlopen(url, timeout=3) as response:
+                if response.status != 200:
+                    return False
+                # The backend health endpoint is JSON; a frontend endpoint only
+                # needs a successful HTTP response.
+                if url == self.config.get("health_url"):
+                    payload = json.loads(response.read(4096))
+                    return isinstance(payload, dict) and payload.get("status") == "ok"
+                return True
+        except (OSError, ValueError):
+            return False
 
     def __call__(self, phase, root):
         if phase == "health":
             deadline = time.monotonic() + self.config.get("health_timeout", 120)
             while time.monotonic() < deadline:
-                try:
-                    with urlopen(self.config["health_url"], timeout=3) as response:
-                        payload = json.loads(response.read(4096))
-                        if response.status == 200 and payload.get("status") == "ok":
-                            return
-                except (OSError, ValueError):
-                    pass
+                if all(self._health_ok(url) for url in self.health_urls):
+                    return
                 time.sleep(2)
             raise RuntimeError("Service failed health check")
         cwds = self.config.get(f"{phase}_cwds", [])

@@ -114,6 +114,7 @@ npm run dev -- --host 127.0.0.1 --port 5174
 | 第 8 轮 | 2026-08-22 | 2 [P1] + 3 [P2]（基线目录未创建、GATE 一致性无核对、requirements-dev 路径、worktree 能力未检测） | 全部修复（`mkdir -p .orchestration/<轮次>`、GATE 一致性核对按 FAIL 处理、`../requirements-dev.txt` 路径、`git worktree list` 检测） | 同上 |
 | 第 9 轮 | 2026-08-22 | 1 [P1] + 3 [P2]（worktree 检测不足、mkdir 为 Git Bash 语法、`<轮次>` 占位符、CODEX SAYS 与格式校验不一致） | 全部修复（运行时强制回退基线、命令注明 Git Bash、占位符替换说明、完整性检查补 CODEX SAYS 块） | 同上 |
 | 第 10 轮 | 2026-08-22 | **0 [P1] + 0 [P2]，APPROVE**（收敛确认：worktree 回退、Git Bash 范围、占位符处理、CODEX SAYS/GATE 校验均已明确一致） | 无需处置 | 同上 |
+| Windows 续接轮 | 2026-10-05 | 邮箱空白原因和旧请求覆盖新领取已修复，复审 GATE PASS；更新并发 P2 已登记；全量验证门禁 FAIL（325 passed、覆盖率 66.20% < 80%） | 本地包重建、发布审计及独立安装冒烟通过；未发布部署，不宣称全量验证通过 | [docs/handover/2026-10-05-windows-packaging-handoff.md](docs/handover/2026-10-05-windows-packaging-handoff.md) |
 
 ---
 

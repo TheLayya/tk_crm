@@ -26,6 +26,7 @@ from app.middleware.operation_log import OperationLogMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 import logging
+from app.desktop_static import mount_frontend
 
 logging.basicConfig(level=logging.INFO)
 
@@ -112,4 +113,8 @@ app.include_router(updates.router, prefix="/api")
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": APP_VERSION}
+
+
+if settings.STATIC_DIR:
+    mount_frontend(app, settings.STATIC_DIR)

@@ -4,7 +4,7 @@
 
 TikTok 账号监控、终端资产与团队运营管理系统。当前版本覆盖账号采集、设备/节点关联、邮箱与卡密资产、数据总览及可配置登录场景。
 
-> 文档更新日期：2026-10-04
+> 文档更新日期：2026-10-05
 
 ## 技术栈
 
@@ -51,6 +51,18 @@ npm run dev -- --host 0.0.0.0 --port 5174
 
 前端：<http://localhost:5174/>  
 后端文档端口以 `backend/.env` 的 `PORT` 为准，未配置时为 `8000`；本机若配置 `PORT=8801`，则访问 `http://localhost:8801/docs`。
+
+## Windows 桌面版
+
+Windows 用户无需安装 Python、Node.js 或 Docker，使用 desktop/build/installer/TkCRM-1.1.10-win-x64-setup.exe 安装即可。安装器会检测并引导安装 Microsoft Edge WebView2 Runtime；用户数据保存在本地应用数据目录，不随卸载删除。
+
+发布前在项目根目录执行以下单入口审计命令：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File desktop/tests/release-audit.ps1
+```
+
+阶段性本地打包按 [Windows 本地打包指引](docs/WINDOWS-LOCAL-PACKAGING.md) 执行；实际推进、测试证据及未验证边界见 [Windows 打包记录](docs/WINDOWS-PACKAGING.md)。
 
 ## 登录账号与初始密码
 
@@ -99,25 +111,39 @@ DATABASE_URL=sqlite:///./data/monitor.db
 
 首次部署前配置 JWT 密钥和字段加密密钥，然后执行 `alembic upgrade head`。已有数据升级时必须保留原字段加密密钥，否则历史密码、2FA、备忘和卡密将无法解密；不要直接更换密钥。
 
-当前数据库迁移版本为 `20261001_0016`。升级已有数据时只执行迁移，不删除 `backend/data/`。
+当前数据库迁移版本包含 `20261005_0020`。升级已有数据时只执行迁移，不删除 `backend/data/`。
 
 ## Docker 部署
 
-首次部署同样需要先准备 `backend/.env` 并替换占位值，再启动容器；已有服务器升级时保留原配置。
+团队服务器和演示服务器建议在 Ubuntu 上使用仓库内的 `deploy.sh` 完成首次部署。脚本会安装或检查 Docker，生成 `backend/.env`，为本机更新代理生成随机令牌，并注册 `tiktok-monitor-updater.service` 作为开机服务：
 
 ```bash
-docker compose up -d --build
+git clone https://github.com/TheLayya/tk_crm.git ~/tk-crm-deploy
+cd ~/tk-crm-deploy
+bash deploy.sh
 ```
 
-升级已有服务器时，保留服务器上的 `backend/.env` 和 `backend/data/` 目录，不要用本地空配置覆盖；Compose 会加载 `backend/.env`，后端容器启动时自动执行 `alembic upgrade head`，随后启动 API。升级建议：
+按提示填写 GitHub 仓库地址、访问令牌、安装目录和域名，安装目录可使用默认的 `/opt/tiktok-monitor`。部署后核对容器与更新代理：
 
 ```bash
+cd /opt/tiktok-monitor
+docker compose ps
+sudo systemctl status tiktok-monitor-updater --no-pager
+```
+
+后续发布新 GitHub Release 并更新根目录 `version.json` 后，管理员直接在网页侧边栏点击版本号 → “检查更新” → “立即更新”。无需逐版本 SSH 执行 `git pull`；更新代理会备份 SQLite、保留 `backend/.env`、`backend/data/` 和管理员密码，迁移或健康检查失败时自动回滚。更新期间服务会短暂重启。
+
+已有服务器升级或不使用网页更新时，可手动执行：
+
+```bash
+cd /opt/tiktok-monitor
+git pull
 docker compose up -d --build
 curl http://127.0.0.1:8000/health
 docker compose ps
 ```
 
-也可以使用仓库内脚本：`bash deploy.sh --update`。脚本会拉取 `main`、重建镜像、启动容器并等待健康检查；生产服务器上的 `backend/.env` 和 `backend/data/` 会被保留。
+手动升级必须保留服务器上的 `backend/.env` 和 `backend/data/`，不要用本地空配置覆盖。没有 Git 工作树的发布归档安装、更新代理 systemd 配置及故障排查见 [一键更新说明](docs/ONE_CLICK_UPDATES.md)。
 
 SQLite 数据库位于 `backend/data/` 持久化目录，代码更新不会删除该目录。
 

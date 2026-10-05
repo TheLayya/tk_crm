@@ -225,8 +225,8 @@
       <el-alert title="一个手机终端可绑定多个运营账号和多个代理节点，清空后保存即可解除。" type="info" :closable="false" style="margin-bottom:16px" />
       <el-form label-width="90px">
         <el-form-item label="终端"><strong>{{ relationRow?.name }}</strong></el-form-item>
-        <el-form-item label="运营账号"><el-select v-model="relationForm.account_ids" multiple collapse-tags collapse-tags-tooltip clearable filterable style="width:100%"><el-option v-for="a in relationAccounts" :key="a.id" :label="`${a.platform} / ${a.account}`" :value="a.id" /></el-select></el-form-item>
-        <el-form-item label="代理节点"><el-select v-model="relationForm.node_ids" multiple clearable filterable collapse-tags style="width:100%"><el-option v-for="n in relationNodes" :key="n.id" :label="`${n.ip}:${n.port}`" :value="n.id" /></el-select></el-form-item>
+        <el-form-item label="运营账号"><el-select v-model="relationForm.account_ids" multiple collapse-tags collapse-tags-tooltip clearable filterable :disabled="!canViewRelationAccounts" :placeholder="canViewRelationAccounts ? '请选择运营账号' : '缺少运营账号查看权限'" style="width:100%"><el-option v-for="a in relationAccounts" :key="a.id" :label="`${a.platform} / ${a.account}`" :value="a.id" /></el-select></el-form-item>
+        <el-form-item label="代理节点"><el-select v-model="relationForm.node_ids" multiple clearable filterable collapse-tags :disabled="!canViewRelationNodes" :placeholder="canViewRelationNodes ? '请选择代理节点' : '缺少代理节点查看权限'" style="width:100%"><el-option v-for="n in relationNodes" :key="n.id" :label="`${n.ip}:${n.port}`" :value="n.id" /></el-select></el-form-item>
       </el-form>
       <template #footer><el-button @click="relationVisible=false">取消</el-button><el-button type="primary" :loading="relationSaving" @click="saveRelations">保存关联</el-button></template>
     </el-dialog>
@@ -309,6 +309,8 @@ const relationRow = ref(null)
 const relationAccounts = ref([])
 const relationNodes = ref([])
 const relationForm = reactive({ account_ids: [], node_ids: [] })
+const canViewRelationAccounts = computed(() => authStore.hasPermission('op_account:view'))
+const canViewRelationNodes = computed(() => authStore.hasPermission('proxy_node:view'))
 
 async function openRelations(row) {
   relationRow.value = row
@@ -316,8 +318,8 @@ async function openRelations(row) {
   relationForm.node_ids = row.node_ids || (row.node_id ? [row.node_id] : [])
   relationVisible.value = true
   const [accountsRes, nodesRes] = await Promise.all([
-    listOpAccounts({ skip: 0, limit: 200 }),
-    getProxyNodes({ skip: 0, limit: 500 })
+    canViewRelationAccounts.value ? listOpAccounts({ skip: 0, limit: 200 }) : Promise.resolve({ items: [] }),
+    canViewRelationNodes.value ? getProxyNodes({ skip: 0, limit: 500 }) : Promise.resolve({ items: [] })
   ])
   relationAccounts.value = accountsRes.items || []
   relationNodes.value = nodesRes.items || []

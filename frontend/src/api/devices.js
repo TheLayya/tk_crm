@@ -52,7 +52,7 @@ export function updateDevice(id, data) {
 }
 
 export function updateDeviceRelations(id, data) {
-  return request({ url: `/devices/${id}/relations`, method: 'put', data })
+  return request({ url: `/devices/${id}/relations`, method: 'put', data, ignoredErrorStatuses: [403] })
 }
 
 /**

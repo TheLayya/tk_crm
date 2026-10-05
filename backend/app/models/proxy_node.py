@@ -63,6 +63,7 @@ class ProxyNode(Base):
     remark = Column(Text, nullable=True)
 
     # 系统字段
+    created_by = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

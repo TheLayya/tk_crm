@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import quote
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models.proxy_node import ProxyNode
 from app.services.sale_validation_service import validate_sale_information
@@ -43,7 +44,7 @@ def _deserialize_sellers(value: Optional[str]) -> List[str]:
 def _deserialize_node(node: ProxyNode) -> ProxyNode:
     """反序列化节点的 JSON 字段。"""
     if node:
-        node.sellers = _deserialize_sellers(node.sellers)
+        set_committed_value(node, "sellers", _deserialize_sellers(node.sellers))
     return node
 
 
@@ -93,9 +94,10 @@ def get_node(db: Session, node_id: int) -> Optional[ProxyNode]:
     return _deserialize_node(node) if node else None
 
 
-def create_node(db: Session, data: ProxyNodeCreate) -> ProxyNode:
+def create_node(db: Session, data: ProxyNodeCreate, actor: Optional[str] = None) -> ProxyNode:
     """创建节点，默认值已在 Schema 中定义。"""
     data_dict = data.model_dump()
+    data_dict["created_by"] = actor
     validate_sale_information(data_dict, "sold")
     data_dict['sellers'] = _serialize_sellers(data_dict.get('sellers'))
     node = ProxyNode(**data_dict)

@@ -44,7 +44,7 @@ def _node_to_row(node: ProxyNode) -> dict:
         "sale_customer": node.sale_customer or "",
         "sale_price": str(node.sale_price) if node.sale_price is not None else "",
         "status": node.status or "",
-        "usage": node.usage or "",
+        "usage": getattr(node, "usage", "") or "",
         "remark": node.remark or "",
     }
 

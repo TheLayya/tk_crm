@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     UPDATE_AGENT_URL: str = ""
     UPDATE_AGENT_TOKEN: str = ""
     UPDATE_AGENT_PORT: int = 8765
+    UPDATE_CLIENT_TYPE: str = "server"
+    STATIC_DIR: str = ""
+    UPDATE_HISTORY_PATH: str = ""
 
     class Config:
         env_file = ".env"

@@ -70,7 +70,7 @@ def get_overview(
         visible_node_ids = {a.node_id for a in accounts if a.node_id}
         visible_node_ids.update(e.node_id for e in emails if e.node_id)
         visible_node_ids.update(nid for d in devices for nid in (d.node_ids or ([d.node_id] if d.node_id else [])))
-        nodes = [n for n in nodes if n.id in visible_node_ids]
+        nodes = [n for n in nodes if n.created_by in usernames or n.id in visible_node_ids]
 
     node_map = {n.id: n for n in nodes}
     accounts_by_device = defaultdict(list)

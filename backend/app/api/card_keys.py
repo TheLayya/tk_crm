@@ -565,13 +565,24 @@ def fail_email(project_id: int, body: EmailFailureBody, db: Session = Depends(ge
     if not email:
         raise HTTPException(404, "没有找到你领取的邮箱")
     remark = body.remark.strip()
-    email.management_status = "废弃"
-    email.remark = remark
-    email.claimed_by = None
-    email.claimed_at = None
-    email.claimed_platform = None
-    email.operator = user.username
+    if not remark:
+        raise HTTPException(422, "请填写失败原因")
+    changed = db.execute(update(EmailAccount).where(
+        EmailAccount.id == email.id,
+        EmailAccount.management_status == email.management_status,
+        EmailAccount.claimed_by == user.username,
+        EmailAccount.claimed_platform == platform,
+        EmailAccount.claimed_at == email.claimed_at,
+        EmailAccount.platform_tags == email.platform_tags,
+    ).values(
+        management_status="废弃", remark=remark, claimed_by=None, claimed_at=None,
+        claimed_platform=None, operator=user.username,
+    )).rowcount
+    if changed != 1:
+        db.rollback()
+        raise HTTPException(409, "邮箱领取状态已变化，请刷新后重试")
     db.commit()
+    db.refresh(email)
     return {"failed": True, "email_id": email.id, "management_status": email.management_status, "remark": email.remark}
 
 

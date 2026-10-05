@@ -52,16 +52,21 @@ configure_update_agent() {
   local token
   if [ -f "$env_file" ] && grep -q '^UPDATE_AGENT_TOKEN=' "$env_file"; then
     token=$(sed -n 's/^UPDATE_AGENT_TOKEN=//p' "$env_file" | head -1)
-  else
+  fi
+  if [ -z "$token" ] || [ "${#token}" -lt 32 ]; then
     token=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
-    printf '\nUPDATE_AGENT_TOKEN=%s\n' "$token" >> "$env_file"
+    if grep -q '^UPDATE_AGENT_TOKEN=' "$env_file"; then
+      sed -i "s#^UPDATE_AGENT_TOKEN=.*#UPDATE_AGENT_TOKEN=$token#" "$env_file"
+    else
+      printf '\nUPDATE_AGENT_TOKEN=%s\n' "$token" >> "$env_file"
+    fi
   fi
   if grep -q '^UPDATE_AGENT_URL=' "$env_file"; then
     sed -i 's#^UPDATE_AGENT_URL=.*#UPDATE_AGENT_URL=http://host.docker.internal:8765#' "$env_file"
   else
     printf 'UPDATE_AGENT_URL=http://host.docker.internal:8765\n' >> "$env_file"
   fi
-  cat > /etc/systemd/system/tiktok-monitor-updater.service << EOF
+  sudo tee /etc/systemd/system/tiktok-monitor-updater.service > /dev/null << EOF
 [Unit]
 Description=TikTok Monitor Update Agent
 Requires=docker.service
@@ -71,15 +76,17 @@ After=docker.service network-online.target
 Type=simple
 WorkingDirectory=${install_dir}
 EnvironmentFile=${env_file}
-ExecStart=/usr/bin/python3 ${install_dir}/tools/update_agent.py --root ${install_dir} --lifecycle ${install_dir}/tools/lifecycle.docker.json --token \$UPDATE_AGENT_TOKEN --host 0.0.0.0 --port 8765
+ExecStart=/usr/bin/python3 ${install_dir}/tools/update_agent.py --root ${install_dir} --lifecycle ${install_dir}/tools/lifecycle.docker.json --token \${UPDATE_AGENT_TOKEN} --host 0.0.0.0 --port 8765 --restart-after-update
 Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
-  systemctl daemon-reload
-  systemctl enable --now tiktok-monitor-updater.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable tiktok-monitor-updater.service
+  sudo systemctl restart tiktok-monitor-updater.service
+  sudo systemctl is-active --quiet tiktok-monitor-updater.service || error "更新代理未正常启动"
   log "更新代理已配置并启动"
 }
 
@@ -119,6 +126,14 @@ prepare_git_auth() {
   cat > "$GITHUB_ASKPASS" <<'EOF'
 #!/bin/sh
 case "$1" in
+  --configure-updater)
+    [ -f backend/.env ] || error "请先配置 backend/.env"
+    configure_update_agent "$PWD"
+    docker compose up -d
+    wait_for_services
+    log "更新入口已初始化，后续从网页检查并更新即可"
+    exit 0
+    ;;
   *Username*) printf '%s\n' 'x-access-token' ;;
   *) printf '%s\n' "$GITHUB_TOKEN" ;;
 esac
