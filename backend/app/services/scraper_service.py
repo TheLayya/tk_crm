@@ -8,6 +8,7 @@ import time
 import random
 from datetime import datetime
 from typing import Optional, Dict, Any
+from app.models.monitor import MonitorProxy
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 ACCOUNT_NOT_FOUND = "ACCOUNT_NOT_FOUND: TikTok 明确提示找不到此账号（可能已改名、删除或不可用）"
 
 
-def is_account_not_found_message(message) -> bool:
+def is_account_not_found_message(message: object) -> bool:
     text = str(message or "").strip().lower()
     return text in ("user not found", "user doesn't exist", "user does not exist") or any(phrase in text for phrase in (
         "couldn't find this account", "couldn’t find this account", "could not find this account",
@@ -23,13 +24,13 @@ def is_account_not_found_message(message) -> bool:
     ))
 
 
-def is_verification_page(response) -> bool:
+def is_verification_page(response: httpx.Response) -> bool:
     text = response.text.lower()
     return any(marker in text for marker in ("slardarwaf", "_wafchallengeid", "waf-aiso/", "verify you are human"))
 
 
 class ScraperService:
-    def __init__(self):
+    def __init__(self) -> None:
         self.timeout = 30
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -38,20 +39,20 @@ class ScraperService:
             'Referer': 'https://www.tiktok.com/',
         }
 
-    def _build_proxy_url(self, proxy) -> Optional[str]:
+    def _build_proxy_url(self, proxy: MonitorProxy | None) -> Optional[str]:
         """构建代理URL字符串"""
         if not proxy:
             return None
         auth = f"{proxy.username}:{proxy.password}@" if proxy.username else ""
         return f"{proxy.proxy_type}://{auth}{proxy.host}:{proxy.port}"
 
-    async def fetch_user_info(self, username: str, proxy=None) -> Dict[str, Any]:
+    async def fetch_user_info(self, username: str, proxy: MonitorProxy | None = None) -> Dict[str, Any]:
         """
         抓取TikTok用户信息。
         返回格式: {success: bool, data: dict | None, error: str | None}
         """
         proxy_url = self._build_proxy_url(proxy)
-        proxies = {"all://": proxy_url} if proxy_url else None
+        proxies: dict[str | httpx.URL, str | httpx.URL | httpx.Proxy | None] | None = {"all://": proxy_url} if proxy_url else None
 
         try:
             async with httpx.AsyncClient(
@@ -214,14 +215,14 @@ class ScraperService:
             logger.debug(f"oEmbed API failed for {username}: {e}")
             return {'success': False, 'data': None, 'error': str(e)[:200]}
 
-    async def fetch_user_videos(self, sec_uid: str, proxy=None, max_count: int = 20) -> Dict[str, Any]:
+    async def fetch_user_videos(self, sec_uid: str, proxy: MonitorProxy | None = None, max_count: int = 20) -> Dict[str, Any]:
         """
         抓取用户视频列表（yt-dlp 同款 Web API 方案，支持翻页）
         流程：先访问用户详情接口获取 msToken cookie，再分页请求 item_list
         返回格式: {success: bool, data: list | None, error: str | None}
         """
         proxy_url = self._build_proxy_url(proxy)
-        proxies = {"all://": proxy_url} if proxy_url else None
+        proxies: dict[str | httpx.URL, str | httpx.URL | httpx.Proxy | None] | None = {"all://": proxy_url} if proxy_url else None
 
         device_id = str(random.randint(7250000000000000000, 7325099899999994577))
         verify_fp = 'verify_' + ''.join(random.choices(string.hexdigits.lower(), k=7))
@@ -248,7 +249,7 @@ class ScraperService:
                 ms_token = cookies.get('msToken', '')
 
                 # Step 2: 分页拉取，cursor 从当前时间戳开始（newest-to-oldest）
-                all_videos = []
+                all_videos: list[dict[str, Any]] = []
                 seen_ids = set()
                 empty_result = False
                 cursor = int(time.time() * 1000)
@@ -349,7 +350,7 @@ class ScraperService:
             logger.error(f"fetch_user_videos error for sec_uid={sec_uid}: {e}")
             return {'success': False, 'data': None, 'error': str(e)[:200]}
 
-    def _parse_item_list(self, item_list: list) -> list:
+    def _parse_item_list(self, item_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """解析 Web API 返回的 itemList（字段名为驼峰式）"""
         videos = []
         for item in item_list:
@@ -375,10 +376,10 @@ class ScraperService:
             })
         return videos
 
-    async def test_proxy(self, proxy) -> Dict[str, Any]:
+    async def test_proxy(self, proxy: MonitorProxy | None) -> Dict[str, Any]:
         """测试代理连通性，访问 TikTok 主站"""
         proxy_url = self._build_proxy_url(proxy)
-        proxies = {"all://": proxy_url} if proxy_url else None
+        proxies: dict[str | httpx.URL, str | httpx.URL | httpx.Proxy | None] | None = {"all://": proxy_url} if proxy_url else None
         start = time.time()
         try:
             async with httpx.AsyncClient(

@@ -10,7 +10,7 @@ from app.schemas.project import ProjectCreate, ProjectUpdate
 logger = logging.getLogger(__name__)
 
 
-def get_visible_project_ids(db: Session, username: str, data_scope: str, dept_usernames: List[str] = None) -> Optional[List[int]]:
+def get_visible_project_ids(db: Session, username: str, data_scope: str, dept_usernames: Optional[List[str]] = None) -> Optional[List[int]]:
     """
     返回该用户可见的项目 ID 列表。
     - all: 返回 None（不过滤，全部可见）
@@ -44,7 +44,7 @@ def get_projects(db: Session, scope_username: Optional[str] = None, allowed_ids:
     )
     count_map = {row.project_id: row.cnt for row in counts}
     for project in projects:
-        project.account_count = count_map.get(project.id, 0)
+        setattr(project, "account_count", count_map.get(project.id, 0))
     return projects
 
 
@@ -52,11 +52,11 @@ def get_project(db: Session, project_id: int) -> Optional[Project]:
     """获取单个项目（附带 account_count）。"""
     project = db.query(Project).filter(Project.id == project_id).first()
     if project:
-        project.account_count = (
+        setattr(project, "account_count", (
             db.query(func.count(MonitorAccount.id))
             .filter(MonitorAccount.project_id == project_id)
             .scalar()
-        )
+        ))
     return project
 
 
@@ -74,7 +74,7 @@ def create_project(db: Session, data: ProjectCreate, created_by: Optional[str] =
     db.add(project)
     db.commit()
     db.refresh(project)
-    project.account_count = 0
+    setattr(project, "account_count", 0)
     return project
 
 
@@ -103,11 +103,11 @@ def update_project(
 
     db.commit()
     db.refresh(project)
-    project.account_count = (
+    setattr(project, "account_count", (
         db.query(func.count(MonitorAccount.id))
         .filter(MonitorAccount.project_id == project_id)
         .scalar()
-    )
+    ))
     return project
 
 

@@ -4,8 +4,9 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timedelta
-from typing import Callable, List, Optional
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from typing import Any, Callable, List, Optional, cast
 
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.database import SessionLocal
 from app.models.op_account import OpAccount, OpAuditLog, OpCollectTask
+from app.models.device import Device
 from app.models.team import User
 from app.services.sale_validation_service import validate_sale_information
 from app.services.asset_scope_service import require_op_account_scope, scoped_op_accounts
@@ -23,6 +25,7 @@ from app.schemas.op_account import (
 )
 
 logger = logging.getLogger(__name__)
+_set_committed_value = cast(Callable[[object, str, object], None], set_committed_value)
 
 
 # ---------------------------------------------------------------------------
@@ -56,8 +59,8 @@ def _write_audit_log(
     account_id: int,
     action: str,
     field_name: Optional[str] = None,
-    old_value: Optional[str] = None,
-    new_value: Optional[str] = None,
+    old_value: str | int | None = None,
+    new_value: str | int | None = None,
     operator: Optional[str] = None,
 ) -> None:
     log = OpAuditLog(
@@ -75,7 +78,7 @@ def _write_audit_log(
             record_relation_snapshot(db, account, operator, "ban_snapshot")
 
 
-def record_relation_snapshot(db: Session, account: OpAccount, operator=None, field_name="relation_snapshot"):
+def record_relation_snapshot(db: Session, account: OpAccount, operator: str | None = None, field_name: str = "relation_snapshot") -> None:
     from app.services.relation_history_service import account_relation_snapshot
 
     _write_audit_log(db, account.id, "snapshot", field_name, None,
@@ -86,7 +89,7 @@ def record_relation_snapshot(db: Session, account: OpAccount, operator=None, fie
 # CRUD
 # ---------------------------------------------------------------------------
 
-def normalize_account_relation(db: Session, values: dict, account: Optional[OpAccount] = None) -> None:
+def normalize_account_relation(db: Session, values: dict[str, Any], account: Optional[OpAccount] = None) -> None:
     """账号节点随终端绑定，账号操作不修改终端节点。"""
     from fastapi import HTTPException
     from app.models.device import Device
@@ -119,7 +122,7 @@ def normalize_account_relation(db: Session, values: dict, account: Optional[OpAc
                 raise HTTPException(409, "代理节点当前状态不可绑定")
 
 
-def sync_device_account_nodes(db: Session, device, operator=None) -> None:
+def sync_device_account_nodes(db: Session, device: Device, operator: str | None = None) -> None:
     """终端关系变更后同步账号的节点摘要。"""
     ids = device.node_ids or ([device.node_id] if device.node_id else [])
     primary = ids[0] if ids else None
@@ -132,7 +135,7 @@ def sync_device_account_nodes(db: Session, device, operator=None) -> None:
         record_relation_snapshot(db, account, operator)
 
 
-def create_op_account(db: Session, data: OpAccountCreate, actor=None) -> OpAccount:
+def create_op_account(db: Session, data: OpAccountCreate, actor: str | None = None) -> OpAccount:
     # Prevent duplicate operation accounts even when no project is selected
     existing = db.query(OpAccount).filter(
         OpAccount.platform == data.platform,
@@ -167,7 +170,7 @@ def get_op_account(db: Session, id: int) -> Optional[OpAccount]:
     return account
 
 
-def update_op_account(db: Session, id: int, data: OpAccountUpdate, actor=None) -> Optional[OpAccount]:
+def update_op_account(db: Session, id: int, data: OpAccountUpdate, actor: str | None = None) -> Optional[OpAccount]:
     account = db.query(OpAccount).filter(OpAccount.id == id).first()
     if not account:
         return None
@@ -234,7 +237,7 @@ def list_op_accounts(
     limit: int = 50,
     current_user: Optional[User] = None,
     exclude_gmail: bool = False,
-) -> tuple:
+) -> tuple[list[OpAccount], int]:
     query = scoped_op_accounts(db, current_user) if current_user is not None else db.query(OpAccount)
     if exclude_gmail:
         query = query.filter(OpAccount.platform != "gmail")
@@ -259,7 +262,7 @@ def list_op_accounts(
     items = query.offset(skip).limit(limit).all()
     # 反序列化每条记录的 sellers
     for item in items:
-        set_committed_value(item, "sellers", _deserialize_sellers(item.sellers))
+        _set_committed_value(item, "sellers", _deserialize_sellers(item.sellers))
     return items, total
 
 
@@ -267,7 +270,7 @@ def list_op_accounts(
 # Stats
 # ---------------------------------------------------------------------------
 
-def get_op_account_stats(db: Session, exclude_gmail: bool = False, current_user: Optional[User] = None) -> dict:
+def get_op_account_stats(db: Session, exclude_gmail: bool = False, current_user: Optional[User] = None) -> dict[str, Any]:
     """
     统计运营账号的汇总数据：总数、各状态数量、总采购成本、总出售收入、净收益。
     """
@@ -321,13 +324,13 @@ def get_op_account_stats(db: Session, exclude_gmail: bool = False, current_user:
 
 def batch_update_status(
     db: Session,
-    ids: list,
+    ids: list[int],
     status: str,
     sale_customer: Optional[str] = None,
-    sale_price=None,
-    sale_date=None,
+    sale_price: Decimal | None = None,
+    sale_date: date | None = None,
     sellers: Optional[List[str]] = None,
-    actor=None,
+    actor: str | None = None,
 ) -> int:
     validate_sale_information(dict(status=status, sale_customer=sale_customer, sale_price=sale_price, sale_date=sale_date, sellers=sellers), "已售", require_date=True)
     count = 0
@@ -361,7 +364,7 @@ def batch_update_status(
     return count
 
 
-def batch_assign_operator(db: Session, ids: list, operator: str, current_user: User) -> int:
+def batch_assign_operator(db: Session, ids: list[int], operator: str, current_user: User) -> int:
     member = db.query(User).filter(User.username == operator, User.is_active == True).first()
     if not member:
         raise HTTPException(status_code=422, detail="请选择存在且已启用的成员")
@@ -439,8 +442,10 @@ def create_import_template() -> bytes:
     except ImportError as exc:
         raise RuntimeError("生成 Excel 模板需要安装 openpyxl") from exc
 
+    from openpyxl.utils.cell import get_column_letter
     workbook = openpyxl.Workbook()
     sheet = workbook.active
+    assert sheet is not None
     sheet.title = "运营账号导入"
     headers = [_COLUMN_LABELS[column] for column in _IMPORT_COLUMNS]
     sample = {
@@ -457,7 +462,7 @@ def create_import_template() -> bytes:
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center")
     for index, header in enumerate(headers, 1):
-        sheet.column_dimensions[openpyxl.utils.get_column_letter(index)].width = max(12, min(24, len(header) * 2 + 4))
+        sheet.column_dimensions[get_column_letter(index)].width = max(12, min(24, len(header) * 2 + 4))
 
     notes = workbook.create_sheet("填写说明")
     notes.append(["字段", "是否必填", "填写说明"])
@@ -480,7 +485,7 @@ def create_import_template() -> bytes:
     return buffer.getvalue()
 
 
-def export_op_accounts(db: Session, filters: dict, format: str = "csv", localized: bool = False, current_user: Optional[User] = None) -> bytes:
+def export_op_accounts(db: Session, filters: dict[str, Any], format: str = "csv", localized: bool = False, current_user: Optional[User] = None) -> bytes:
     items, _ = list_op_accounts(db, **filters, skip=0, limit=999999, current_user=current_user)
     columns = [_COLUMN_LABELS.get(col, col) for col in _EXPORT_COLUMNS] if localized else _EXPORT_COLUMNS
 
@@ -491,6 +496,7 @@ def export_op_accounts(db: Session, filters: dict, format: str = "csv", localize
             raise RuntimeError("openpyxl is required for xlsx export")
         wb = openpyxl.Workbook()
         ws = wb.active
+        assert ws is not None
         ws.append(columns)
         for acc in items:
             ws.append([str(getattr(acc, col, "") or "") for col in _EXPORT_COLUMNS])
@@ -499,19 +505,19 @@ def export_op_accounts(db: Session, filters: dict, format: str = "csv", localize
         return buf.getvalue()
 
     # Default: CSV with UTF-8 BOM
-    buf = io.StringIO()
-    writer = csv.writer(buf)
+    text_buffer = io.StringIO()
+    writer = csv.writer(text_buffer)
     writer.writerow(columns)
     for acc in items:
         writer.writerow([str(getattr(acc, col, "") or "") for col in _EXPORT_COLUMNS])
-    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+    return ("\ufeff" + text_buffer.getvalue()).encode("utf-8")
 
 
 # ---------------------------------------------------------------------------
 # CSV Import
 # ---------------------------------------------------------------------------
 
-def _parse_import_bool(value):
+def _parse_import_bool(value: object) -> bool | None:
     if value is None or value == "":
         return None
     if isinstance(value, bool):
@@ -524,7 +530,7 @@ def _optional_import_value(value: str) -> Optional[str]:
     return None if value.lower() in {"", "null", "none", "nil", "无", "空", "-"} else value
 
 
-def parse_email_import_line(line: str, import_format: str = "auto", delimiter: str = "auto") -> dict:
+def parse_email_import_line(line: str, import_format: str = "auto", delimiter: str = "auto") -> dict[str, Any]:
     pattern = {"----": r"----", "|": r"\|", ":": r":"}.get(delimiter, r"----|\||:")
     separator = re.search(pattern, line)
     if not separator:
@@ -556,21 +562,22 @@ def parse_email_import_line(line: str, import_format: str = "auto", delimiter: s
     account = account.strip().lower()
     if not re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}", account):
         raise ValueError("邮箱地址无效")
+    registered_value: datetime | str | None = registered
     registered_year = None
     if registered:
         if re.fullmatch(r"\d{4}", registered):
             registered_year = int(registered)
             if not 1 <= registered_year <= 9999:
                 raise ValueError("注册年份无效")
-            registered = None
+            registered_value = None
         else:
-            registered = datetime.fromisoformat(registered)
+            registered_value = datetime.fromisoformat(registered)
     return dict(account=account, password=password or None,
                 recovery_email=_optional_import_value(recovery_email), totp_secret=totp_secret.strip() or None,
-                account_created_at=registered or None, account_created_year=registered_year, country=country or None)
+                account_created_at=registered_value or None, account_created_year=registered_year, country=country or None)
 
 
-def import_gmail_text(db: Session, content: str, actor=None) -> OpImportResult:
+def import_gmail_text(db: Session, content: str, actor: str | None = None) -> OpImportResult:
     rows = []
     success = duplicates = failed = 0
     for line_number, line in enumerate(content.lstrip("\ufeff").splitlines(), 1):
@@ -644,13 +651,13 @@ def import_from_csv(
 
         try:
             create_data = OpAccountCreate(
-                platform=platform_val,
+                platform=cast(Any, platform_val),
                 account=account_val,
                 password=row.get("password") or None,
                 totp_secret=row.get("totp_secret") or None,
                 recovery_email=row.get("recovery_email") or None,
-                account_created_at=row.get("account_created_at") or None,
-                account_created_year=row.get("account_created_year") or None,
+                account_created_at=cast(Any, row.get("account_created_at") or None),
+                account_created_year=cast(Any, row.get("account_created_year") or None),
                 email=row.get("email") or None,
                 email_password=row.get("email_password") or None,
                 email_login_url=row.get("email_login_url") or None,
@@ -664,11 +671,11 @@ def import_from_csv(
                 registrant=actor if force_actor else (row.get("registrant") or actor),
                 operator=row.get("operator") or None,
                 purchase_channel=row.get("purchase_channel") or None,
-                purchase_price=row.get("purchase_price") or None,
-                purchase_date=row.get("purchase_date") or None,
+                purchase_price=cast(Any, row.get("purchase_price") or None),
+                purchase_date=cast(Any, row.get("purchase_date") or None),
                 sale_customer=row.get("sale_customer") or None,
-                sale_price=row.get("sale_price") or None,
-                sale_date=row.get("sale_date") or None,
+                sale_price=cast(Any, row.get("sale_price") or None),
+                sale_date=cast(Any, row.get("sale_date") or None),
                 tiktok_mid_video=_parse_import_bool(row.get("tiktok_mid_video")),
                 tiktok_showcase=_parse_import_bool(row.get("tiktok_showcase")),
                 tiktok_phone_live=_parse_import_bool(row.get("tiktok_phone_live")),
@@ -700,6 +707,7 @@ def import_from_excel(
     workbook = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
     try:
         sheet = workbook.active
+        assert sheet is not None
         rows = list(sheet.iter_rows(values_only=True))
     finally:
         workbook.close()
@@ -728,7 +736,7 @@ def import_from_excel(
 # Collect task scheduling
 # ---------------------------------------------------------------------------
 
-async def run_scheduled_collections(db_factory: Callable) -> None:
+async def run_scheduled_collections(db_factory: Callable[[], Session]) -> None:
     """定时采集到期的运营账号；间隔使用系统 MonitorSettings.default_interval。"""
     from app.models.monitor import MonitorSettings
     from app.services.op_collector_service import collect_account, select_proxy
@@ -765,9 +773,9 @@ async def run_scheduled_collections(db_factory: Callable) -> None:
         db.close()
 
 
-def register_scheduler_job(scheduler, db_factory: Callable) -> None:
+def register_scheduler_job(scheduler: Any, db_factory: Callable[[], Session]) -> None:
     """每分钟触发一次，到期账号才真正执行采集。"""
-    async def _job():
+    async def _job() -> None:
         await run_scheduled_collections(db_factory)
 
     scheduler.add_job(
@@ -781,7 +789,7 @@ def register_scheduler_job(scheduler, db_factory: Callable) -> None:
     logger.info("Registered scheduled op-account collection job (every minute)")
 
 
-def trigger_collect(db: Session, account_ids: list, background_tasks: BackgroundTasks, actor=None) -> str:
+def trigger_collect(db: Session, account_ids: list[int], background_tasks: BackgroundTasks, actor: str | None = None) -> str:
     account_ids = list(dict.fromkeys(account_ids))
     task_id = str(uuid.uuid4())
     task = OpCollectTask(
@@ -807,7 +815,7 @@ def get_collect_task(db: Session, task_id: str) -> Optional[OpCollectTask]:
 # Background collect runner
 # ---------------------------------------------------------------------------
 
-def run_collect_task(task_id: str, account_ids: list) -> None:
+def run_collect_task(task_id: str, account_ids: list[int]) -> None:
     """Synchronous background task executed by FastAPI BackgroundTasks."""
     from app.services.op_collector_service import collect_account, select_proxy
 
@@ -864,7 +872,7 @@ def _increment_task(db: Session, task_id: str, success: bool) -> None:
 # Audit logs
 # ---------------------------------------------------------------------------
 
-def get_audit_logs(db: Session, account_id: int) -> list:
+def get_audit_logs(db: Session, account_id: int) -> list[OpAuditLog]:
     return (
         db.query(OpAuditLog)
         .filter(OpAuditLog.op_account_id == account_id)

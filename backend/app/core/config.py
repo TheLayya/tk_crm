@@ -1,4 +1,5 @@
 import re
+from typing import Any
 from pydantic_settings import BaseSettings
 
 
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if self.FIELD_ENCRYPTION_KEY:
             if not re.fullmatch(r"[0-9a-fA-F]{64}", self.FIELD_ENCRYPTION_KEY):

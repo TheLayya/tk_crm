@@ -1,6 +1,7 @@
 """
 MonitorSettings CRUD API endpoints
 """
+from app.models.team import User
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -46,7 +47,7 @@ def get_or_create_settings(db: Session) -> MonitorSettings:
 
 
 @router.get("/public", response_model=PublicSettingsResponse, response_model_exclude_none=True)
-def get_public_settings(db: Session = Depends(get_db)):
+def get_public_settings(db: Session = Depends(get_db)) -> PublicSettingsResponse:
     """公开接口：返回站点名称和 logo，不需要登录。"""
     try:
         settings = get_or_create_settings(db)
@@ -60,7 +61,7 @@ def get_public_settings(db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=SettingsResponse)
-def get_settings(db: Session = Depends(get_db), _=Depends(require_permission("settings:view"))):
+def get_settings(db: Session = Depends(get_db), _: User = Depends(require_permission("settings:view"))) -> MonitorSettings:
     """
     Get current monitor settings.
     
@@ -82,7 +83,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_permission("se
 
 
 @router.put("", response_model=SettingsResponse)
-def update_settings(data: SettingsUpdate, db: Session = Depends(get_db), _=Depends(require_permission("settings:edit"))):
+def update_settings(data: SettingsUpdate, db: Session = Depends(get_db), _: User = Depends(require_permission("settings:edit"))) -> MonitorSettings:
     """
     Update monitor settings.
     

@@ -3,10 +3,11 @@ import base64
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from sqlalchemy import String
 from sqlalchemy.types import TypeDecorator
+from sqlalchemy.engine import Dialect
 
 
 class EncryptionService:
-    def __init__(self, key_hex: str):
+    def __init__(self, key_hex: str) -> None:
         self.key = bytes.fromhex(key_hex)
 
     def encrypt(self, plaintext: str) -> str:
@@ -37,17 +38,17 @@ def _get_encryption_service() -> EncryptionService:
     return _encryption_service
 
 
-class EncryptedType(TypeDecorator):
+class EncryptedType(TypeDecorator[str]):
     """SQLAlchemy TypeDecorator，透明加解密字符串字段"""
     impl = String
     cache_ok = True
 
-    def process_bind_param(self, value, dialect):
+    def process_bind_param(self, value: str | None, dialect: Dialect) -> str | None:
         if value is None:
             return None
         return _get_encryption_service().encrypt(value)
 
-    def process_result_value(self, value, dialect):
+    def process_result_value(self, value: str | None, dialect: Dialect) -> str | None:
         if value is None:
             return None
         try:

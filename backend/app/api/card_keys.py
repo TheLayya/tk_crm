@@ -1,6 +1,11 @@
+from fastapi.responses import JSONResponse
+from typing import TypedDict, cast
+
+
 import hashlib
 import json
 import base64
+import binascii
 import hmac
 import struct
 import time
@@ -20,6 +25,20 @@ from app.services.auth_service import require_permission, _get_user_permissions
 router = APIRouter(prefix="/card-keys", tags=["Card keys"])
 
 
+class WorkReportItem(TypedDict):
+    kind: str
+    record_id: int
+    username: str | None
+    time: str | None
+    reference: str
+
+
+class WorkReportTotals(TypedDict):
+    username: str | None
+    keys_consumed: int
+    emails_completed: int
+
+
 class ProjectBody(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=10000)
@@ -37,19 +56,19 @@ class PlatformBody(BaseModel):
     is_active: bool = True
 
 
-def _members(project):
+def _members(project: CardKeyProject) -> list[str]:
     return [x for x in (project.member_usernames or "").split(",") if x]
 
 
-def _manager(user, db):
+def _manager(user: User, db: Session) -> bool:
     return user.is_super_admin or "card_key:manage" in _get_user_permissions(db, user.id)
 
 
-def _allowed(project, user, db):
+def _allowed(project: CardKeyProject, user: User, db: Session) -> bool:
     return _manager(user, db) or "__all__" in _members(project) or user.username in _members(project)
 
 
-def _project_json(project, db, user=None):
+def _project_json(project: CardKeyProject, db: Session, user: User | None = None) -> dict[str, object]:
     total, available, claimed, consumed = db.query(
         func.count(CardKey.id),
         func.sum(case((CardKey.status == "available", 1), else_=0)),
@@ -69,11 +88,11 @@ def _project_json(project, db, user=None):
     usernames = {row.username for row in db.query(User).filter(User.is_active.is_(True)).all()} if "__all__" in members else set(members)
     key_rows = db.query(CardKey.claimed_by, CardKey.status, func.count(CardKey.id)).filter(CardKey.project_id == project.id, CardKey.claimed_by.isnot(None)).group_by(CardKey.claimed_by, CardKey.status).all()
     email_rows = db.query(CardKeyEmailUsage.username, func.count(CardKeyEmailUsage.id)).filter(CardKeyEmailUsage.project_id == project.id).group_by(CardKeyEmailUsage.username).all()
-    key_stats = {}
+    key_stats: dict[str, dict[str, int]] = {}
     for username, status, count in key_rows:
         if status in {"claimed", "consumed"}:
             key_stats.setdefault(username, {"claimed": 0, "consumed": 0})[status] += count
-    email_stats = dict(email_rows)
+    email_stats = {username: count for username, count in email_rows}
     usernames.update(key_stats)
     usernames.update(email_stats)
     for username in sorted(usernames):
@@ -90,21 +109,21 @@ def _project_json(project, db, user=None):
             "emails_completed": sum(email_stats.values())}
 
 
-def _time_json(value):
+def _time_json(value: datetime | None) -> str | None:
     return value.isoformat() + "Z" if value else None
 
 
-def _platform_json(platform):
+def _platform_json(platform: CardKeyPlatform) -> dict[str, object]:
     return {"id": platform.id, "name": platform.name, "is_active": platform.is_active}
 
 
-def _key_json(key):
+def _key_json(key: CardKey) -> dict[str, object]:
     return {"id": key.id, "content": key.content, "status": key.status,
             "claimed_by": key.claimed_by, "claimed_at": _time_json(key.claimed_at),
             "consumed_at": _time_json(key.consumed_at), "history": key.history or [], "remark": key.remark}
 
 
-def _email_json(email):
+def _email_json(email: EmailAccount) -> dict[str, object]:
     import json
     try:
         platform_tags = json.loads(email.platform_tags or "[]")
@@ -117,7 +136,7 @@ def _email_json(email):
             "claimed_platform": email.claimed_platform}
 
 
-def _totp_code(secret):
+def _totp_code(secret: object) -> tuple[str | None, int | None]:
     try:
         if not secret:
             return None, None
@@ -131,11 +150,11 @@ def _totp_code(secret):
         offset = digest[-1] & 0x0F
         number = (struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1000000
         return f"{number:06d}", 30 - (timestamp % 30)
-    except (ValueError, TypeError, base64.binascii.Error):
+    except (ValueError, TypeError, binascii.Error):
         return None, None
 
 
-def _history(key, action, username, now):
+def _history(key: CardKey, action: str, username: str, now: datetime) -> list[dict[str, object]]:
     events = list(key.history or [])
     if not events and key.claimed_by:
         events.append({"action": "claim", "username": key.claimed_by, "time": _time_json(key.claimed_at)})
@@ -143,7 +162,7 @@ def _history(key, action, username, now):
     return events
 
 
-def _validate_project(body, db):
+def _validate_project(body: ProjectBody, db: Session) -> list[str]:
     if not body.name.strip():
         raise HTTPException(422, "请填写项目名称")
     names = list(dict.fromkeys(x.strip() for x in body.members if x.strip()))
@@ -155,19 +174,19 @@ def _validate_project(body, db):
     return names
 
 
-@router.get("/members")
-def members(db: Session = Depends(get_db), _=Depends(require_permission("card_key:view"))):
+@router.get("/members", response_model=None)
+def members(db: Session = Depends(get_db), _: User = Depends(require_permission("card_key:view"))) -> list[dict[str, object]]:
     return [{"username": u.username, "real_name": u.real_name} for u in db.query(User)
             .filter(User.is_active.is_(True)).order_by(User.username).all()]
 
 
-@router.get("/platforms")
-def list_platforms(db: Session = Depends(get_db), _=Depends(require_permission("card_key:view"))):
+@router.get("/platforms", response_model=None)
+def list_platforms(db: Session = Depends(get_db), _: User = Depends(require_permission("card_key:view"))) -> list[dict[str, object]]:
     return [_platform_json(row) for row in db.query(CardKeyPlatform).order_by(CardKeyPlatform.is_active.desc(), CardKeyPlatform.name).all()]
 
 
-@router.post("/platforms", status_code=201)
-def create_platform(body: PlatformBody, db: Session = Depends(get_db), _=Depends(require_permission("card_key:manage"))):
+@router.post("/platforms", status_code=201, response_model=None)
+def create_platform(body: PlatformBody, db: Session = Depends(get_db), _: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
     name = body.name.strip()
     if not name:
         raise HTTPException(422, "请填写平台名称")
@@ -180,8 +199,8 @@ def create_platform(body: PlatformBody, db: Session = Depends(get_db), _=Depends
     return _platform_json(row)
 
 
-@router.put("/platforms/{platform_id}")
-def update_platform(platform_id: int, body: PlatformBody, db: Session = Depends(get_db), _=Depends(require_permission("card_key:manage"))):
+@router.put("/platforms/{platform_id}", response_model=None)
+def update_platform(platform_id: int, body: PlatformBody, db: Session = Depends(get_db), _: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
     row = db.get(CardKeyPlatform, platform_id)
     if not row:
         raise HTTPException(404, "平台不存在")
@@ -196,15 +215,15 @@ def update_platform(platform_id: int, body: PlatformBody, db: Session = Depends(
     return _platform_json(row)
 
 
-@router.get("")
-def list_projects(db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.get("", response_model=None)
+def list_projects(db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> list[dict[str, object]]:
     projects = db.query(CardKeyProject).order_by(CardKeyProject.updated_at.desc()).all()
     return [_project_json(p, db, user) for p in projects if _allowed(p, user, db) or db.query(CardKey.id).filter(
         CardKey.project_id == p.id, CardKey.claimed_by == user.username).first()]
 
 
-@router.post("", status_code=201)
-def create_project(body: ProjectBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:manage"))):
+@router.post("", status_code=201, response_model=None)
+def create_project(body: ProjectBody, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
     names = _validate_project(body, db)
     project = CardKeyProject(name=body.name.strip(), description=body.description.strip(), target_platform=body.target_platform.strip() or None,
                              member_usernames=",".join(names), created_by=user.username, is_active=body.is_active)
@@ -214,8 +233,8 @@ def create_project(body: ProjectBody, db: Session = Depends(get_db), user=Depend
     return _project_json(project, db)
 
 
-@router.put("/{project_id}")
-def update_project(project_id: int, body: ProjectBody, db: Session = Depends(get_db), _=Depends(require_permission("card_key:manage"))):
+@router.put("/{project_id}", response_model=None)
+def update_project(project_id: int, body: ProjectBody, db: Session = Depends(get_db), _: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
@@ -229,8 +248,8 @@ def update_project(project_id: int, body: ProjectBody, db: Session = Depends(get
     return _project_json(project, db)
 
 
-@router.delete("/{project_id}")
-def delete_project(project_id: int, db: Session = Depends(get_db), _=Depends(require_permission("card_key:manage"))):
+@router.delete("/{project_id}", response_model=None)
+def delete_project(project_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
@@ -244,8 +263,8 @@ def delete_project(project_id: int, db: Session = Depends(get_db), _=Depends(req
     return {"deleted": True}
 
 
-@router.post("/{project_id}/import")
-def import_keys(project_id: int, body: ImportBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:manage"))):
+@router.post("/{project_id}/import", response_model=None)
+def import_keys(project_id: int, body: ImportBody, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
@@ -270,10 +289,10 @@ def import_keys(project_id: int, body: ImportBody, db: Session = Depends(get_db)
     return {"added": added, "duplicates": duplicates}
 
 
-@router.get("/{project_id}/keys")
+@router.get("/{project_id}/keys", response_model=None)
 def list_keys(project_id: int, page: int = Query(1, ge=1), page_size: int = Query(30, ge=1, le=100),
               status: str = "", mine: bool = False, keyword: str = "",
-              db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+              db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
@@ -298,8 +317,8 @@ def list_keys(project_id: int, page: int = Query(1, ge=1), page_size: int = Quer
     return {"items": [_key_json(key) for key in rows[start:start + page_size]], "total": len(rows)}
 
 
-@router.post("/{project_id}/claim")
-def claim_key(project_id: int, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.post("/{project_id}/claim", response_model=None)
+def claim_key(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
@@ -337,8 +356,8 @@ def claim_key(project_id: int, db: Session = Depends(get_db), user=Depends(requi
     return _key_json(key)
 
 
-@router.post("/{project_id}/keys/{key_id}/consume")
-def consume_key(project_id: int, key_id: int, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.post("/{project_id}/keys/{key_id}/consume", response_model=None)
+def consume_key(project_id: int, key_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     key = db.query(CardKey).filter(CardKey.id == key_id, CardKey.project_id == project_id).first()
     if not key:
         raise HTTPException(404, "卡密不存在")
@@ -362,8 +381,8 @@ def consume_key(project_id: int, key_id: int, db: Session = Depends(get_db), use
     return {"id": key.id, "status": key.status}
 
 
-@router.post("/{project_id}/keys/{key_id}/release")
-def release_key(project_id: int, key_id: int, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.post("/{project_id}/keys/{key_id}/release", response_model=None)
+def release_key(project_id: int, key_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     key = db.query(CardKey).filter(CardKey.id == key_id, CardKey.project_id == project_id).first()
     if not key:
         raise HTTPException(404, "卡密不存在")
@@ -388,8 +407,8 @@ class InvalidKeyBody(BaseModel):
     remark: str = Field(min_length=1, max_length=2000)
 
 
-@router.post("/{project_id}/keys/{key_id}/invalid")
-def mark_key_invalid(project_id: int, key_id: int, body: InvalidKeyBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.post("/{project_id}/keys/{key_id}/invalid", response_model=None)
+def mark_key_invalid(project_id: int, key_id: int, body: InvalidKeyBody, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     key = db.query(CardKey).filter(CardKey.id == key_id, CardKey.project_id == project_id).first()
     if not key:
         raise HTTPException(404, "卡密不存在")
@@ -417,8 +436,8 @@ class KeyRemarkBody(BaseModel):
     remark: str = Field(max_length=2000)
 
 
-@router.put("/{project_id}/keys/{key_id}/remark")
-def update_key_remark(project_id: int, key_id: int, body: KeyRemarkBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.put("/{project_id}/keys/{key_id}/remark", response_model=None)
+def update_key_remark(project_id: int, key_id: int, body: KeyRemarkBody, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     key = db.query(CardKey).filter_by(id=key_id, project_id=project_id).first()
     if not key:
         raise HTTPException(404, "卡密不存在")
@@ -435,15 +454,15 @@ def update_key_remark(project_id: int, key_id: int, body: KeyRemarkBody, db: Ses
     return _key_json(key)
 
 
-@router.get("/{project_id}/work-report")
-def work_report(project_id: int, date_from: date | None = None, date_to: date | None = None, db: Session = Depends(get_db), user=Depends(require_permission("card_key:manage"))):
+@router.get("/{project_id}/work-report", response_model=None)
+def work_report(project_id: int, date_from: date | None = None, date_to: date | None = None, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
     if not db.get(CardKeyProject, project_id):
         raise HTTPException(404, "项目不存在")
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "开始日期不能晚于结束日期")
     start = datetime.combine(date_from, datetime.min.time()) - timedelta(hours=8) if date_from else None
     end = datetime.combine(date_to, datetime.min.time()) + timedelta(days=1, hours=-8) if date_to else None
-    items = []
+    items: list[WorkReportItem] = []
     keys = db.query(CardKey).filter_by(project_id=project_id, status="consumed")
     usages = db.query(CardKeyEmailUsage, EmailAccount.email).outerjoin(EmailAccount, CardKeyEmailUsage.email_id == EmailAccount.id).filter(CardKeyEmailUsage.project_id == project_id)
     if start:
@@ -456,15 +475,15 @@ def work_report(project_id: int, date_from: date | None = None, date_to: date | 
         items.append({"kind": "卡密消耗", "record_id": key.id, "username": key.claimed_by, "time": _time_json(key.consumed_at), "reference": f"卡密 #{key.id}"})
     for usage, email in usages.all():
         items.append({"kind": "平台注册", "record_id": usage.id, "username": usage.username, "time": _time_json(usage.completed_at), "reference": f"{usage.platform} · {email or '邮箱已删除'}"})
-    totals = {}
+    totals: dict[str | None, WorkReportTotals] = {}
     for item in items:
         values = totals.setdefault(item["username"], {"username": item["username"], "keys_consumed": 0, "emails_completed": 0})
         values["keys_consumed" if item["kind"] == "卡密消耗" else "emails_completed"] += 1
     return {"members": sorted(totals.values(), key=lambda row: row["username"] or ""), "items": sorted(items, key=lambda row: row["time"] or "", reverse=True)}
 
 
-@router.get("/{project_id}/email")
-def get_claimed_email(project_id: int, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.get("/{project_id}/email", response_model=None)
+def get_claimed_email(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object] | None:
     project = db.get(CardKeyProject, project_id)
     if not project or not _allowed(project, user, db):
         raise HTTPException(404, "项目不存在或无权访问")
@@ -473,8 +492,8 @@ def get_claimed_email(project_id: int, db: Session = Depends(get_db), user=Depen
     return _email_json(email) if email else None
 
 
-@router.post("/{project_id}/email/claim")
-def claim_email(project_id: int, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.post("/{project_id}/email/claim", response_model=None)
+def claim_email(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     platform = (project.target_platform or "").strip() if project else ""
     if not project or not _allowed(project, user, db):
@@ -513,8 +532,8 @@ def claim_email(project_id: int, db: Session = Depends(get_db), user=Depends(req
     raise HTTPException(409, "没有可用于该平台的未注册邮箱")
 
 
-@router.get("/{project_id}/email/totp")
-def get_claimed_email_totp(project_id: int, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.get("/{project_id}/email/totp", response_model=None)
+def get_claimed_email_totp(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> JSONResponse:
     project = db.get(CardKeyProject, project_id)
     if not project or not _allowed(project, user, db):
         raise HTTPException(404, "项目不存在或无权访问")
@@ -525,12 +544,11 @@ def get_claimed_email_totp(project_id: int, db: Session = Depends(get_db), user=
     code, remaining = _totp_code(email.totp_secret)
     if not code:
         raise HTTPException(422, "该邮箱没有有效的 2FA 密钥")
-    from fastapi.responses import JSONResponse
     return JSONResponse({"code": code, "remaining": remaining}, headers={"Cache-Control": "no-store"})
 
 
-@router.post("/{project_id}/email/release")
-def release_email(project_id: int, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.post("/{project_id}/email/release", response_model=None)
+def release_email(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project or not _allowed(project, user, db):
         raise HTTPException(404, "项目不存在或无权访问")
@@ -550,8 +568,8 @@ class EmailFailureBody(BaseModel):
     remark: str = Field(min_length=1, max_length=2000)
 
 
-@router.post("/{project_id}/email/fail")
-def fail_email(project_id: int, body: EmailFailureBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.post("/{project_id}/email/fail", response_model=None)
+def fail_email(project_id: int, body: EmailFailureBody, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project or not _allowed(project, user, db):
         raise HTTPException(404, "项目不存在或无权访问")
@@ -593,8 +611,8 @@ class CompleteEmailBody(BaseModel):
     totp_secret: str | None = Field(default=None, max_length=255)
 
 
-@router.post("/{project_id}/email/complete")
-def complete_email(project_id: int, body: CompleteEmailBody, db: Session = Depends(get_db), user=Depends(require_permission("card_key:view"))):
+@router.post("/{project_id}/email/complete", response_model=None)
+def complete_email(project_id: int, body: CompleteEmailBody, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project or not _allowed(project, user, db):
         raise HTTPException(404, "项目不存在或无权访问")
@@ -615,7 +633,7 @@ def complete_email(project_id: int, body: CompleteEmailBody, db: Session = Depen
     if supported and db.query(OpAccount).filter(OpAccount.platform == platform_key, OpAccount.account == account_name).first():
         raise HTTPException(409, "该平台账号已存在，请更换账号或在运营账号中关联")
     import json
-    tags = _email_json(email)["platform_tags"]
+    tags = cast(list[str], _email_json(email)["platform_tags"])
     if platform.casefold() not in {tag.casefold() for tag in tags}:
         tags.append(platform)
     changed = db.execute(update(EmailAccount).where(

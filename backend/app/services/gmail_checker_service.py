@@ -1,9 +1,10 @@
 """Gmail status probe backed by the optional gmail0918.top API."""
 from datetime import datetime
 import re
-from typing import Iterable
+from typing import Any, Iterable, cast
 
 import httpx
+from app.models.op_account import OpAccount
 
 CHECK_URL = "https://gmail0918.top/api.php"
 MAX_BATCH_SIZE = 50
@@ -25,7 +26,7 @@ def normalize_status(raw_status: str | None) -> str:
     return STATUS_MAP.get(raw, "检测失败")
 
 
-def check_gmail_accounts(emails: Iterable[str], timeout: float = 30.0) -> list[dict]:
+def check_gmail_accounts(emails: Iterable[str], timeout: float = 30.0) -> list[dict[str, Any]]:
     values = list(dict.fromkeys(str(email).strip().lower() for email in emails if str(email).strip()))
     if not values:
         return []
@@ -50,10 +51,10 @@ def check_gmail_accounts(emails: Iterable[str], timeout: float = 30.0) -> list[d
         received.add(email)
     if received != expected:
         raise RuntimeError("检测服务未返回全部邮箱结果")
-    return rows
+    return cast(list[dict[str, Any]], rows)
 
 
-def apply_check_results(accounts, results: list[dict], now: datetime | None = None) -> int:
+def apply_check_results(accounts: Iterable[OpAccount], results: list[dict[str, Any]], now: datetime | None = None) -> int:
     by_email = {str(result.get("email") or "").strip().lower(): result for result in results}
     checked_at = now or datetime.utcnow()
     updated = 0

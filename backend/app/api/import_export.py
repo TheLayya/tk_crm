@@ -1,6 +1,7 @@
 """
 Import/Export API endpoints for account lists
 """
+from app.schemas.account import BatchAccountResult
 import logging
 from datetime import datetime
 from typing import Optional
@@ -24,7 +25,7 @@ async def import_accounts_from_file(
     file: UploadFile = File(..., description="CSV or Excel file containing usernames"),
     monitor_interval: Optional[int] = Query(None, description="Monitor interval in seconds (uses default if not specified)"),
     db: Session = Depends(get_db),
-):
+) -> BatchAccountResult:
     """
     Import accounts from CSV or Excel file.
     
@@ -88,12 +89,12 @@ async def import_accounts_from_file(
         )
 
 
-@router.get("/export")
+@router.get("/export", response_model=None)
 async def export_accounts(
     project_id: Optional[int] = Query(None, description="Project ID to export (exports all if not specified)"),
     format: str = Query("csv", pattern="^(csv|excel)$", description="Export format: csv or excel"),
     db: Session = Depends(get_db),
-):
+) -> Response:
     """
     Export accounts to CSV or Excel file.
     
@@ -141,13 +142,13 @@ async def export_accounts(
             )
         
         elif format == "excel":
-            content = import_export_service.export_accounts_excel(db, project_id)
+            excel_content = import_export_service.export_accounts_excel(db, project_id)
             filename = f"{project_name}_accounts_{export_date}.xlsx"
             filename_encoded = quote(filename)
             media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             
             return Response(
-                content=content,
+                content=excel_content,
                 media_type=media_type,
                 headers={
                     "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"

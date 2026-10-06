@@ -1,6 +1,7 @@
 """
 Video and VideoStats API endpoints
 """
+from app.models.video import VideoStats
 import logging
 from typing import List
 
@@ -16,13 +17,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Videos"])
 
 
-@router.get("/accounts/{account_id}/videos")
+@router.get("/accounts/{account_id}/videos", response_model=None)
 def get_account_videos(
     account_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-):
+) -> dict[str, object]:
     """
     Get paginated list of videos for a specific account with latest stats.
     
@@ -70,7 +71,7 @@ def get_account_videos(
 def get_video_stats_history(
     video_id: int,
     db: Session = Depends(get_db),
-):
+) -> list[VideoStats]:
     """
     Get statistics history for a specific video.
     
@@ -101,11 +102,11 @@ def get_video_stats_history(
         )
 
 
-@router.post("/accounts/{account_id}/videos/collect", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/accounts/{account_id}/videos/collect", status_code=status.HTTP_202_ACCEPTED, response_model=None)
 async def trigger_video_collection(
     account_id: int,
     db: Session = Depends(get_db),
-):
+) -> dict[str, object]:
     """
     Manually trigger video collection for a specific account.
     

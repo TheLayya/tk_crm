@@ -1,5 +1,6 @@
 import hashlib
 import uuid
+from typing import Callable, TypedDict
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException, Header, Depends
@@ -15,7 +16,21 @@ def _sha256(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _record_login_log(db: Session, username: str, ip: str, result: str, reason: str = None):
+class LoginUser(TypedDict):
+    id: int
+    username: str
+    real_name: str | None
+    is_super_admin: bool
+
+
+class LoginResult(TypedDict):
+    access_token: str
+    refresh_token: str
+    user: LoginUser
+    permissions: list[str]
+
+
+def _record_login_log(db: Session, username: str, ip: str | None, result: str, reason: str | None = None) -> None:
     log = LoginLog(
         username=username,
         ip_address=ip,
@@ -56,7 +71,7 @@ def _get_user_permissions(db: Session, user_id: int) -> list[str]:
     return list({p.permission for p in perms})
 
 
-def login(username: str, password: str, ip: str, db: Session) -> dict:
+def login(username: str, password: str, ip: str | None, db: Session) -> LoginResult:
     # Check account lock: >= 5 failures in last 15 minutes
     failure_count = _count_recent_failures(db, username)
     if failure_count >= 5:
@@ -69,7 +84,7 @@ def login(username: str, password: str, ip: str, db: Session) -> dict:
     # Verify password (always run to avoid timing attacks)
     password_ok = user is not None and verify_password(password, user.password_hash)
 
-    if not password_ok:
+    if not password_ok or user is None:
         _record_login_log(db, username, ip, "failed", "用户名或密码错误")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
@@ -120,7 +135,7 @@ def login(username: str, password: str, ip: str, db: Session) -> dict:
     }
 
 
-def refresh_token(token: str, db: Session) -> dict:
+def refresh_token(token: str, db: Session) -> LoginResult:
     token_hash = _sha256(token)
 
     db_token = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
@@ -215,7 +230,7 @@ def get_current_user(token: str, db: Session) -> User:
     return user
 
 
-def require_permission(perm: str):
+def require_permission(perm: str) -> Callable[..., User]:
     """FastAPI dependency factory that checks if the current user has the required permission."""
     def dependency(
         authorization: str = Header(None),

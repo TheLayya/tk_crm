@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 from urllib.parse import quote
 
 import httpx
@@ -31,7 +31,7 @@ def _build_proxy_url(node: ProxyNode) -> str:
 
     if use_relay:
         protocol = node.relay_protocol or "http"
-        ip = node.relay_ip
+        ip = cast(str, node.relay_ip)
         port = node.relay_port
     else:
         protocol = node.protocol or "socks5"
@@ -49,7 +49,7 @@ def _build_proxy_url(node: ProxyNode) -> str:
     return f"{protocol}://{auth}{ip}:{port}"
 
 
-async def _do_test(node: ProxyNode) -> dict:
+async def _do_test(node: ProxyNode) -> dict[str, Any]:
     """
     通过代理发起 HTTP 请求，测试节点连通性。
 

@@ -1,7 +1,8 @@
 """Shared ownership scope for operating accounts and proxy nodes."""
 from fastapi import HTTPException
+from typing import Any, cast
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from app.models.device import Device
 from app.models.op_account import EmailAccount, OpAccount
@@ -25,13 +26,13 @@ def get_scope_user_ids(db: Session, user: User) -> set[int] | None:
     return {user_id for (user_id,) in db.query(User.id).filter(User.username.in_(names)).all()}
 
 
-def scoped_op_accounts(db: Session, user: User):
+def scoped_op_accounts(db: Session, user: User) -> Query[OpAccount]:
     """Accounts inherit their active terminal owner, never a shared node."""
     query = db.query(OpAccount)
     names = get_scope_usernames(db, user)
     if names is not None:
         devices = db.query(Device.id).filter(
-            Device.is_deleted == False, Device.owner_id.in_(get_scope_user_ids(db, user)),
+            Device.is_deleted == False, Device.owner_id.in_(cast(set[int], get_scope_user_ids(db, user))),
         )
         query = query.filter(or_(
             OpAccount.registrant.in_(names), OpAccount.operator.in_(names),
@@ -56,7 +57,7 @@ def get_visible_node_ids(db: Session, user: User) -> set[int] | None:
         return None
     ids = {node_id for (node_id,) in db.query(ProxyNode.id).filter(ProxyNode.created_by.in_(names)).all()}
     devices = db.query(Device).filter(
-        Device.is_deleted == False, Device.owner_id.in_(get_scope_user_ids(db, user)),
+        Device.is_deleted == False, Device.owner_id.in_(cast(set[int], get_scope_user_ids(db, user))),
     ).all()
     for device in devices:
         ids.update(device.node_ids or ([device.node_id] if device.node_id else []))
@@ -76,7 +77,7 @@ def require_visible_op_account(db: Session, account_id: int, user: User) -> OpAc
     return account
 
 
-def require_account_relation_scope(db: Session, values: dict, user: User) -> None:
+def require_account_relation_scope(db: Session, values: dict[str, Any], user: User) -> None:
     owner_ids = get_scope_user_ids(db, user)
     if owner_ids is None:
         return
@@ -85,5 +86,6 @@ def require_account_relation_scope(db: Session, values: dict, user: User) -> Non
         if device and device.owner_id not in owner_ids:
             raise HTTPException(status_code=403, detail="无权关联该终端")
     if values.get("node_id") is not None:
-        if values["node_id"] not in get_visible_node_ids(db, user):
+        visible_ids = get_visible_node_ids(db, user)
+        if visible_ids is not None and values["node_id"] not in visible_ids:
             raise HTTPException(status_code=403, detail="无权关联该节点")

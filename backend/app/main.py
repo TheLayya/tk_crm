@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from sqlalchemy.orm import Session
 from app.core.database import engine, Base
 from app.core.scheduler import start_scheduler, stop_scheduler, scheduler
@@ -47,7 +48,7 @@ def create_super_admin(db: Session) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 启动时创建数据库表
     Base.metadata.create_all(bind=engine)
     # 初始化超级管理员
@@ -111,8 +112,8 @@ app.include_router(overview.router, prefix="/api")
 app.include_router(updates.router, prefix="/api")
 
 
-@app.get("/health")
-def health():
+@app.get("/health", response_model=None)
+def health() -> dict[str, str]:
     return {"status": "ok", "version": APP_VERSION}
 
 

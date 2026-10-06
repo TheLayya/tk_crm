@@ -25,24 +25,24 @@ class WorkItemBody(BaseModel):
 
     @field_validator("title")
     @classmethod
-    def validate_title(cls, value):
+    def validate_title(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("请填写标题")
         return value.strip()
 
     @field_validator("remind_at")
     @classmethod
-    def normalize_time(cls, value):
+    def normalize_time(cls, value: datetime | None) -> datetime | None:
         if value and value.tzinfo:
             return value.astimezone(timezone.utc).replace(tzinfo=None)
         return value
 
-def _categories(db):
+def _categories(db: Session) -> list[str]:
     settings = db.get(WorkItemCategorySettings, 1)
     return settings.categories if settings else list(WORK_ITEM_CATEGORIES)
 
 
-def _validate_category(category, db):
+def _validate_category(category: str, db: Session) -> None:
     if category not in _categories(db):
         raise HTTPException(status_code=422, detail="备忘大类无效")
 
@@ -51,7 +51,7 @@ class CategoryBody(BaseModel):
     categories: list[str] = Field(min_length=1, max_length=30)
 
 
-def _reminder_users(body, db):
+def _reminder_users(body: WorkItemBody, db: Session) -> str:
     names = list(dict.fromkeys(body.reminder_users))
     if "__all__" in names:
         return ",__all__,"
@@ -61,19 +61,19 @@ def _reminder_users(body, db):
     return "," + ",".join(names) + "," if names else ""
 
 
-@router.get("/members")
-def reminder_members(db: Session = Depends(get_db), _=Depends(require_permission("work_item:view"))):
+@router.get("/members", response_model=None)
+def reminder_members(db: Session = Depends(get_db), _: User = Depends(require_permission("work_item:view"))) -> list[dict[str, object]]:
     return [{"username": user.username, "real_name": user.real_name}
             for user in db.query(User).filter(User.is_active.is_(True)).order_by(User.username).all()]
 
 
-@router.get("/categories")
-def work_item_categories(db: Session = Depends(get_db), _=Depends(require_permission("work_item:view"))):
+@router.get("/categories", response_model=None)
+def work_item_categories(db: Session = Depends(get_db), _: User = Depends(require_permission("work_item:view"))) -> list[str]:
     return _categories(db)
 
 
-@router.put("/categories")
-def update_categories(body: CategoryBody, db: Session = Depends(get_db), _=Depends(require_permission("settings:edit"))):
+@router.put("/categories", response_model=None)
+def update_categories(body: CategoryBody, db: Session = Depends(get_db), _: User = Depends(require_permission("settings:edit"))) -> list[str]:
     names = [name.strip() for name in body.categories]
     if any(not name or len(name) > 32 for name in names) or len(set(names)) != len(names):
         raise HTTPException(status_code=422, detail="大类不能重复或为空，每项最多32字")
@@ -92,7 +92,7 @@ def update_categories(body: CategoryBody, db: Session = Depends(get_db), _=Depen
     return names
 
 
-def _serialize(item: WorkItem) -> dict:
+def _serialize(item: WorkItem) -> dict[str, object]:
     reminder_users = [x for x in (item.reminder_users or "").split(",") if x]
     return {
         "id": item.id,
@@ -109,15 +109,15 @@ def _serialize(item: WorkItem) -> dict:
     }
 
 
-@router.get("")
+@router.get("", response_model=None)
 def list_work_items(
     keyword: Optional[str] = Query(None),
     status: str = Query("pending"),
     category: Optional[str] = Query(None),
     mine: bool = Query(False),
     db: Session = Depends(get_db),
-    user=Depends(require_permission("work_item:view")),
-):
+    user: User = Depends(require_permission("work_item:view")),
+) -> dict[str, object]:
     query = db.query(WorkItem)
     if status == "pending":
         query = query.filter(WorkItem.is_done.is_(False))
@@ -137,11 +137,11 @@ def list_work_items(
     return {"items": [_serialize(item) for item in items], "total": len(items)}
 
 
-@router.get("/summary")
+@router.get("/summary", response_model=None)
 def work_item_summary(
     db: Session = Depends(get_db),
-    user=Depends(require_permission("work_item:view")),
-):
+    user: User = Depends(require_permission("work_item:view")),
+) -> dict[str, object]:
     now = datetime.utcnow()
     soon = now + timedelta(days=7)
     assigned = db.query(WorkItem).filter(
@@ -158,12 +158,12 @@ def work_item_summary(
     }
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=None)
 def create_work_item(
     body: WorkItemBody,
     db: Session = Depends(get_db),
-    user=Depends(require_permission("work_item:manage")),
-):
+    user: User = Depends(require_permission("work_item:manage")),
+) -> dict[str, object]:
     _validate_category(body.category, db)
     item = WorkItem(
         title=body.title.strip(),
@@ -180,13 +180,13 @@ def create_work_item(
     return _serialize(item)
 
 
-@router.put("/{item_id}")
+@router.put("/{item_id}", response_model=None)
 def update_work_item(
     item_id: int,
     body: WorkItemBody,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("work_item:manage")),
-):
+    _: User = Depends(require_permission("work_item:manage")),
+) -> dict[str, object]:
     item = db.query(WorkItem).filter(WorkItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="备忘不存在")
@@ -202,12 +202,12 @@ def update_work_item(
     return _serialize(item)
 
 
-@router.delete("/{item_id}", status_code=204)
+@router.delete("/{item_id}", status_code=204, response_model=None)
 def delete_work_item(
     item_id: int,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("work_item:manage")),
-):
+    _: User = Depends(require_permission("work_item:manage")),
+) -> None:
     item = db.query(WorkItem).filter(WorkItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="备忘不存在")

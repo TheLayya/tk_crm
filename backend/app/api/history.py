@@ -26,7 +26,7 @@ def get_account_history(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
-):
+) -> list[MonitorHistory]:
     """
     Get historical records for a monitor account with time range filtering.
     
@@ -81,7 +81,7 @@ def get_account_trends(
     start_time: Optional[datetime] = Query(None, description="Start of time range filter"),
     end_time: Optional[datetime] = Query(None, description="End of time range filter"),
     db: Session = Depends(get_db),
-):
+) -> TrendResponse:
     """
     Get trend data with calculated deltas between adjacent records.
     

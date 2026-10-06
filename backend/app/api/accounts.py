@@ -1,6 +1,8 @@
 """
 Account CRUD API endpoints with batch operations
 """
+from app.models.team import User
+from datetime import datetime
 import logging
 from typing import List, Optional
 
@@ -35,7 +37,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
 
-@router.get("")
+@router.get("", response_model=None)
 def get_accounts(
     project_id: Optional[int] = Query(None),
     keyword: Optional[str] = Query(None),
@@ -43,9 +45,9 @@ def get_accounts(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("monitor:view")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("monitor:view")),
+) -> dict[str, object]:
     try:
         data_scope = get_user_data_scope(db, current_user)
         dept_usernames = get_dept_member_usernames(db, current_user) if data_scope == "dept" else None
@@ -72,11 +74,11 @@ def get_accounts(
         account_ids = [account.id for account in accounts]
         yesterday_counts = video_service.get_yesterday_video_counts(db, account_ids)
         yesterday_plays = video_service.get_yesterday_video_plays(db, account_ids)
-        video_updated_at = dict(
+        video_updated_at = {account_id: collected_at for account_id, collected_at in
             db.query(Video.account_id, func.max(Video.updated_at))
             .filter(Video.account_id.in_(account_ids))
             .group_by(Video.account_id).all()
-        )
+        }
         result = []
         for account in accounts:
             account_dict = AccountResponse.model_validate(account).model_dump()
@@ -98,7 +100,7 @@ def get_accounts(
 
 
 @router.get("/{account_id}", response_model=AccountResponse)
-def get_account(account_id: int, db: Session = Depends(get_db)):
+def get_account(account_id: int, db: Session = Depends(get_db)) -> dict[str, object]:
     """
     Get a single account by ID.
     
@@ -128,7 +130,7 @@ def get_account(account_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
-def create_account(data: AccountCreate, db: Session = Depends(get_db)):
+def create_account(data: AccountCreate, db: Session = Depends(get_db)) -> dict[str, object]:
     """
     Create a new monitor account.
     
@@ -177,7 +179,7 @@ def update_account(
     account_id: int,
     data: AccountUpdate,
     db: Session = Depends(get_db),
-):
+) -> dict[str, object]:
     """
     Update a monitor account.
     
@@ -220,8 +222,8 @@ def update_account(
         )
 
 
-@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_account(account_id: int, db: Session = Depends(get_db)):
+@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
     """
     Delete a monitor account.
     
@@ -248,8 +250,8 @@ def delete_account(account_id: int, db: Session = Depends(get_db)):
         )
 
 
-@router.post("/{account_id}/check", status_code=status.HTTP_202_ACCEPTED)
-async def trigger_check(account_id: int, db: Session = Depends(get_db)):
+@router.post("/{account_id}/check", status_code=status.HTTP_202_ACCEPTED, response_model=None)
+async def trigger_check(account_id: int, db: Session = Depends(get_db)) -> dict[str, object]:
     """
     Manually trigger immediate check for a single account.
     
@@ -277,7 +279,7 @@ async def trigger_check(account_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/import", response_model=BatchAccountResult)
-def batch_import_accounts(data: BatchAccountCreate, db: Session = Depends(get_db)):
+def batch_import_accounts(data: BatchAccountCreate, db: Session = Depends(get_db)) -> BatchAccountResult:
     """
     Batch import accounts from multi-line text input.
     
@@ -375,8 +377,8 @@ def batch_import_accounts(data: BatchAccountCreate, db: Session = Depends(get_db
         )
 
 
-@router.post("/batch", status_code=status.HTTP_200_OK)
-def batch_action(data: BatchActionRequest, db: Session = Depends(get_db)):
+@router.post("/batch", status_code=status.HTTP_200_OK, response_model=None)
+def batch_action(data: BatchActionRequest, db: Session = Depends(get_db)) -> dict[str, object]:
     """
     Perform batch operations on multiple accounts.
     

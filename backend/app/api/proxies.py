@@ -1,6 +1,8 @@
 """
 Proxy CRUD API endpoints with connectivity testing
 """
+from app.models.monitor import MonitorProxy
+from typing import cast
 import logging
 from typing import List
 
@@ -17,7 +19,7 @@ router = APIRouter(prefix="/proxies", tags=["Proxies"])
 
 
 @router.post("/batch", response_model=ProxyBatchResult, status_code=status.HTTP_201_CREATED)
-def batch_create_proxies(data: ProxyBatchCreate, db: Session = Depends(get_db)):
+def batch_create_proxies(data: ProxyBatchCreate, db: Session = Depends(get_db)) -> ProxyBatchResult:
     """
     Batch create proxies from text input.
     
@@ -86,7 +88,8 @@ def batch_create_proxies(data: ProxyBatchCreate, db: Session = Depends(get_db)):
             success_count=success_count,
             fail_count=fail_count,
             errors=errors,
-            created_proxies=created_proxies
+            # Pydantic validates each ORM item through ProxyResponse.from_attributes.
+            created_proxies=cast(list[ProxyResponse], created_proxies)
         )
         
     except Exception as e:
@@ -102,7 +105,7 @@ def get_proxies(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
-):
+) -> list[MonitorProxy]:
     """
     Get paginated list of proxies.
     
@@ -123,7 +126,7 @@ def get_proxies(
 
 
 @router.get("/{proxy_id}", response_model=ProxyResponse)
-def get_proxy(proxy_id: int, db: Session = Depends(get_db)):
+def get_proxy(proxy_id: int, db: Session = Depends(get_db)) -> MonitorProxy:
     """
     Get a single proxy by ID.
     
@@ -148,7 +151,7 @@ def get_proxy(proxy_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=ProxyResponse, status_code=status.HTTP_201_CREATED)
-def create_proxy(data: ProxyCreate, db: Session = Depends(get_db)):
+def create_proxy(data: ProxyCreate, db: Session = Depends(get_db)) -> MonitorProxy:
     """
     Create a new proxy.
     
@@ -172,7 +175,7 @@ def update_proxy(
     proxy_id: int,
     data: ProxyUpdate,
     db: Session = Depends(get_db),
-):
+) -> MonitorProxy:
     """
     Update a proxy.
     
@@ -199,8 +202,8 @@ def update_proxy(
         )
 
 
-@router.delete("/{proxy_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_proxy(proxy_id: int, db: Session = Depends(get_db)):
+@router.delete("/{proxy_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+def delete_proxy(proxy_id: int, db: Session = Depends(get_db)) -> None:
     """
     Delete a proxy.
     
@@ -228,7 +231,7 @@ def delete_proxy(proxy_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{proxy_id}/test", response_model=ProxyTestResult)
-async def test_proxy(proxy_id: int, db: Session = Depends(get_db)):
+async def test_proxy(proxy_id: int, db: Session = Depends(get_db)) -> ProxyTestResult:
     """
     Test proxy connectivity.
     

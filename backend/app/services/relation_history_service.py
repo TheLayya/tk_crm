@@ -1,12 +1,38 @@
 import json
+from datetime import datetime
+from collections.abc import Mapping
+from typing import TypedDict, cast
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
 from app.models.device import Device, DeviceLog
 from app.models.proxy_node import ProxyNode
 from app.models.op_account import OpAccount, OpAuditLog
+from app.models.team import User
 from app.services.asset_scope_service import get_visible_node_ids, scoped_op_accounts
 
 
-def account_relation_snapshot(db, account):
+class RelationReference(TypedDict, total=False):
+    id: int
+    name: str
+
+
+class RelationSnapshot(TypedDict):
+    device: RelationReference | None
+    nodes: list[RelationReference]
+    source: str
+
+
+class HistoryEntry(TypedDict):
+    kind: str
+    id: int
+    name: str
+    first_recorded_at: datetime | None
+    last_recorded_at: datetime | None
+    current: bool
+    status: str | None
+
+
+def account_relation_snapshot(db: Session, account: OpAccount) -> RelationSnapshot:
     device = db.get(Device, account.device_id) if account.device_id else None
     if device and device.is_deleted:
         device = None
@@ -17,19 +43,19 @@ def account_relation_snapshot(db, account):
             "source": "沿用终端" if device else "直接关联"}
 
 
-def visible_accounts(db, user):
+def visible_accounts(db: Session, user: User) -> list[OpAccount]:
     return scoped_op_accounts(db, user).all()
 
 
-def parse_snapshot(log):
+def parse_snapshot(log: OpAuditLog) -> dict[str, object]:
     try:
         value = json.loads(log.new_value or "null")
-        return value if isinstance(value, dict) else {}
+        return cast(dict[str, object], value) if isinstance(value, dict) else {}
     except (ValueError, TypeError):
         return {}
 
 
-def relation_overview(db, kind, resource_id, user):
+def relation_overview(db: Session, kind: str, resource_id: int, user: User) -> dict[str, object]:
     accounts = visible_accounts(db, user)
     by_id = {account.id: account for account in accounts}
     model = {"account": OpAccount, "device": Device, "node": ProxyNode}[kind]
@@ -55,17 +81,17 @@ def relation_overview(db, kind, resource_id, user):
     logs = db.query(OpAuditLog).filter(OpAuditLog.op_account_id.in_(ids),
         OpAuditLog.field_name.in_(["device_id", "node_id", "relation_snapshot", "ban_snapshot"])
     ).order_by(OpAuditLog.created_at, OpAuditLog.id).all() if ids else []
-    entries = {}
-    current = []
-    bans = []
+    entries: dict[tuple[str, int], HistoryEntry] = {}
+    current: list[dict[str, object]] = []
+    bans: list[dict[str, object]] = []
 
-    def touch(entry_kind, object_id, name=None, when=None, is_current=False, status=None):
+    def touch(entry_kind: str, object_id: int | None, name: str | None = None, when: datetime | None = None, is_current: bool = False, status: str | None = None) -> None:
         if not object_id:
             return
         key = (entry_kind, object_id)
         if key not in entries:
             related = db.get({"account": OpAccount, "device": Device, "node": ProxyNode}[entry_kind], object_id)
-            display = name or (related.account if entry_kind == "account" and related else related.name if entry_kind == "device" and related else f"{related.ip}:{related.port}" if related else "历史对象已不存在")
+            display = name or (related.account if isinstance(related, OpAccount) else related.name if isinstance(related, Device) else f"{related.ip}:{related.port}" if isinstance(related, ProxyNode) else "历史对象已不存在")
             entries[key] = {"kind": entry_kind, "id": object_id, "name": display,
                             "first_recorded_at": None, "last_recorded_at": None,
                             "current": False, "status": status}
@@ -81,9 +107,9 @@ def relation_overview(db, kind, resource_id, user):
         for log in logs:
             if log.op_account_id != account.id:
                 continue
-            snapshot_log = parse_snapshot(log) if log.field_name.endswith("snapshot") else {}
-            device = snapshot_log.get("device") or {}
-            nodes = snapshot_log.get("nodes") or []
+            snapshot_log = parse_snapshot(log) if cast(str, log.field_name).endswith("snapshot") else {}
+            device = cast(RelationReference, snapshot_log.get("device") or {})
+            nodes = cast(list[RelationReference], snapshot_log.get("nodes") or [])
             if device.get("id"):
                 if kind == "account": touch("device", device["id"], device.get("name"), log.created_at)
             for node in nodes:
@@ -124,39 +150,40 @@ def relation_overview(db, kind, resource_id, user):
         devices = query.all()
         device_ids = [device.id for device in devices]
         device_logs = db.query(DeviceLog).filter(DeviceLog.device_id.in_(device_ids)).order_by(DeviceLog.created_at, DeviceLog.id).all() if device_ids else []
-        for device in devices:
-            if kind == "device" and device.id != resource_id:
+        for device_row in devices:
+            if kind == "device" and device_row.id != resource_id:
                 continue
-            current_ids = device.node_ids or ([device.node_id] if device.node_id else [])
+            current_ids = device_row.node_ids or ([device_row.node_id] if device_row.node_id else [])
             if kind == "device":
                 for node_id in current_ids: touch("node", node_id, is_current=True)
             elif resource_id in current_ids:
-                touch("device", device.id, device.name, is_current=True)
-            for log in device_logs:
-                if log.device_id != device.id:
+                touch("device", device_row.id, device_row.name, is_current=True)
+            for device_log in device_logs:
+                if device_log.device_id != device_row.id:
                     continue
                 try:
-                    changes = json.loads(log.changes or "{}")
+                    changes_value = json.loads(device_log.changes or "{}")
                 except (ValueError, TypeError):
                     continue
-                recorded_ids = set()
-                relations = changes.get("relations") or {}
+                changes = cast(dict[str, object], changes_value)
+                recorded_ids: set[int] = set()
+                relations = cast(dict[str, object], changes.get("relations") or {})
                 values = [relations.get("old_node_ids"), relations.get("new_node_ids")]
-                values.extend((relations.get(side) or {}).get("node_ids") for side in ("old", "new"))
+                values.extend(cast(Mapping[str, object], relations.get(side) or {}).get("node_ids") for side in ("old", "new"))
                 for field in ("node_id", "node_ids"):
-                    values.extend((changes.get(field) or {}).get(side) for side in ("old", "new"))
-                for value in values:
-                    if isinstance(value, str):
+                    values.extend(cast(Mapping[str, object], changes.get(field) or {}).get(side) for side in ("old", "new"))
+                for node_value in values:
+                    if isinstance(node_value, str):
                         try:
-                            value = json.loads(value)
+                            node_value = json.loads(node_value)
                         except ValueError:
                             continue
-                    for node_id in value if isinstance(value, list) else [value]:
-                        if node_id and str(node_id).isdecimal(): recorded_ids.add(int(node_id))
+                    for historical_node_id in cast(list[object], node_value) if isinstance(node_value, list) else [node_value]:
+                        if historical_node_id and str(historical_node_id).isdecimal(): recorded_ids.add(int(cast(int | str, historical_node_id)))
                 if kind == "device":
-                    for node_id in recorded_ids: touch("node", node_id, when=log.created_at)
+                    for node_id in recorded_ids: touch("node", node_id, when=device_log.created_at)
                 elif resource_id in recorded_ids:
-                    touch("device", device.id, device.name, log.created_at)
+                    touch("device", device_row.id, device_row.name, device_log.created_at)
     history = list(entries.values())
     return {"current": current, "history": history, "ban_snapshots": bans,
             "counts": {entry_kind: sum(entry["kind"] == entry_kind for entry in history) for entry_kind in ("account", "device", "node")},
@@ -164,7 +191,7 @@ def relation_overview(db, kind, resource_id, user):
             "note": "仅统计当前可见账号的已记录关联；旧记录可能缺失，首次/最近为记录时间，不是精确使用时段。封禁快照是系统登记封禁时的关联，不证明封禁原因。"}
 
 
-def readable_account_log(db, log):
+def readable_account_log(db: Session, log: OpAuditLog) -> dict[str, object]:
     field = log.field_name
     if log.action == "gmail_check":
         return {"summary": "Gmail 第三方检测", "details": [log.new_value or "检测失败", "探测结果，不覆盖管理状态"]}
@@ -172,13 +199,13 @@ def readable_account_log(db, log):
     if field in ("relation_snapshot", "ban_snapshot"):
         snapshot = parse_snapshot(log)
         return {"summary": "登记封禁时的关联" if field == "ban_snapshot" else "关联快照",
-                "details": ["终端：" + (snapshot.get("device") or {}).get("name", "未关联"),
-                            "节点：" + (" / ".join(node["name"] for node in snapshot.get("nodes", [])) or "未关联")]}
+                "details": ["终端：" + cast(RelationReference, snapshot.get("device") or {}).get("name", "未关联"),
+                            "节点：" + (" / ".join(node["name"] for node in cast(list[RelationReference], snapshot.get("nodes", []))) or "未关联")]}
     if field in ("device_id", "node_id"):
-        def display(value):
+        def display(value: str | None) -> str:
             if not value or not str(value).isdecimal(): return "未关联"
             related = db.get(Device if field == "device_id" else ProxyNode, int(value))
-            return related.name if related and field == "device_id" else f"{related.ip}:{related.port}" if related else "历史对象已不存在"
+            return related.name if isinstance(related, Device) else f"{related.ip}:{related.port}" if isinstance(related, ProxyNode) else "历史对象已不存在"
         return {"summary": ("解除" if not log.new_value else "关联" if not log.old_value else "切换") + labels[field],
                 "details": [display(log.old_value) + " → " + display(log.new_value)]}
     if log.action == "create": return {"summary": "新增账号", "details": []}

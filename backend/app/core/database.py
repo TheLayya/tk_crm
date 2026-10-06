@@ -1,6 +1,9 @@
 import os
+from collections.abc import Generator
+from sqlite3 import Connection
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.orm import sessionmaker, DeclarativeBase, Session
+from sqlalchemy.pool import ConnectionPoolEntry
 from app.core.config import settings
 
 # 确保数据目录存在（SQLite 场景）
@@ -22,7 +25,7 @@ engine = create_engine(
 )
 if settings.DATABASE_URL.startswith("sqlite"):
     @event.listens_for(engine, "connect")
-    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    def _enable_sqlite_foreign_keys(dbapi_connection: Connection, _connection_record: ConnectionPoolEntry) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
@@ -31,7 +34,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 class Base(DeclarativeBase):
     pass
 
-def get_db():
+def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db

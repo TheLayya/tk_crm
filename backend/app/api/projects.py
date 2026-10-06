@@ -1,6 +1,8 @@
 """
 Project CRUD API endpoints
 """
+from app.models.monitor import Project
+from app.models.team import User
 import logging
 from typing import List, Optional
 
@@ -23,7 +25,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
 
-def _resolve_allowed_ids(db, current_user):
+def _resolve_allowed_ids(db: Session, current_user: User) -> tuple[list[int] | None, str]:
     """根据当前用户的数据范围，返回可见项目 ID 列表（None 表示全部可见）。"""
     data_scope = get_user_data_scope(db, current_user)
     dept_usernames = get_dept_member_usernames(db, current_user) if data_scope == "dept" else None
@@ -35,10 +37,10 @@ def _resolve_allowed_ids(db, current_user):
 @router.get("", response_model=List[ProjectResponse])
 def get_projects(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("monitor:view")),
-):
-    allowed_ids, _ = _resolve_allowed_ids(db, current_user)
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("monitor:view")),
+) -> list[Project]:
+    allowed_ids, data_scope = _resolve_allowed_ids(db, current_user)
     return project_service.get_projects(db, allowed_ids=allowed_ids)
 
 
@@ -46,13 +48,13 @@ def get_projects(
 def get_project(
     project_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("monitor:view")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("monitor:view")),
+) -> Project:
     project = project_service.get_project(db, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    allowed_ids, _ = _resolve_allowed_ids(db, current_user)
+    allowed_ids, data_scope = _resolve_allowed_ids(db, current_user)
     if allowed_ids is not None and project_id not in allowed_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该项目")
     return project
@@ -62,9 +64,9 @@ def get_project(
 def create_project(
     data: ProjectCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("monitor:view")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("monitor:view")),
+) -> Project:
     try:
         return project_service.create_project(db, data, created_by=current_user.username)
     except ValueError as e:
@@ -76,14 +78,14 @@ def update_project(
     project_id: int,
     data: ProjectUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("monitor:view")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("monitor:view")),
+) -> Project | None:
     project = project_service.get_project(db, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     # 只有创建人或 all 范围的用户才能修改
-    _, data_scope = _resolve_allowed_ids(db, current_user)
+    allowed_ids, data_scope = _resolve_allowed_ids(db, current_user)
     if data_scope == "self" and project.created_by != current_user.username:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有项目创建人才能修改")
     try:
@@ -92,17 +94,17 @@ def update_project(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 
-@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_project(
     project_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("monitor:view")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("monitor:view")),
+) -> None:
     project = project_service.get_project(db, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    _, data_scope = _resolve_allowed_ids(db, current_user)
+    allowed_ids, data_scope = _resolve_allowed_ids(db, current_user)
     if data_scope == "self" and project.created_by != current_user.username:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有项目创建人才能删除")
     try:
@@ -126,13 +128,13 @@ class ProjectMembersUpdate(BaseModel):
 def get_project_members(
     project_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("monitor:view")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("monitor:view")),
+) -> list[str]:
     project = project_service.get_project(db, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    allowed_ids, _ = _resolve_allowed_ids(db, current_user)
+    allowed_ids, data_scope = _resolve_allowed_ids(db, current_user)
     if allowed_ids is not None and project_id not in allowed_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该项目")
     return project_service.get_project_members(db, project_id)
@@ -143,14 +145,14 @@ def set_project_members(
     project_id: int,
     data: ProjectMembersUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("monitor:view")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("monitor:view")),
+) -> list[str]:
     """设置项目协作成员（全量替换）。只有创建人或 all 范围用户可操作。"""
     project = project_service.get_project(db, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    _, data_scope = _resolve_allowed_ids(db, current_user)
+    allowed_ids, data_scope = _resolve_allowed_ids(db, current_user)
     if data_scope == "self" and project.created_by != current_user.username:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有项目创建人才能管理协作成员")
     project_service.set_project_members(db, project_id, data.usernames)

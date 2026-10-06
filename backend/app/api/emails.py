@@ -1,3 +1,5 @@
+from typing import Any, overload, cast
+from sqlalchemy.orm import Query as ORMQuery
 import csv
 import json
 import re
@@ -29,21 +31,29 @@ from app.services.sale_validation_service import validate_sale_information
 router = APIRouter(prefix="/emails", tags=["emails"])
 
 
-def _platform_json(row):
+def _platform_json(row: CardKeyPlatform) -> dict[str, object]:
     return {"id": row.id, "name": row.name, "is_active": row.is_active}
 
 
-@router.get("/platforms")
-def list_email_platforms(db: Session = Depends(get_db), _=Depends(require_permission("email:view"))):
+@router.get("/platforms", response_model=None)
+def list_email_platforms(db: Session = Depends(get_db), _: User = Depends(require_permission("email:view"))) -> list[dict[str, object]]:
     return [_platform_json(row) for row in db.query(CardKeyPlatform).filter(
         CardKeyPlatform.is_active.is_(True),
     ).order_by(CardKeyPlatform.name).all()]
 
 
-def scoped_query(db, model, user):
+@overload
+def scoped_query(db: Session, model: type[EmailAccount], user: User) -> ORMQuery[EmailAccount]: ...
+
+
+@overload
+def scoped_query(db: Session, model: type[OpAccount], user: User) -> ORMQuery[OpAccount]: ...
+
+
+def scoped_query(db: Session, model: type[EmailAccount] | type[OpAccount], user: User) -> ORMQuery[EmailAccount] | ORMQuery[OpAccount]:
     if model is OpAccount:
         return scoped_op_accounts(db, user)
-    query = db.query(model)
+    query = cast(ORMQuery[EmailAccount], db.query(model))
     scope = get_user_data_scope(db, user)
     if scope != "all":
         allowed = get_dept_member_usernames(db, user) if scope == "dept" else [user.username]
@@ -51,14 +61,14 @@ def scoped_query(db, model, user):
     return query
 
 
-def get_email(db, email_id, user):
+def get_email(db: Session, email_id: int, user: User) -> EmailAccount:
     email = scoped_query(db, EmailAccount, user).filter(EmailAccount.id == email_id).first()
     if not email:
         raise HTTPException(status_code=404, detail="邮箱不存在或无权访问")
     return email
 
 
-def validate_values(values):
+def validate_values(values: dict[str, Any]) -> None:
     if "email" in values:
         email = (values["email"] or "").strip().lower()
         if not re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}", email):
@@ -68,11 +78,11 @@ def validate_values(values):
         raise HTTPException(status_code=422, detail="使用状态无效")
 
 
-def validate_sale(values):
+def validate_sale(values: dict[str, Any]) -> None:
     validate_sale_information({**values, "status": values.get("management_status")}, "已出售", require_date=True)
 
 
-def save(db):
+def save(db: Session) -> None:
     try:
         db.commit()
     except IntegrityError:
@@ -80,7 +90,7 @@ def save(db):
         raise HTTPException(status_code=409, detail="邮箱已存在") from None
 
 
-def email_response(email, count=0, db=None, platform_registrants=None):
+def email_response(email: EmailAccount, count: int=0, db: Session | None = None, platform_registrants: dict[str, str] | None = None) -> EmailAccountResponse:
     result = EmailAccountResponse.model_validate(email)
     try:
         result.platform_tags = json.loads(email.platform_tags or "[]")
@@ -96,7 +106,7 @@ def email_response(email, count=0, db=None, platform_registrants=None):
     return result
 
 
-def validate_assets(db, values, user):
+def validate_assets(db: Session, values: dict[str, Any], user: User) -> None:
     device_id = values.get("device_id")
     node_id = values.get("node_id")
     scope = get_user_data_scope(db, user)
@@ -119,7 +129,7 @@ def validate_assets(db, values, user):
                 raise HTTPException(status_code=403, detail="无权绑定此节点")
 
 
-def record_assets(db, email, values, user):
+def record_assets(db: Session, email: EmailAccount, values: dict[str, Any], user: User) -> None:
     now = datetime.utcnow()
     for field in ("device_id", "node_id"):
         if field not in values or getattr(email, field) == values[field]:
@@ -135,7 +145,7 @@ def record_assets(db, email, values, user):
             db.add(EmailAssetRelation(email_id=email.id, **{field: values[field]}, operator=user.username))
 
 
-def prepare_trade(values):
+def prepare_trade(values: dict[str, Any]) -> None:
     if "sellers" in values:
         values["sellers"] = json.dumps(values["sellers"] or [], ensure_ascii=False)
     for field in ("purchase_price", "sale_price"):
@@ -147,11 +157,11 @@ def prepare_trade(values):
         )), ensure_ascii=False)
 
 
-@router.get("")
+@router.get("", response_model=None)
 def list_emails(keyword: str | None = None, management_status: str | None = None,
                 platform: str | None = None,
                 skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
-                db: Session = Depends(get_db), user=Depends(require_permission("email:view"))):
+                db: Session = Depends(get_db), user: User = Depends(require_permission("email:view"))) -> dict[str, object]:
     query = scoped_query(db, EmailAccount, user)
     if keyword:
         query = query.filter(or_(EmailAccount.email.ilike(f"%{keyword}%"), EmailAccount.recovery_email.ilike(f"%{keyword}%")))
@@ -162,11 +172,11 @@ def list_emails(keyword: str | None = None, management_status: str | None = None
     total = query.count()
     emails = query.order_by(EmailAccount.id.desc()).offset(skip).limit(limit).all()
     email_ids = [email.id for email in emails]
-    counts = dict(db.query(EmailAccountRelation.email_id, func.count(EmailAccountRelation.id)).filter(
+    counts = {email_id: count for email_id, count in db.query(EmailAccountRelation.email_id, func.count(EmailAccountRelation.id)).filter(
         EmailAccountRelation.email_id.in_(email_ids),
         EmailAccountRelation.unbound_at.is_(None),
-    ).group_by(EmailAccountRelation.email_id).all())
-    registrations = {}
+    ).group_by(EmailAccountRelation.email_id).all()}
+    registrations: dict[int, dict[str, str]] = {}
     if email_ids:
         for email_id, platform_name, username in db.query(CardKeyEmailUsage.email_id, CardKeyEmailUsage.platform, CardKeyEmailUsage.username).filter(CardKeyEmailUsage.email_id.in_(email_ids)).order_by(CardKeyEmailUsage.completed_at.desc()).all():
             registrations.setdefault(email_id, {}).setdefault(platform_name, username)
@@ -174,7 +184,7 @@ def list_emails(keyword: str | None = None, management_status: str | None = None
 
 
 @router.post("", response_model=EmailAccountResponse)
-def create_email(body: EmailAccountCreate, db: Session = Depends(get_db), user=Depends(require_permission("email:manage"))):
+def create_email(body: EmailAccountCreate, db: Session = Depends(get_db), user: User = Depends(require_permission("email:manage"))) -> EmailAccountResponse:
     values = body.model_dump()
     validate_values(values)
     validate_sale(values)
@@ -195,14 +205,14 @@ def create_email(body: EmailAccountCreate, db: Session = Depends(get_db), user=D
     return email_response(email, db=db)
 
 
-@router.post("/import")
-def import_emails(body: EmailImportRequest, db: Session = Depends(get_db), user=Depends(require_permission("email:import"))):
+@router.post("/import", response_model=None)
+def import_emails(body: EmailImportRequest, db: Session = Depends(get_db), user: User = Depends(require_permission("email:import"))) -> dict[str, object]:
     lines = [(number, line) for number, line in enumerate(body.text.lstrip("\ufeff").splitlines(), 1) if line.strip()]
     if not lines or len(lines) > 5000:
         raise HTTPException(status_code=422, detail="每次请输入 1-5000 行邮箱")
     rows = []
     for number, line in lines:
-        result = {"line": number}
+        result: dict[str, object] = {"line": number}
         try:
             values = parse_email_import_line(line, body.import_format, body.delimiter)
             values["purchase_channel"] = body.purchase_channel
@@ -228,8 +238,8 @@ def import_emails(body: EmailImportRequest, db: Session = Depends(get_db), user=
             "failed": sum(row["_result"] == "failed" for row in rows), "rows": rows}
 
 
-@router.post("/check")
-def check_emails(body: GmailCheckRequest, db: Session = Depends(get_db), user=Depends(require_permission("email:check"))):
+@router.post("/check", response_model=None)
+def check_emails(body: GmailCheckRequest, db: Session = Depends(get_db), user: User = Depends(require_permission("email:check"))) -> dict[str, object]:
     from app.api.op_accounts import gmail_check_lock
     emails = [get_email(db, email_id, user) for email_id in dict.fromkeys(body.account_ids)]
     if any(not email.email.endswith("@gmail.com") for email in emails):
@@ -253,8 +263,8 @@ def check_emails(body: GmailCheckRequest, db: Session = Depends(get_db), user=De
     return {"checked": len(emails)}
 
 
-@router.get("/account-options")
-def account_options(keyword: str = "", db: Session = Depends(get_db), user=Depends(require_permission("op_account:view"))):
+@router.get("/account-options", response_model=None)
+def account_options(keyword: str = "", db: Session = Depends(get_db), user: User = Depends(require_permission("op_account:view"))) -> list[dict[str, object]]:
     accounts = scoped_query(db, OpAccount, user).filter(OpAccount.platform != "gmail")
     if keyword:
         accounts = accounts.filter(OpAccount.account.ilike(f"%{keyword}%"))
@@ -262,9 +272,9 @@ def account_options(keyword: str = "", db: Session = Depends(get_db), user=Depen
             for account in accounts.limit(100).all()]
 
 
-@router.get("/for-account/{account_id}")
+@router.get("/for-account/{account_id}", response_model=None)
 def account_emails(account_id: int, db: Session = Depends(get_db),
-                   user=Depends(require_permission("email:view")), _=Depends(require_permission("op_account:view"))):
+                   user: User = Depends(require_permission("email:view")), _: User = Depends(require_permission("op_account:view"))) -> list[dict[str, object]]:
     if not scoped_query(db, OpAccount, user).filter_by(id=account_id).first():
         raise HTTPException(status_code=404, detail="运营账号不存在或无权访问")
     accessible = scoped_query(db, EmailAccount, user).with_entities(EmailAccount.id).subquery()
@@ -279,7 +289,7 @@ def account_emails(account_id: int, db: Session = Depends(get_db),
 
 
 @router.put("/{email_id}", response_model=EmailAccountResponse)
-def update_email(email_id: int, body: EmailAccountUpdate, db: Session = Depends(get_db), user=Depends(require_permission("email:manage"))):
+def update_email(email_id: int, body: EmailAccountUpdate, db: Session = Depends(get_db), user: User = Depends(require_permission("email:manage"))) -> EmailAccountResponse:
     email = get_email(db, email_id, user)
     values = body.model_dump(exclude_unset=True)
     validate_values(values)
@@ -293,8 +303,8 @@ def update_email(email_id: int, body: EmailAccountUpdate, db: Session = Depends(
     return email_response(email, db=db)
 
 
-@router.delete("/{email_id}")
-def delete_email(email_id: int, db: Session = Depends(get_db), user=Depends(require_permission("email:manage"))):
+@router.delete("/{email_id}", response_model=None)
+def delete_email(email_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("email:manage"))) -> dict[str, object]:
     email = get_email(db, email_id, user)
     if db.query(EmailAccountRelation).filter_by(email_id=email_id).first() or db.query(EmailAssetRelation).filter_by(email_id=email_id).first():
         raise HTTPException(status_code=409, detail="邮箱已有绑定历史，请设为废弃以保留追溯记录")
@@ -303,8 +313,8 @@ def delete_email(email_id: int, db: Session = Depends(get_db), user=Depends(requ
     return {"deleted": True}
 
 
-@router.get("/{email_id}/asset-history")
-def asset_history(email_id: int, db: Session = Depends(get_db), user=Depends(require_permission("email:view"))):
+@router.get("/{email_id}/asset-history", response_model=None)
+def asset_history(email_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("email:view"))) -> list[dict[str, object]]:
     get_email(db, email_id, user)
     rows = db.query(EmailAssetRelation).filter_by(email_id=email_id).order_by(EmailAssetRelation.bound_at.desc()).all()
     return [{"id": row.id, "kind": "手机" if row.device_id else "节点",
@@ -313,8 +323,8 @@ def asset_history(email_id: int, db: Session = Depends(get_db), user=Depends(req
              "operator": row.operator, "unbound_by": row.unbound_by} for row in rows]
 
 
-@router.get("/{email_id}/relations")
-def relations(email_id: int, db: Session = Depends(get_db), user=Depends(require_permission("email:view"))):
+@router.get("/{email_id}/relations", response_model=None)
+def relations(email_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("email:view"))) -> list[dict[str, object]]:
     get_email(db, email_id, user)
     accessible = scoped_query(db, OpAccount, user).with_entities(OpAccount.id).subquery()
     rows = db.query(EmailAccountRelation).filter(
@@ -326,9 +336,9 @@ def relations(email_id: int, db: Session = Depends(get_db), user=Depends(require
              "operator": row.operator, "unbound_by": row.unbound_by, "remark": row.remark} for row in rows]
 
 
-@router.post("/{email_id}/relations")
+@router.post("/{email_id}/relations", response_model=None)
 def bind_account(email_id: int, body: EmailRelationRequest, db: Session = Depends(get_db),
-                 user=Depends(require_permission("email:manage")), _=Depends(require_permission("op_account:edit"))):
+                 user: User = Depends(require_permission("email:manage")), _: User = Depends(require_permission("op_account:edit"))) -> dict[str, object]:
     email = get_email(db, email_id, user)
     account = scoped_query(db, OpAccount, user).filter(OpAccount.id == body.op_account_id, OpAccount.platform != "gmail").first()
     if not account:
@@ -344,9 +354,9 @@ def bind_account(email_id: int, body: EmailRelationRequest, db: Session = Depend
     return {"bound": True}
 
 
-@router.delete("/{email_id}/relations/{relation_id}")
+@router.delete("/{email_id}/relations/{relation_id}", response_model=None)
 def unbind_account(email_id: int, relation_id: int, db: Session = Depends(get_db),
-                   user=Depends(require_permission("email:manage")), _=Depends(require_permission("op_account:edit"))):
+                   user: User = Depends(require_permission("email:manage")), _: User = Depends(require_permission("op_account:edit"))) -> dict[str, object]:
     email = get_email(db, email_id, user)
     relation = db.query(EmailAccountRelation).filter_by(id=relation_id, email_id=email_id, unbound_at=None).first()
     if not relation or not scoped_query(db, OpAccount, user).filter_by(id=relation.op_account_id).first():

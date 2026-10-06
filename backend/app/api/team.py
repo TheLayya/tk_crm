@@ -10,9 +10,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.team import LoginLog, OperationLog, OperationToken
+from app.models.team import LoginLog, OperationLog, OperationToken, User
 from app.services.auth_service import require_permission
 from app.services.team_service import (
+    DepartmentNode,
     create_dept,
     create_member,
     create_role,
@@ -108,47 +109,47 @@ class RoleUpdate(BaseModel):
 
 # ── Department routes ─────────────────────────────────────────────────────────
 
-@router.get("/dept/tree")
+@router.get("/dept/tree", response_model=None)
 def get_department_tree(
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:dept:view")),
-):
+    _: User = Depends(require_permission("team:dept:view")),
+) -> list[DepartmentNode]:
     return get_dept_tree(db)
 
 
-@router.post("/dept", status_code=201)
+@router.post("/dept", status_code=201, response_model=None)
 def create_department(
     body: DeptCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:dept:create")),
-):
+    _: User = Depends(require_permission("team:dept:create")),
+) -> dict[str, object]:
     dept = create_dept(body.model_dump(), db)
     return {"id": dept.id, "name": dept.name, "parent_id": dept.parent_id}
 
 
-@router.put("/dept/{id}")
+@router.put("/dept/{id}", response_model=None)
 def update_department(
     id: int,
     body: DeptUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:dept:edit")),
-):
+    _: User = Depends(require_permission("team:dept:edit")),
+) -> dict[str, object]:
     dept = update_dept(id, body.model_dump(exclude_none=True), db)
     return {"id": dept.id, "name": dept.name, "parent_id": dept.parent_id}
 
 
-@router.delete("/dept/{id}", status_code=204)
+@router.delete("/dept/{id}", status_code=204, response_model=None)
 def delete_department(
     id: int,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:dept:delete")),
-):
+    _: User = Depends(require_permission("team:dept:delete")),
+) -> None:
     delete_dept(id, db)
 
 
 # ── Member routes ─────────────────────────────────────────────────────────────
 
-@router.get("/member")
+@router.get("/member", response_model=None)
 def get_members(
     dept_id: Optional[int] = Query(None),
     username: Optional[str] = Query(None),
@@ -156,17 +157,17 @@ def get_members(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:member:view")),
-):
+    _: User = Depends(require_permission("team:member:view")),
+) -> dict[str, object]:
     return list_members(dept_id, username, is_active, page, size, db)
 
 
-@router.post("/member", status_code=201)
+@router.post("/member", status_code=201, response_model=None)
 def create_member_route(
     body: MemberCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:member:create")),
-):
+    _: User = Depends(require_permission("team:member:create")),
+) -> dict[str, object]:
     user = create_member(body.model_dump(), db)
     return {
         "id": user.id,
@@ -177,13 +178,13 @@ def create_member_route(
     }
 
 
-@router.put("/member/{id}")
+@router.put("/member/{id}", response_model=None)
 def update_member_route(
     id: int,
     body: MemberUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:member:edit")),
-):
+    _: User = Depends(require_permission("team:member:edit")),
+) -> dict[str, object]:
     user = update_member(id, body.model_dump(exclude_none=True), db)
     return {
         "id": user.id,
@@ -194,82 +195,82 @@ def update_member_route(
     }
 
 
-@router.delete("/member/{id}", status_code=204)
+@router.delete("/member/{id}", status_code=204, response_model=None)
 def delete_member_route(
     id: int,
     x_operation_token: Optional[str] = Header(None, alias="X-Operation-Token"),
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:member:delete")),
-):
+    _: User = Depends(require_permission("team:member:delete")),
+) -> None:
     _validate_operation_token(x_operation_token, db)
     delete_member(id, db)
 
 
-@router.post("/member/{id}/reset-password", status_code=204)
+@router.post("/member/{id}/reset-password", status_code=204, response_model=None)
 def reset_member_password(
     id: int,
     body: ResetPasswordRequest,
     x_operation_token: Optional[str] = Header(None, alias="X-Operation-Token"),
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:member:reset_password")),
-):
+    _: User = Depends(require_permission("team:member:reset_password")),
+) -> None:
     _validate_operation_token(x_operation_token, db)
     reset_password(id, body.new_password, db)
 
 
-@router.post("/member/{id}/unlock", status_code=204)
+@router.post("/member/{id}/unlock", status_code=204, response_model=None)
 def unlock_member_route(
     id: int,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:member:edit")),
-):
+    _: User = Depends(require_permission("team:member:edit")),
+) -> None:
     """解除账号登录锁定（清除15分钟内的失败记录）"""
     unlock_member(id, db)
 
 
 # ── Role routes ───────────────────────────────────────────────────────────────
 
-@router.get("/role")
+@router.get("/role", response_model=None)
 def get_roles(
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:role:view")),
-):
+    _: User = Depends(require_permission("team:role:view")),
+) -> list[dict[str, object]]:
     return list_roles(db)
 
 
-@router.post("/role", status_code=201)
+@router.post("/role", status_code=201, response_model=None)
 def create_role_route(
     body: RoleCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:role:create")),
-):
+    _: User = Depends(require_permission("team:role:create")),
+) -> dict[str, object]:
     role = create_role(body.model_dump(), db)
     return {"id": role.id, "name": role.name, "description": role.description}
 
 
-@router.put("/role/{id}")
+@router.put("/role/{id}", response_model=None)
 def update_role_route(
     id: int,
     body: RoleUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:role:edit")),
-):
+    _: User = Depends(require_permission("team:role:edit")),
+) -> dict[str, object]:
     role = update_role(id, body.model_dump(exclude_none=True), db)
     return {"id": role.id, "name": role.name, "description": role.description}
 
 
-@router.delete("/role/{id}", status_code=204)
+@router.delete("/role/{id}", status_code=204, response_model=None)
 def delete_role_route(
     id: int,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:role:delete")),
-):
+    _: User = Depends(require_permission("team:role:delete")),
+) -> None:
     delete_role(id, db)
 
 
 # ── Log routes ────────────────────────────────────────────────────────────────
 
-@router.get("/log/login")
+@router.get("/log/login", response_model=None)
 def get_login_logs(
     username: Optional[str] = Query(None),
     start_time: Optional[datetime] = Query(None),
@@ -278,8 +279,8 @@ def get_login_logs(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:log:view")),
-):
+    _: User = Depends(require_permission("team:log:view")),
+) -> dict[str, object]:
     query = db.query(LoginLog)
 
     if username:
@@ -312,7 +313,7 @@ def get_login_logs(
     }
 
 
-@router.get("/log/operation")
+@router.get("/log/operation", response_model=None)
 def get_operation_logs(
     username: Optional[str] = Query(None),
     start_time: Optional[datetime] = Query(None),
@@ -322,8 +323,8 @@ def get_operation_logs(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _=Depends(require_permission("team:log:view")),
-):
+    _: User = Depends(require_permission("team:log:view")),
+) -> dict[str, object]:
     query = db.query(OperationLog)
 
     if username:

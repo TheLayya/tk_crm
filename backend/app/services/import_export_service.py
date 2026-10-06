@@ -2,7 +2,8 @@ import csv
 import io
 import logging
 from datetime import datetime
-from typing import Optional, List
+from typing import Any, Optional, List, cast
+from openpyxl.cell.cell import Cell
 
 from sqlalchemy.orm import Session
 
@@ -60,7 +61,7 @@ def _get_export_accounts(db: Session, project_id: Optional[int]) -> List[Monitor
     return query.order_by(MonitorAccount.id).all()
 
 
-def _get_24h_ago_data(db: Session, account_id: int) -> Optional[dict]:
+def _get_24h_ago_data(db: Session, account_id: int) -> Optional[dict[str, int]]:
     """获取24小时前的历史数据"""
     from app.models.monitor import MonitorHistory
     from datetime import timedelta
@@ -113,7 +114,7 @@ def export_accounts_csv(db: Session, project_id: Optional[int] = None) -> str:
                 field_name = f.replace("_24h", "")
                 row[f] = data_24h_ago.get(field_name, "") if data_24h_ago else "-"
             elif f.endswith("_change_24h"):
-                field_name = f.replace("_change_24h", "")
+                field_name = f.replace("_change_24h", "_count")
                 current = getattr(acc, field_name, 0) or 0
                 if data_24h_ago:
                     old = data_24h_ago.get(field_name, 0) or 0
@@ -138,6 +139,7 @@ def export_accounts_excel(db: Session, project_id: Optional[int] = None) -> byte
     accounts = _get_export_accounts(db, project_id)
     wb = openpyxl.Workbook()
     ws = wb.active
+    assert ws is not None
     ws.title = "Accounts"
     
     # 中文表头映射
@@ -188,7 +190,7 @@ def export_accounts_excel(db: Session, project_id: Optional[int] = None) -> byte
         # 获取24小时前的数据
         data_24h_ago = _get_24h_ago_data(db, acc.id)
         
-        row_data = []
+        row_data: list[Any] = []
         for f in _EXPORT_FIELDS:
             # 处理24小时对比字段
             if f.endswith("_24h") and not f.endswith("change_24h"):
@@ -200,7 +202,7 @@ def export_accounts_excel(db: Session, project_id: Optional[int] = None) -> byte
                     row_data.append("-")
             elif f.endswith("_change_24h"):
                 # 24小时变化
-                field_name = f.replace("_change_24h", "")
+                field_name = f.replace("_change_24h", "_count")
                 current_value = getattr(acc, field_name, 0) or 0
                 if data_24h_ago:
                     old_value = data_24h_ago.get(field_name, 0) or 0
@@ -225,7 +227,7 @@ def export_accounts_excel(db: Session, project_id: Optional[int] = None) -> byte
                     row_data.append("是" if value else "否")
                 elif f == "monitor_interval":
                     # 将秒转换为分钟显示
-                    row_data.append(value // 60 if value else 0)
+                    row_data.append(cast(int, value) // 60 if value else 0)
                 elif isinstance(value, (int, float)):
                     row_data.append(value)
                 else:
@@ -242,7 +244,7 @@ def export_accounts_excel(db: Session, project_id: Optional[int] = None) -> byte
     # 自动调整列宽
     for column in ws.columns:
         max_length = 0
-        column_letter = column[0].column_letter
+        column_letter = cast(Cell, column[0]).column_letter
         for cell in column:
             try:
                 if cell.value:
@@ -386,6 +388,7 @@ def _extract_usernames_from_excel(content: bytes) -> List[str]:
 
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     ws = wb.active
+    assert ws is not None
 
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
@@ -410,7 +413,7 @@ def _extract_usernames_from_excel(content: bytes) -> List[str]:
 # Batch actions
 # ---------------------------------------------------------------------------
 
-async def batch_action(db: Session, data: BatchActionRequest) -> dict:
+async def batch_action(db: Session, data: BatchActionRequest) -> dict[str, Any]:
     """批量操作：enable / disable / delete / move。"""
     action = data.action
     account_ids = data.account_ids

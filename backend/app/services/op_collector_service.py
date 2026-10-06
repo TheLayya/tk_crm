@@ -1,7 +1,7 @@
 import logging
 import random
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, cast
 
 from sqlalchemy.orm import Session
 
@@ -26,12 +26,12 @@ def select_proxy(db: Session) -> Optional[MonitorProxy]:
     return random.choice(proxies)
 
 
-async def _collect_tiktok(db: Session, account: OpAccount, proxy) -> dict:
+async def _collect_tiktok(db: Session, account: OpAccount, proxy: MonitorProxy | None) -> dict[str, Any]:
     """调用 scraper_service 采集 TikTok 用户信息，成功返回 dict，失败抛出异常。"""
     result = await scraper_service.fetch_user_info(account.account.strip().lstrip("@"), proxy=proxy)
     if not result.get("success") or not result.get("data"):
         raise RuntimeError(result.get("error") or "fetch_user_info returned no data")
-    return result["data"]
+    return cast(dict[str, Any], result["data"])
 
 
 def _collect_unsupported(db: Session, account: OpAccount) -> None:
@@ -39,7 +39,7 @@ def _collect_unsupported(db: Session, account: OpAccount) -> None:
     db.commit()
 
 
-async def collect_account(db: Session, account: OpAccount, proxy) -> bool:
+async def collect_account(db: Session, account: OpAccount, proxy: MonitorProxy | None) -> bool:
     """
     按 platform 路由采集。
     - tiktok: 采集基础数据与视频；视频失败时保留成功的基础数据与历史视频。

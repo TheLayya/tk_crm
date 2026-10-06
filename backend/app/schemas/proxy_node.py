@@ -83,7 +83,7 @@ class ProxyNodeUpdate(BaseModel):
     # 备注
     remark: Optional[str] = None
 
-    def get_update_data(self) -> dict:
+    def get_update_data(self) -> dict[str, object]:
         """返回仅包含显式设置字段的字典（PATCH 语义）。"""
         return self.model_dump(exclude_unset=True)
 
@@ -124,8 +124,8 @@ class ProxyNodeResponse(BaseModel):
     device_name: Optional[str] = None
     account_count: int = 0
     account_ids: List[int] = []
-    devices: List[dict] = []
-    accounts: List[dict] = []
+    devices: List[dict[str, object]] = []
+    accounts: List[dict[str, object]] = []
 
 class ProxyNodeLegacyFields(BaseModel):
     model_config = ConfigDict(extra="forbid")

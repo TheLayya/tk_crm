@@ -2,10 +2,10 @@ import json
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, TypedDict, cast
 from urllib.parse import quote
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models.proxy_node import ProxyNode
@@ -19,6 +19,12 @@ from app.schemas.proxy_node import (
 )
 
 logger = logging.getLogger(__name__)
+_set_committed_value = cast(Callable[[object, str, object], None], set_committed_value)
+
+
+class ChannelTotals(TypedDict):
+    count: int
+    total_cost: Decimal
 
 
 # ---------------------------------------------------------------------------
@@ -44,11 +50,11 @@ def _deserialize_sellers(value: Optional[str]) -> List[str]:
 def _deserialize_node(node: ProxyNode) -> ProxyNode:
     """反序列化节点的 JSON 字段。"""
     if node:
-        set_committed_value(node, "sellers", _deserialize_sellers(node.sellers))
+        _set_committed_value(node, "sellers", _deserialize_sellers(node.sellers))
     return node
 
 
-def _apply_filter(query, filter: ProxyNodeFilter):
+def _apply_filter(query: Query[ProxyNode], filter: ProxyNodeFilter) -> Query[ProxyNode]:
     """将 ProxyNodeFilter 中的条件应用到 query，返回新 query。"""
     if filter.status:
         query = query.filter(ProxyNode.status.in_(filter.status))
@@ -122,7 +128,7 @@ def update_node(
     update_data = data.get_update_data()
     validate_sale_information({**{field: getattr(node, field) for field in ("status", "sale_customer", "sale_price", "sellers")}, **update_data}, "sold")
     if 'sellers' in update_data:
-        update_data['sellers'] = _serialize_sellers(update_data['sellers'])
+        update_data['sellers'] = _serialize_sellers(cast(list[str] | None, update_data['sellers']))
     for field, value in update_data.items():
         setattr(node, field, value)
 
@@ -174,9 +180,9 @@ def batch_delete_nodes(db: Session, node_ids: List[int]) -> int:
     return deleted
 
 
-def batch_update_status(db: Session, node_ids: List[int], status: str, sale_customer=None, sale_price=None, sellers=None) -> int:
+def batch_update_status(db: Session, node_ids: List[int], status: str, sale_customer: str | None = None, sale_price: Decimal | None = None, sellers: list[str] | None = None) -> int:
     """批量修改状态，自动更新 updated_at，返回更新数量。"""
-    values = {"status": status, "updated_at": datetime.utcnow()}
+    values: dict[str, Any] = {"status": status, "updated_at": datetime.utcnow()}
     if status == "sold":
         validate_sale_information(dict(status=status, sale_customer=sale_customer, sale_price=sale_price, sellers=sellers), "sold")
         values.update(sale_customer=sale_customer, sale_price=sale_price, sellers=_serialize_sellers(sellers))
@@ -184,7 +190,7 @@ def batch_update_status(db: Session, node_ids: List[int], status: str, sale_cust
         db.query(ProxyNode)
         .filter(ProxyNode.id.in_(node_ids))
         .update(
-            values,
+            cast(Any, values),  # SQLAlchemy accepts string column names at this update boundary.
             synchronize_session=False,
         )
     )
@@ -217,7 +223,7 @@ def get_stats(
     total = len(nodes)
 
     # 各状态数量
-    by_status: dict = {"idle": 0, "active": 0, "sold": 0, "disabled": 0}
+    by_status: dict[str, int] = {"idle": 0, "active": 0, "sold": 0, "disabled": 0}
     for node in nodes:
         if node.status in by_status:
             by_status[node.status] += 1
@@ -234,7 +240,7 @@ def get_stats(
     net_profit = total_sale_revenue - total_purchase_cost
 
     # 按渠道分组
-    channel_map: dict = {}
+    channel_map: dict[str, ChannelTotals] = {}
     for node in nodes:
         channel = node.purchase_channel or ""
         if channel not in channel_map:

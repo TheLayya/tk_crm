@@ -1,10 +1,11 @@
 import json
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from fastapi import HTTPException
 
 
-def validate_sale_information(values, sold_status, require_date=False):
+def validate_sale_information(values: dict[str, Any], sold_status: str, require_date: bool = False) -> None:
     if values.get("status") != sold_status:
         return
     customer = values.get("sale_customer")

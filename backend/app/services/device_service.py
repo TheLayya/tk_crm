@@ -7,13 +7,15 @@
 import json
 import logging
 import threading
-from typing import List, Optional, Tuple, cast
+from collections.abc import Mapping
+from typing import List, Optional, Tuple, TypedDict, cast
 
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.device import Device, DeviceLog
+from app.models.op_account import OpAccount
 from app.models.proxy_node import ProxyNode
 from app.models.team import User
 from app.services.auth_service import get_user_data_scope, get_dept_member_usernames
@@ -33,6 +35,14 @@ ALLOWED_UPDATE_FIELDS = {"name", "device_type", "owner_id", "node_id", "node_ids
 
 # 显式禁止更新（即使出现在 data 中）
 FORBIDDEN_UPDATE_FIELDS = {"id", "is_deleted", "created_at", "updated_at"}
+
+
+class ReadableDeviceLog(TypedDict):
+    summary: str
+    details: list[str]
+
+
+DeviceChanges = dict[str, dict[str, object]]
 
 
 class DeviceServiceError(Exception):
@@ -60,7 +70,7 @@ def _write_device_log(
     user_id: int,
     username: str,
     action: str,
-    changes: dict,
+    changes: DeviceChanges,
 ) -> None:
     payload = json.dumps(changes, ensure_ascii=False)
     db.add(
@@ -197,29 +207,28 @@ def get_device(db: Session, device_id: int, user: User) -> Optional[Device]:
     return device
 
 
-def create_device(db: Session, data: dict, user: User) -> Device:
+def create_device(db: Session, data: Mapping[str, object], user: User) -> Device:
     with _device_mutation_lock:
         return _create_device_locked(db, data, user)
 
-def _create_device_locked(db: Session, data: dict, user: User) -> Device:
+def _create_device_locked(db: Session, data: Mapping[str, object], user: User) -> Device:
     """创建设备。非超管 owner 强制为当前用户。"""
     # owner 解析
-    owner_id = data.get("owner_id")
+    owner_id = cast(int | None, data.get("owner_id"))
     if user.is_super_admin:
         if owner_id is None:
             raise DeviceServiceError(400, "所属人必填")
     else:
         if owner_id is not None and owner_id != user.id:
             raise DeviceServiceError(400, "无权为他人创建设备")
-        # 遗留 Column 风格模型的属性在 mypy 下为 Column[int]，运行时是 int
-        owner_id = cast(int, user.id)
+        owner_id = user.id
 
     _require_active_owner(db, owner_id)
 
     # 节点校验
     if data.get("node_ids"):
         raise DeviceServiceError(400, "请使用关联管理接口修改代理节点关系")
-    node_id = data.get("node_id")
+    node_id = cast(int | None, data.get("node_id"))
     if node_id is not None:
         _require_bindable_node(db, node_id, user)
 
@@ -245,8 +254,8 @@ def _create_device_locked(db: Session, data: dict, user: User) -> Device:
     _write_device_log(
         db,
         device.id,
-        cast(int, user.id),
-        cast(str, user.username),
+        user.id,
+        user.username,
         "CREATE",
         {
             "name": {"old": None, "new": _truncate_value(device.name)},
@@ -261,13 +270,13 @@ def _create_device_locked(db: Session, data: dict, user: User) -> Device:
     return device
 
 
-def update_device(db: Session, device: Device, data: dict, user: User) -> Tuple[Device, dict]:
+def update_device(db: Session, device: Device, data: Mapping[str, object], user: User) -> Tuple[Device, DeviceChanges]:
     """更新设备（PATCH 语义，data 仅含显式字段）。返回 (device, changes)。"""
     if device.is_deleted:
         raise DeviceServiceError(404, "设备不存在")
     _ensure_owner(db, device, user)
 
-    changes: dict = {}
+    changes: DeviceChanges = {}
 
     # 字段白名单：拒绝未知字段与保留字段
     for field in data:
@@ -290,12 +299,12 @@ def update_device(db: Session, device: Device, data: dict, user: User) -> Tuple[
             raise DeviceServiceError(400, "owner_id 不能为空")
         if not user.is_super_admin:
             raise DeviceServiceError(400, "无权修改所属人")
-        _require_active_owner(db, data["owner_id"])
+        _require_active_owner(db, cast(int, data["owner_id"]))
 
     # 节点换绑/解绑校验
     target_node_id: Optional[int] = None
     if "node_id" in data:
-        new_node_id = data["node_id"]
+        new_node_id = cast(int | None, data["node_id"])
         if new_node_id is not None and new_node_id != device.node_id:
             _require_bindable_node(db, new_node_id, user)
 
@@ -311,7 +320,7 @@ def update_device(db: Session, device: Device, data: dict, user: User) -> Tuple[
             setattr(device, field, value)
     if "node_id" in data:
         # 兼容旧 PATCH，同时保持单节点旧列与多节点 JSON 的同源一致。
-        normalized = [data["node_id"]] if data["node_id"] is not None else []
+        normalized = [cast(int, data["node_id"])] if data["node_id"] is not None else []
         if device.node_ids != normalized:
             changes["node_ids"] = {"old": _truncate_value(device.node_ids), "new": normalized}
             device.node_ids = normalized
@@ -330,7 +339,7 @@ def update_device(db: Session, device: Device, data: dict, user: User) -> Tuple[
             logger.exception("update_device %s: unexpected integrity error", device.id)
             raise
         _write_device_log(
-            db, device.id, cast(int, user.id), cast(str, user.username), "UPDATE", changes
+            db, device.id, user.id, user.username, "UPDATE", changes
         )
         db.commit()
         db.refresh(device)
@@ -347,8 +356,8 @@ def soft_delete_device(db: Session, device: Device, user: User) -> None:
     _write_device_log(
         db,
         device.id,
-        cast(int, user.id),
-        cast(str, user.username),
+        user.id,
+        user.username,
         "DELETE",
         {
             "is_deleted": {"old": _truncate_value(device.is_deleted), "new": True},
@@ -387,24 +396,22 @@ def get_device_logs(
     return logs, total
 
 
-def parse_log_changes(raw: Optional[str]) -> Optional[dict]:
+def parse_log_changes(raw: Optional[str]) -> Optional[dict[str, object]]:
     """安全解析日志 JSON；损坏数据返回 None 而非抛异常。"""
     if not raw:
         return None
     try:
         parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else None
+        return cast(dict[str, object], parsed) if isinstance(parsed, dict) else None
     except (json.JSONDecodeError, TypeError):
         return None
 
 
-def readable_device_log(db: Session, log: DeviceLog) -> dict:
-    from app.models.op_account import OpAccount
-
+def readable_device_log(db: Session, log: DeviceLog) -> ReadableDeviceLog:
     changes = parse_log_changes(log.changes) or {}
-    details = []
+    details: list[str] = []
 
-    def reference(model, value):
+    def reference(model: type[ProxyNode] | type[OpAccount] | type[User], value: object) -> str:
         if value is None:
             return "未关联"
         if isinstance(value, str) and value.isdecimal():
@@ -414,17 +421,18 @@ def readable_device_log(db: Session, log: DeviceLog) -> dict:
         item = db.get(model, value)
         if item is None:
             return "历史对象已不存在"
-        if model is ProxyNode:
+        if isinstance(item, ProxyNode):
             return f"{item.ip}:{item.port}"
-        if model is OpAccount:
+        if isinstance(item, OpAccount):
             return item.account
-        return item.real_name or item.username
+        owner = cast(User, item)
+        return owner.real_name or owner.username
 
-    def relation_values(state, plural, singular):
+    def relation_values(state: Mapping[str, object], plural: str, singular: str) -> list[object]:
         value = state.get(plural, state.get(singular))
-        return value if isinstance(value, list) else ([] if value is None else [value])
+        return cast(list[object], value) if isinstance(value, list) else ([] if value is None else [value])
 
-    def relation_details(label, model, old, new):
+    def relation_details(label: str, model: type[ProxyNode] | type[OpAccount] | type[User], old: list[object], new: list[object]) -> None:
         removed = [value for value in old if value not in new]
         added = [value for value in new if value not in old]
         if added:
@@ -432,24 +440,25 @@ def readable_device_log(db: Session, log: DeviceLog) -> dict:
         if removed:
             details.append(f"解除{label}：" + "、".join(reference(model, value) for value in removed))
 
-    name = (changes.get("name") or {}).get("new")
-    kind = (changes.get("device_type") or {}).get("new")
+    name = cast(Mapping[str, object], changes.get("name") or {}).get("new")
+    kind = cast(Mapping[str, object], changes.get("device_type") or {}).get("new")
     summary = {"CREATE": f"新增{'手机' if kind == 'phone' else '电脑' if kind == 'pc' else '终端'}{(' ' + str(name)) if name else ''}",
                "UPDATE": "更新终端", "DELETE": "删除终端"}.get(log.action, "终端操作")
     for field, change in changes.items():
         if not isinstance(change, dict):
             continue
-        old, new = change.get("old"), change.get("new")
+        typed_change = cast(dict[str, object], change)
+        old, new = typed_change.get("old"), typed_change.get("new")
         if field == "relations":
             if isinstance(old, dict) or isinstance(new, dict):
-                old_state = old if isinstance(old, dict) else {}
-                new_state = new if isinstance(new, dict) else {}
+                old_state = cast(dict[str, object], old) if isinstance(old, dict) else {}
+                new_state = cast(dict[str, object], new) if isinstance(new, dict) else {}
                 for label, model, plural, singular in (("节点", ProxyNode, "node_ids", "node_id"),
                                                        ("账号", OpAccount, "account_ids", "account_id")):
                     relation_details(label, model, relation_values(old_state, plural, singular),
                                      relation_values(new_state, plural, singular))
             elif "old_node_ids" in change or "new_node_ids" in change:
-                relation_details("节点", ProxyNode, change.get("old_node_ids") or [], change.get("new_node_ids") or [])
+                relation_details("节点", ProxyNode, cast(list[object], typed_change.get("old_node_ids") or []), cast(list[object], typed_change.get("new_node_ids") or []))
             summary = "调整终端关联"
             continue
         if old == new or (not old and not new):
@@ -457,15 +466,15 @@ def readable_device_log(db: Session, log: DeviceLog) -> dict:
         if field == "node_id" and "node_ids" in changes:
             continue
         if field in ("node_id", "node_ids"):
-            relation_details("节点", ProxyNode, old if isinstance(old, list) else ([] if old is None else [old]),
-                             new if isinstance(new, list) else ([] if new is None else [new]))
+            relation_details("节点", ProxyNode, cast(list[object], old) if isinstance(old, list) else ([] if old is None else [old]),
+                             cast(list[object], new) if isinstance(new, list) else ([] if new is None else [new]))
         elif field == "owner_id":
             details.append("所属人：" + (reference(User, old) + " → " if old is not None else "") + reference(User, new))
         elif field == "remark":
             details.append("清空备注" if not new else "设置备注：" + str(new))
         elif field in ("name", "device_type") and log.action != "CREATE":
             label = "名称" if field == "name" else "类型"
-            labels = {"phone": "手机", "pc": "电脑"}
+            labels: dict[object, object] = {"phone": "手机", "pc": "电脑"}
             details.append(f"{label}：{labels.get(old, old) or '未设置'} → {labels.get(new, new) or '未设置'}")
     return {"summary": summary, "details": details}
 
@@ -476,7 +485,7 @@ def get_bindable_nodes(
     exclude_device_id: Optional[int] = None,
     limit: int = 100,
     allowed_node_ids: Optional[set[int]] = None,
-) -> List[dict]:
+) -> List[dict[str, object]]:
     """返回可共享绑定的空闲或使用中节点。"""
     query = db.query(ProxyNode).filter(ProxyNode.status.in_(BINDABLE_NODE_STATUSES))
     if allowed_node_ids is not None:

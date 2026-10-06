@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import Any
 from datetime import datetime, timedelta
 from typing import Optional, List, Callable
 
@@ -108,7 +109,7 @@ def create_account(db: Session, data: AccountCreate) -> MonitorAccount:
     import threading
     account_id = account.id  # 只传 id，不传 ORM 对象
 
-    def _trigger_first_check():
+    def _trigger_first_check() -> None:
         from app.core.database import SessionLocal
         check_db = SessionLocal()
         try:
@@ -313,7 +314,7 @@ async def trigger_check(db: Session, account_id: int) -> Optional[MonitorHistory
 # Scheduled batch checks
 # ---------------------------------------------------------------------------
 
-async def run_scheduled_checks(db_factory: Callable) -> None:
+async def run_scheduled_checks(db_factory: Callable[[], Session]) -> None:
     """由调度器调用：批量检查所有 active 且到期的账号，受 max_concurrent_checks 限制。"""
     db: Session = db_factory()
     try:
@@ -345,7 +346,7 @@ async def run_scheduled_checks(db_factory: Callable) -> None:
         # 分批并发执行，受 max_concurrent_checks 限制
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def _bounded_check(acc: MonitorAccount):
+        async def _bounded_check(acc: MonitorAccount) -> None:
             async with semaphore:
                 try:
                     await check_account(db, acc)
@@ -395,10 +396,10 @@ def update_settings(db: Session, data: SettingsUpdate) -> MonitorSettings:
 # Scheduler registration
 # ---------------------------------------------------------------------------
 
-def register_scheduler_jobs(scheduler, db_factory: Callable) -> None:
+def register_scheduler_jobs(scheduler: Any, db_factory: Callable[[], Session]) -> None:
     """注册 APScheduler 定时任务：每分钟执行一次 run_scheduled_checks。"""
 
-    async def _job():
+    async def _job() -> None:
         await run_scheduled_checks(db_factory)
 
     scheduler.add_job(

@@ -8,7 +8,7 @@ import io
 import logging
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 
 import openpyxl
 from pydantic import ValidationError
@@ -78,7 +78,7 @@ def _parse_int(value: str) -> Optional[int]:
 
 
 def _validate_row(
-    row_dict: dict, line_num: int
+    row_dict: dict[str, Any], line_num: int
 ) -> Tuple[Optional[ProxyNodeCreate], Optional[str]]:
     """
     验证单行数据，返回 (ProxyNodeCreate, None) 或 (None, error_str)。
@@ -190,7 +190,7 @@ def _validate_row(
     )
 
     try:
-        return ProxyNodeCreate(**create_values), None
+        return ProxyNodeCreate(**cast(dict[str, Any], create_values)), None
     except ValidationError as error:
         fields = ", ".join(str(item["loc"][0]) for item in error.errors())
         return None, f"第 {line_num} 行: 必填信息缺失或格式不正确: {fields}"
@@ -220,6 +220,7 @@ def import_from_csv(db: Session, file_content: bytes, actor: Optional[str] = Non
             continue
 
         try:
+            assert node_data is not None
             create_node(db, node_data, actor=actor)
             success_count += 1
         except Exception as e:
@@ -246,6 +247,7 @@ def import_from_excel(db: Session, file_content: bytes, actor: Optional[str] = N
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
     ws = wb.active
+    assert ws is not None
 
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
@@ -274,6 +276,7 @@ def import_from_excel(db: Session, file_content: bytes, actor: Optional[str] = N
             continue
 
         try:
+            assert node_data is not None
             create_node(db, node_data, actor=actor)
             success_count += 1
         except Exception as e:

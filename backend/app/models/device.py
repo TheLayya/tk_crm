@@ -25,7 +25,7 @@ class Device(Base):
     node_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("proxy_nodes.id"), nullable=True
     )
-    node_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    node_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_deleted: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, index=True

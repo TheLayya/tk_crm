@@ -1,6 +1,10 @@
 """
 运营账号管理 API 端点
 """
+from app.models.team import User
+from app.models.op_account import OpAccount, OpAuditLog
+from fastapi.responses import Response
+from typing import Any
 import logging
 import threading
 import httpx
@@ -42,8 +46,8 @@ gmail_check_lock = threading.Lock()
 def get_stats(
     exclude_gmail: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission("op_account:view")),
-):
+    current_user: User = Depends(require_permission("op_account:view")),
+) -> dict[str, object]:
     """获取运营账号统计数据。"""
     return op_account_service.get_op_account_stats(db, exclude_gmail=exclude_gmail, current_user=current_user)
 
@@ -60,9 +64,9 @@ def list_op_accounts(
     limit: int = Query(50, ge=1, le=200),
     exclude_gmail: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("op_account:view")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("op_account:view")),
+) -> dict[str, object]:
     items, total = op_account_service.list_op_accounts(
         db,
         platform=platform,
@@ -80,8 +84,8 @@ def list_op_accounts(
     for item in items:
         device = db.query(Device).filter(Device.id == item.device_id, Device.is_deleted == False).first() if item.device_id else None
         node = db.query(ProxyNode).filter(ProxyNode.id == item.node_id).first() if item.node_id else None
-        item.device_name = device.name if device else None
-        item.node_ip = f"{node.ip}:{node.port}" if node else None
+        setattr(item, "device_name", device.name if device else None)
+        setattr(item, "node_ip", f"{node.ip}:{node.port}" if node else None)
     return {
         "items": [OpAccountResponse.model_validate(item).model_dump() for item in items],
         "total": total,
@@ -93,9 +97,9 @@ def create_op_account(
     data: OpAccountCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("op_account:create")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("op_account:create")),
+) -> OpAccountResponse:
     try:
         require_account_relation_scope(db, data.model_dump(exclude_unset=True), current_user)
         # 如果未填 registrant，自动设为当前用户，确保数据范围过滤能匹配到自己
@@ -119,8 +123,8 @@ def create_op_account(
 # 注意：以下固定路径路由必须在 /{id} 之前定义，避免路径冲突
 
 
-@router.get("/import/template")
-def download_import_template(_=Depends(require_permission("op_account:import"))):
+@router.get("/import/template", response_model=None)
+def download_import_template(_: User = Depends(require_permission("op_account:import"))) -> StreamingResponse:
     data = op_account_service.create_import_template()
     return StreamingResponse(
         iter([data]),
@@ -130,7 +134,7 @@ def download_import_template(_=Depends(require_permission("op_account:import")))
 
 
 @router.post("/batch-status", response_model=dict)
-def batch_update_status(data: BatchStatusUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user_from_header), _=Depends(require_permission("op_account:edit"))):
+def batch_update_status(data: BatchStatusUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_from_header), _: User = Depends(require_permission("op_account:edit"))) -> dict[str, object]:
     require_op_account_scope(db, data.ids, current_user)
     count = op_account_service.batch_update_status(
         db,
@@ -149,10 +153,10 @@ def batch_update_status(data: BatchStatusUpdate, db: Session = Depends(get_db), 
 def batch_assign_operator(
     data: BatchAssignOperator,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("op_account:edit")),
-    _members=Depends(require_permission("team:member:view")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("op_account:edit")),
+    _members: User = Depends(require_permission("team:member:view")),
+) -> dict[str, object]:
     count = op_account_service.batch_assign_operator(db, data.ids, data.operator, current_user)
     return {"updated": count}
 
@@ -162,9 +166,9 @@ async def import_from_csv(
     file: UploadFile,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("op_account:import")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("op_account:import")),
+) -> OpImportResult:
     raw = await file.read()
     filename = (file.filename or "").lower()
     try:
@@ -196,13 +200,13 @@ async def import_from_csv(
         if row.get("_result") == "success" and row.get("_id")
     ]
     if account_ids:
-        tiktok_ids = [item.id for item in db.query(op_account_service.OpAccount).filter(op_account_service.OpAccount.id.in_(account_ids), op_account_service.OpAccount.platform == "tiktok").all()]
+        tiktok_ids = [item.id for item in db.query(OpAccount).filter(OpAccount.id.in_(account_ids), OpAccount.platform == "tiktok").all()]
         if tiktok_ids:
             result.task_id = op_account_service.trigger_collect(db, tiktok_ids, background_tasks, actor=current_user.username)
     return result
 
 
-@router.get("/export")
+@router.get("/export", response_model=None)
 def export_op_accounts(
     platform: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
@@ -213,8 +217,8 @@ def export_op_accounts(
     format: str = Query("csv"),
     localized: bool = Query(False, description="是否使用中文表头"),
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission("op_account:export")),
-):
+    current_user: User = Depends(require_permission("op_account:export")),
+) -> StreamingResponse:
     if format not in {"csv", "xlsx"}:
         raise HTTPException(status_code=422, detail="导出格式仅支持 CSV 或 XLSX")
     filters = {
@@ -243,11 +247,11 @@ def export_op_accounts(
 
 @router.post("/collect", response_model=dict)
 def trigger_collect(
-    body: dict,
+    body: dict[str, Any],
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission("op_account:collect")),
-):
+    current_user: User = Depends(require_permission("op_account:collect")),
+) -> dict[str, object]:
     account_ids = body.get("account_ids", [])
     if not isinstance(account_ids, list) or not account_ids or any(type(account_id) is not int or account_id <= 0 for account_id in account_ids):
         raise HTTPException(status_code=422, detail="请选择有效的运营账号")
@@ -257,7 +261,7 @@ def trigger_collect(
 
 
 @router.get("/tasks/{task_id}", response_model=CollectTaskResponse)
-def get_collect_task(task_id: str, db: Session = Depends(get_db), current_user=Depends(require_permission("op_account:view"))):
+def get_collect_task(task_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_permission("op_account:view"))) -> CollectTaskResponse:
     task = op_account_service.get_collect_task(db, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
@@ -278,15 +282,15 @@ def get_collect_task(task_id: str, db: Session = Depends(get_db), current_user=D
 def check_gmail_status(
     body: GmailCheckRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-    _=Depends(require_permission("op_account:collect")),
-):
+    current_user: User = Depends(get_current_user_from_header),
+    _: User = Depends(require_permission("op_account:collect")),
+) -> dict[str, object]:
     account_ids = list(dict.fromkeys(body.account_ids))
     if not account_ids or len(account_ids) > MAX_BATCH_SIZE:
         raise HTTPException(status_code=422, detail=f"请选择 1-{MAX_BATCH_SIZE} 个 Gmail 账号")
-    accounts = db.query(op_account_service.OpAccount).filter(
-        op_account_service.OpAccount.id.in_(account_ids),
-        op_account_service.OpAccount.platform == "gmail",
+    accounts = db.query(OpAccount).filter(
+        OpAccount.id.in_(account_ids),
+        OpAccount.platform == "gmail",
     ).all()
     if len(accounts) != len(account_ids):
         raise HTTPException(status_code=422, detail="只能检测已选择的 Gmail 账号")
@@ -297,7 +301,7 @@ def check_gmail_status(
         results = check_gmail_accounts([account.account for account in accounts])
         apply_check_results(accounts, results)
         for account in accounts:
-            db.add(op_account_service.OpAuditLog(
+            db.add(OpAuditLog(
                 op_account_id=account.id, action="gmail_check", field_name="gmail_check_status",
                 new_value=account.gmail_check_status, operator=current_user.username,
             ))
@@ -315,23 +319,23 @@ def check_gmail_status(
 
 
 @router.put("/{id}", response_model=OpAccountResponse)
-def update_op_account(id: int, data: OpAccountUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user_from_header), _=Depends(require_permission("op_account:edit"))):
+def update_op_account(id: int, data: OpAccountUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_from_header), _: User = Depends(require_permission("op_account:edit"))) -> OpAccountResponse:
     account = require_visible_op_account(db, id, current_user)
     require_account_relation_scope(db, data.model_dump(exclude_unset=True), current_user)
-    account = op_account_service.update_op_account(db, id, data, actor=current_user.username)
-    if not account:
+    updated_account = op_account_service.update_op_account(db, id, data, actor=current_user.username)
+    if not updated_account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    return OpAccountResponse.model_validate(account)
+    return OpAccountResponse.model_validate(updated_account)
 
 
-@router.get("/{id}/videos")
+@router.get("/{id}/videos", response_model=None)
 def get_op_account_videos(
     id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission("op_account:view")),
-):
+    current_user: User = Depends(require_permission("op_account:view")),
+) -> dict[str, object]:
     account = require_visible_op_account(db, id, current_user)
     return {
         "items": video_service.get_videos(db, id, skip, limit, model=OpAccountVideo),
@@ -341,8 +345,8 @@ def get_op_account_videos(
     }
 
 
-@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_op_account(id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user_from_header), _=Depends(require_permission("op_account:delete"))):
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+def delete_op_account(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_from_header), _: User = Depends(require_permission("op_account:delete"))) -> None:
     account = require_visible_op_account(db, id, current_user)
     ok = op_account_service.delete_op_account(db, id)
     if not ok:
@@ -350,8 +354,8 @@ def delete_op_account(id: int, db: Session = Depends(get_db), current_user=Depen
     return None
 
 
-@router.get("/avatar-proxy")
-async def proxy_avatar(url: str = Query(...), _=Depends(require_permission("op_account:view"))):
+@router.get("/avatar-proxy", response_model=None)
+async def proxy_avatar(url: str = Query(...), _: User = Depends(require_permission("op_account:view"))) -> Response:
     """代理转发 TikTok 头像图片，绕过防盗链"""
     import httpx
     if not url.startswith("http"):
@@ -372,13 +376,13 @@ async def proxy_avatar(url: str = Query(...), _=Depends(require_permission("op_a
 
 
 @router.get("/{resource_id}/association-history", response_model=dict)
-def get_association_history(resource_id: int, db: Session = Depends(get_db), current_user=Depends(require_permission("op_account:view"))):
+def get_association_history(resource_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_permission("op_account:view"))) -> dict[str, object]:
     from app.services.relation_history_service import relation_overview
     return relation_overview(db, "account", resource_id, current_user)
 
 
 @router.get("/{id}/logs", response_model=List[AuditLogResponse])
-def get_audit_logs(id: int, db: Session = Depends(get_db), current_user=Depends(require_permission("op_account:view"))):
+def get_audit_logs(id: int, db: Session = Depends(get_db), current_user: User = Depends(require_permission("op_account:view"))) -> list[AuditLogResponse]:
     account = require_visible_op_account(db, id, current_user)
     from app.services.relation_history_service import relation_overview, readable_account_log
     relation_overview(db, "account", id, current_user)

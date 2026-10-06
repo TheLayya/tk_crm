@@ -1,6 +1,7 @@
 import re
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
+from starlette.responses import Response
 from app.core.database import SessionLocal
 from app.core.security import decode_access_token
 from app.models.team import OperationLog
@@ -56,7 +57,7 @@ PATH_MODULE_MAP = [
 
 
 class OperationLogMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         method = request.method
         path = request.url.path
 

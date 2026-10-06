@@ -30,7 +30,7 @@ class DeviceUpdate(BaseModel):
     node_ids: Optional[list[int]] = None
     remark: Optional[str] = None
 
-    def get_update_data(self) -> dict:
+    def get_update_data(self) -> dict[str, object]:
         """返回仅包含显式设置字段的字典（PATCH 语义）。"""
         return self.model_dump(exclude_unset=True)
 
@@ -96,7 +96,7 @@ class DeviceLogOut(BaseModel):
     user_id: int
     username: str
     action: str
-    changes: Optional[dict] = None
+    changes: Optional[dict[str, object]] = None
     summary: Optional[str] = None
     details: list[str] = Field(default_factory=list)
     created_at: datetime

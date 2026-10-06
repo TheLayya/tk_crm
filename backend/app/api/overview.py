@@ -1,7 +1,13 @@
 ﻿from collections import defaultdict
 from decimal import Decimal
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Optional, TypedDict, cast
+
+
+class GroupTotal(TypedDict):
+    count: int
+    amount: Decimal
+
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
@@ -29,19 +35,19 @@ def _visible_email(email: EmailAccount, usernames: Optional[set[str]]) -> bool:
     return usernames is None or email.registrant in usernames or email.operator in usernames
 
 
-@router.get("")
+@router.get("", response_model=None)
 def get_overview(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:view")),
-    _accounts=Depends(require_permission("op_account:view")),
-    _nodes=Depends(require_permission("proxy_node:view")),
+    _accounts: User = Depends(require_permission("op_account:view")),
+    _nodes: User = Depends(require_permission("proxy_node:view")),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
-):
+) -> dict[str, object]:
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
 
-    def in_period(value):
+    def in_period(value: date | None) -> bool:
         return date_from is None and date_to is None or value is not None and (date_from is None or value >= date_from) and (date_to is None or value <= date_to)
 
     usernames = get_scope_usernames(db, current_user)
@@ -59,7 +65,7 @@ def get_overview(
         nodes = [n for n in nodes if n.id in visible_node_ids]
 
     node_map = {n.id: n for n in nodes}
-    accounts_by_device = defaultdict(list)
+    accounts_by_device: defaultdict[int, list[OpAccount]] = defaultdict(list)
     for account in accounts:
         if account.device_id:
             accounts_by_device[account.device_id].append(account)
@@ -86,8 +92,8 @@ def get_overview(
             } for a in accounts_by_device[device.id]],
         })
 
-    def grouped(items, key, amount):
-        result = defaultdict(lambda: {"count": 0, "amount": Decimal("0")})
+    def grouped(items: list[OpAccount | ProxyNode | EmailAccount], key: str, amount: str) -> list[dict[str, object]]:
+        result: defaultdict[str, GroupTotal] = defaultdict(lambda: {"count": 0, "amount": Decimal("0")})
         for item in items:
             group = getattr(item, key) or "未填写"
             result[group]["count"] += 1
@@ -103,8 +109,8 @@ def get_overview(
         sales = [item for asset_kind, item in revenue_items if asset_kind == kind]
         by_asset.append({
             "name": kind,
-            "cost": sum((item.purchase_price for item in purchases), Decimal("0")),
-            "revenue": sum((item.sale_price for item in sales), Decimal("0")),
+            "cost": sum((cast(Decimal, item.purchase_price) for item in purchases), Decimal("0")),
+            "revenue": sum((cast(Decimal, item.sale_price) for item in sales), Decimal("0")),
             "cost_count": len(purchases),
             "revenue_count": len(sales),
         })
@@ -134,8 +140,8 @@ def get_overview(
         },
         "device_rows": device_rows,
         "finance": {
-            "entered_cost": sum((item.purchase_price for _, item in cost_items), Decimal("0")),
-            "entered_revenue": sum((item.sale_price for _, item in revenue_items), Decimal("0")),
+            "entered_cost": sum((cast(Decimal, item.purchase_price) for _, item in cost_items), Decimal("0")),
+            "entered_revenue": sum((cast(Decimal, item.sale_price) for _, item in revenue_items), Decimal("0")),
             "by_asset": by_asset,
             "cost_by_channel": grouped([item for _, item in cost_items], "purchase_channel", "purchase_price"),
             "revenue_by_customer": grouped([item for _, item in revenue_items], "sale_customer", "sale_price"),

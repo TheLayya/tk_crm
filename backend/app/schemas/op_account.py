@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field, PositiveInt, StringConstraints, field_validator
+from pydantic import ValidationInfo, BaseModel, Field, PositiveInt, StringConstraints, field_validator
 
 
 class OpAccountCreate(BaseModel):
@@ -134,7 +134,7 @@ class OpAccountResponse(BaseModel):
 
     @field_validator('sellers', mode='before')
     @classmethod
-    def normalize_sellers(cls, value):
+    def normalize_sellers(cls, value: object) -> object:
         if isinstance(value, str):
             try:
                 import json
@@ -261,7 +261,7 @@ class EmailAccountResponse(BaseModel):
 
     @field_validator("platform_tags", mode="before")
     @classmethod
-    def normalize_platform_tags(cls, value):
+    def normalize_platform_tags(cls, value: object) -> object:
         if isinstance(value, str):
             try:
                 import json
@@ -273,7 +273,7 @@ class EmailAccountResponse(BaseModel):
 
     @field_validator("sellers", mode="before")
     @classmethod
-    def normalize_sellers(cls, value):
+    def normalize_sellers(cls, value: object) -> object:
         if isinstance(value, str):
             try:
                 import json
@@ -304,7 +304,7 @@ class EmailAssetRelationRequest(BaseModel):
 
     @field_validator("node_id")
     @classmethod
-    def require_one_asset(cls, value, info):
+    def require_one_asset(cls, value: int | None, info: ValidationInfo) -> int | None:
         if value is None and info.data.get("device_id") is None:
             raise ValueError("请选择终端或节点")
         return value
@@ -351,7 +351,7 @@ class BatchAssignOperator(BaseModel):
 
     @field_validator('operator')
     @classmethod
-    def validate_operator(cls, value):
+    def validate_operator(cls, value: str) -> str:
         value = value.strip()
         if not value:
             raise ValueError('请选择成员')

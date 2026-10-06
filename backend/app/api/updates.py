@@ -1,3 +1,5 @@
+from typing import Any
+from app.models.team import User
 import json
 import logging
 import os
@@ -18,13 +20,13 @@ router = APIRouter(prefix="/updates", tags=["Updates"])
 HISTORY_PATH = Path(settings.UPDATE_HISTORY_PATH) if settings.UPDATE_HISTORY_PATH else Path(__file__).resolve().parents[2] / "data" / "update-history.json"
 
 
-def _version_tuple(value):
+def _version_tuple(value: object) -> tuple[int, ...]:
     if not isinstance(value, str) or not re.fullmatch(r"v?\d+\.\d+\.\d+", value):
         raise ValueError("Invalid release version")
     return tuple(int(part) for part in value.removeprefix("v").split("."))
 
 
-def _validate_package_manifest(data):
+def _validate_package_manifest(data: dict[str, Any]) -> None:
     checksum = data.get("sha256", "")
     if not isinstance(checksum, str) or not re.fullmatch(r"[a-f0-9]{64}", checksum):
         raise ValueError("Invalid release checksum")
@@ -40,7 +42,7 @@ def _validate_package_manifest(data):
         raise ValueError("Invalid release package URL")
 
 
-def _has_windows_package(data):
+def _has_windows_package(data: dict[str, Any]) -> bool:
     package_url = data.get("windows_package_url")
     checksum = data.get("windows_sha256")
     if package_url is None and checksum is None:
@@ -62,7 +64,7 @@ def _has_windows_package(data):
     return True
 
 
-def _manifest():
+def _manifest() -> dict[str, Any]:
     url = settings.UPDATE_MANIFEST_URL or os.getenv("UPDATE_MANIFEST_URL", UPDATE_MANIFEST_URL)
     request = Request(url, headers={"User-Agent": "tk-crm-updater"})
     with urlopen(request, timeout=10) as response:
@@ -80,13 +82,13 @@ def _manifest():
     return data
 
 
-@router.get("/version")
-def current_version(_=Depends(get_current_user_from_header)):
+@router.get("/version", response_model=None)
+def current_version(_: User = Depends(get_current_user_from_header)) -> dict[str, object]:
     return {"current_version": APP_VERSION}
 
 
-@router.get("/history")
-def update_history(_=Depends(require_permission("settings:view"))):
+@router.get("/history", response_model=None)
+def update_history(_: User = Depends(require_permission("settings:view"))) -> dict[str, object]:
     if not HISTORY_PATH.is_file():
         return {"items": []}
     try:
@@ -96,8 +98,8 @@ def update_history(_=Depends(require_permission("settings:view"))):
     return {"items": history if isinstance(history, list) else []}
 
 
-@router.get("/check")
-def check_update(_=Depends(require_permission("settings:view"))):
+@router.get("/check", response_model=None)
+def check_update(_: User = Depends(require_permission("settings:view"))) -> dict[str, object]:
     try:
         manifest = _manifest()
         latest = manifest["version"]
@@ -120,18 +122,18 @@ def check_update(_=Depends(require_permission("settings:view"))):
     }
 
 
-@router.get("/status")
-def update_status(_=Depends(require_permission("settings:view"))):
+@router.get("/status", response_model=None)
+def update_status(_: User = Depends(require_permission("settings:view"))) -> object:
     return _agent_request("GET", "/status") if _agent_configured() else {
         "status": "not_configured", "message": "Local updater initialization required"
     }
 
 
-def _agent_configured():
+def _agent_configured() -> bool:
     return bool(settings.UPDATE_AGENT_URL and settings.UPDATE_AGENT_TOKEN)
 
 
-def _agent_request(method, path, payload=None):
+def _agent_request(method: str, path: str, payload: dict[str, Any] | None = None) -> object:
     url = settings.UPDATE_AGENT_URL.rstrip("/") + path
     request = Request(url, method=method, headers={"Authorization": f"Bearer {settings.UPDATE_AGENT_TOKEN}"})
     if payload is not None:
@@ -148,8 +150,8 @@ def _agent_request(method, path, payload=None):
         raise HTTPException(status_code=503, detail="Local updater is unavailable") from exc
 
 
-@router.post("/apply")
-def apply_update(_=Depends(require_permission("settings:edit"))):
+@router.post("/apply", response_model=None)
+def apply_update(_: User = Depends(require_permission("settings:edit"))) -> object:
     if not _agent_configured():
         raise HTTPException(status_code=409, detail="Local updater is not initialized")
     try:

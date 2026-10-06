@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from typing import Any, TypedDict
 from sqlalchemy.orm import Session
 
 from app.models.team import Department, User, LoginLog
@@ -6,12 +7,19 @@ from app.models.team import Department, User, LoginLog
 
 # ── Department Services ──────────────────────────────────────────────────────
 
-def get_dept_tree(db: Session) -> list:
+class DepartmentNode(TypedDict):
+    id: int
+    name: str
+    parent_id: int | None
+    children: list["DepartmentNode"]
+
+
+def get_dept_tree(db: Session) -> list[DepartmentNode]:
     """Recursively build a tree of all departments."""
     depts = db.query(Department).all()
 
     # Build a dict keyed by id for quick lookup
-    nodes = {
+    nodes: dict[int, DepartmentNode] = {
         d.id: {"id": d.id, "name": d.name, "parent_id": d.parent_id, "children": []}
         for d in depts
     }
@@ -27,7 +35,7 @@ def get_dept_tree(db: Session) -> list:
     return roots
 
 
-def create_dept(data: dict, db: Session) -> Department:
+def create_dept(data: dict[str, Any], db: Session) -> Department:
     """Create a new department node."""
     parent_id = data.get("parent_id")
     name = data["name"]
@@ -54,7 +62,7 @@ def create_dept(data: dict, db: Session) -> Department:
     return dept
 
 
-def update_dept(id: int, data: dict, db: Session) -> Department:
+def update_dept(id: int, data: dict[str, Any], db: Session) -> Department:
     """Update a department's name and optionally its parent."""
     dept = db.query(Department).filter(Department.id == id).first()
     if not dept:
@@ -122,7 +130,7 @@ def list_members(
     page: int,
     size: int,
     db: Session,
-) -> dict:
+) -> dict[str, Any]:
     """List members with optional filters and pagination."""
     query = db.query(User)
 
@@ -154,7 +162,7 @@ def list_members(
             "username": u.username,
             "real_name": u.real_name,
             "department_id": u.department_id,
-            "department_name": departments.get(u.department_id),
+            "department_name": departments.get(u.department_id) if u.department_id is not None else None,
             "is_active": u.is_active,
             "is_super_admin": u.is_super_admin,
             "created_at": u.created_at,
@@ -164,7 +172,7 @@ def list_members(
     return {"total": total, "items": items, "page": page, "size": size}
 
 
-def create_member(data: dict, db: Session) -> User:
+def create_member(data: dict[str, Any], db: Session) -> User:
     """Create a new member account."""
     username = data["username"]
     password = data["password"]
@@ -198,7 +206,7 @@ def create_member(data: dict, db: Session) -> User:
     return user
 
 
-def update_member(id: int, data: dict, db: Session) -> User:
+def update_member(id: int, data: dict[str, Any], db: Session) -> User:
     """Update a member's profile and roles."""
     user = db.query(User).filter(User.id == id).first()
     if not user:
@@ -319,7 +327,7 @@ PREDEFINED_PERMISSIONS = {
 }
 
 
-def list_roles(db: Session) -> list:
+def list_roles(db: Session) -> list[dict[str, Any]]:
     """Return all roles with their permissions."""
     roles = db.query(Role).all()
     result = []
@@ -340,7 +348,7 @@ def list_roles(db: Session) -> list:
     return result
 
 
-def create_role(data: dict, db: Session) -> Role:
+def create_role(data: dict[str, Any], db: Session) -> Role:
     """Create a new role with permissions."""
     name = data["name"]
     permissions = data.get("permissions", [])
@@ -366,7 +374,7 @@ def create_role(data: dict, db: Session) -> Role:
     return role
 
 
-def update_role(id: int, data: dict, db: Session) -> Role:
+def update_role(id: int, data: dict[str, Any], db: Session) -> Role:
     """Update a role's name, description, and permissions."""
     role = db.query(Role).filter(Role.id == id).first()
     if not role:

@@ -1,3 +1,4 @@
+from typing import cast
 """
 代理节点管理 API 路由层
 
@@ -66,7 +67,7 @@ def _require_node_delete_scope(db: Session, node_ids: set[int], user: User) -> N
     linked_accounts = db.query(OpAccount).filter(OpAccount.node_id.in_(node_ids)).all()
     if any(account.id not in visible_account_ids for account in linked_accounts):
         raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Node is linked to another member's account")
-    names = get_scope_usernames(db, user)
+    names = cast(set[str], get_scope_usernames(db, user))
     linked_emails = db.query(EmailAccount).filter(EmailAccount.node_id.in_(node_ids)).all()
     if any(not ({email.registrant, email.operator} & names) for email in linked_emails):
         raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Node is linked to another member's email")
@@ -112,7 +113,7 @@ def list_nodes(
     expire_date_to: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_permission("proxy_node:view")),
-):
+) -> dict[str, object]:
     """查询节点列表，支持分页和多条件筛选。"""
     try:
         f = ProxyNodeFilter(
@@ -135,13 +136,13 @@ def list_nodes(
                 linked_devices = [d for d in linked_devices if d.owner_id in allowed_owner_ids]
             device = linked_devices[0] if linked_devices else None
             accounts = scoped_op_accounts(db, _current_user).filter(OpAccount.node_id == n.id).all()
-            n.device_id = device.id if device else None
-            n.device_name = device.name if device else None
-            n.account_count = len(accounts)
-            n.account_ids = [a.id for a in accounts]
-            n.devices = [{"id": d.id, "name": d.name} for d in linked_devices]
+            setattr(n, "device_id", device.id if device else None)
+            setattr(n, "device_name", device.name if device else None)
+            setattr(n, "account_count", len(accounts))
+            setattr(n, "account_ids", [a.id for a in accounts])
+            setattr(n, "devices", [{"id": d.id, "name": d.name} for d in linked_devices])
             enrich_monitor_summaries(db, accounts, _current_user)
-            n.accounts = [{
+            setattr(n, "accounts", [{
                 "id": a.id,
                 "username": a.account,
                 "nickname": a.nickname,
@@ -150,11 +151,11 @@ def list_nodes(
                 "following_count": a.following_count,
                 "like_count": a.like_count,
                 "video_count": a.video_count,
-                "followers_change": a.followers_change,
-                "yesterday_video_count": a.yesterday_video_count,
-                "yesterday_video_plays": a.yesterday_video_plays,
+                "followers_change": getattr(a, "followers_change", None),
+                "yesterday_video_count": getattr(a, "yesterday_video_count", None),
+                "yesterday_video_plays": getattr(a, "yesterday_video_plays", None),
                 "device_id": a.device_id if allowed_owner_ids is None or any(d.id == a.device_id for d in linked_devices) else None,
-            } for a in accounts]
+            } for a in accounts])
         items = [ProxyNodeResponse.model_validate(n) for n in nodes]
         return {"items": items, "total": total}
     except Exception as e:
@@ -170,7 +171,7 @@ def list_nodes(
 # ---------------------------------------------------------------------------
 
 @router.post("", response_model=ProxyNodeResponse, status_code=http_status.HTTP_201_CREATED)
-def create_node(data: ProxyNodeCreate, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))):
+def create_node(data: ProxyNodeCreate, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))) -> ProxyNode:
     """创建单个代理节点。"""
     try:
         node = proxy_node_service.create_node(db, data, actor=_current_user.username)
@@ -195,7 +196,7 @@ def get_stats(
     expire_date_to: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_permission("proxy_node:view")),
-):
+) -> ProxyNodeStats:
     """获取节点统计数据，支持按到期日期范围筛选。"""
     try:
         f = ProxyNodeFilter(
@@ -216,8 +217,8 @@ def get_stats(
 # GET /import/template  — 下载导入模板 CSV
 # ---------------------------------------------------------------------------
 
-@router.get("/import/template")
-def download_import_template():
+@router.get("/import/template", response_model=None)
+def download_import_template() -> Response:
     """下载节点导入模板 CSV 文件。"""
     try:
         content = proxy_node_import_service.generate_template_csv()
@@ -241,7 +242,7 @@ def download_import_template():
 # ---------------------------------------------------------------------------
 
 @router.post("/import", response_model=ProxyNodeImportResult)
-async def import_nodes(file: UploadFile, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))):
+async def import_nodes(file: UploadFile, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))) -> ProxyNodeImportResult:
     """批量导入节点，支持 CSV 和 Excel (.xlsx) 格式。"""
     filename = file.filename or ""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -279,7 +280,7 @@ async def import_nodes(file: UploadFile, db: Session = Depends(get_db), _current
 # GET /export  — 导出节点数据（CSV/Excel）
 # ---------------------------------------------------------------------------
 
-@router.get("/export")
+@router.get("/export", response_model=None)
 def export_nodes(
     format: str = Query("csv", pattern="^(csv|xlsx)$"),
     status: Optional[List[str]] = Query(None),
@@ -290,7 +291,7 @@ def export_nodes(
     expire_date_to: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_permission("proxy_node:view")),
-):
+) -> Response:
     """导出节点数据，支持 CSV 和 Excel 格式，支持筛选条件。"""
     try:
         f = ProxyNodeFilter(
@@ -335,8 +336,8 @@ def export_nodes(
 # DELETE /batch  — 批量删除
 # ---------------------------------------------------------------------------
 
-@router.delete("/batch")
-def batch_delete_nodes(body: BatchDeleteBody, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))):
+@router.delete("/batch", response_model=None)
+def batch_delete_nodes(body: BatchDeleteBody, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))) -> dict[str, object]:
     """批量删除节点。"""
     try:
         if _allowed_node_ids(db, _current_user) is not None:
@@ -360,8 +361,8 @@ def batch_delete_nodes(body: BatchDeleteBody, db: Session = Depends(get_db), _cu
 # PATCH /batch/status  — 批量修改状态
 # ---------------------------------------------------------------------------
 
-@router.patch("/batch/status")
-def batch_update_status(body: BatchStatusBody, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))):
+@router.patch("/batch/status", response_model=None)
+def batch_update_status(body: BatchStatusBody, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))) -> dict[str, object]:
     """批量修改节点状态。"""
     try:
         nodes = db.query(ProxyNode).filter(ProxyNode.id.in_(body.node_ids)).all()
@@ -394,7 +395,7 @@ async def batch_test_nodes(
     body: BatchTestBody,
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_permission("proxy_node:manage")),
-):
+) -> ProxyNodeBatchTestResult:
     """批量测试节点连通性，最大并发 10。"""
     try:
         nodes = db.query(ProxyNode).filter(ProxyNode.id.in_(body.node_ids)).all()
@@ -424,7 +425,7 @@ def get_node_uri(
     node_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_from_header),
-):
+) -> dict[str, object]:
     """构建节点代理 URI（凭据编码）。仅超级管理员可用；仅空闲/使用中节点可生成。"""
     if not current_user.is_super_admin:
         raise HTTPException(
@@ -457,7 +458,7 @@ def get_node_uri(
 # ---------------------------------------------------------------------------
 
 @router.get("/{node_id}", response_model=ProxyNodeResponse)
-def get_node(node_id: int, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:view"))):
+def get_node(node_id: int, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:view"))) -> ProxyNode:
     """按 ID 查询单个节点，不存在返回 404。"""
     node = proxy_node_service.get_node(db, node_id)
     if not node:
@@ -474,7 +475,7 @@ def get_node(node_id: int, db: Session = Depends(get_db), _current_user: User = 
 # ---------------------------------------------------------------------------
 
 @router.patch("/{node_id}", response_model=ProxyNodeResponse)
-def update_node(node_id: int, data: ProxyNodeUpdate, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))):
+def update_node(node_id: int, data: ProxyNodeUpdate, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))) -> ProxyNode | None:
     """Update proxy node; return 404 when missing."""
     node = proxy_node_service.get_node(db, node_id)
     if not node:
@@ -483,7 +484,7 @@ def update_node(node_id: int, data: ProxyNodeUpdate, db: Session = Depends(get_d
     return proxy_node_service.update_node(db, node_id, data)
 
 @router.get("/{resource_id}/association-history", response_model=dict)
-def get_association_history(resource_id: int, db: Session = Depends(get_db), current_user=Depends(require_permission("proxy_node:view"))):
+def get_association_history(resource_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_permission("proxy_node:view"))) -> dict[str, object]:
     node = proxy_node_service.get_node(db, resource_id)
     if not node:
         raise HTTPException(status_code=404, detail="Not found")
@@ -499,7 +500,7 @@ def get_node_logs(
     limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("proxy_node:view")),
-):
+) -> dict[str, object]:
     node = db.query(ProxyNode).filter(ProxyNode.id == node_id).first()
     if node is None:
         raise HTTPException(status_code=404, detail="代理节点不存在")
@@ -514,7 +515,7 @@ def get_node_logs(
     return {
         "total": query.count(),
         "items": [{"id": log.id, "username": log.username, "action": log.action,
-                   "result": log.result, "summary": "调整关联" if log.summary.endswith("/relation") else
+                   "result": log.result, "summary": "调整关联" if cast(str, log.summary).endswith("/relation") else
                    {"UPDATE": "修改节点资料", "DELETE": "删除节点", "VIEW_SECRET": "查看节点连接凭据"}.get(log.action, log.action),
                    "created_at": log.created_at}
                   for log in query.order_by(OperationLog.created_at.desc(), OperationLog.id.desc()).offset(skip).limit(limit).all()],
@@ -522,11 +523,11 @@ def get_node_logs(
 
 
 @router.put("/{node_id}/relation", response_model=dict)
-def update_node_relation(node_id: int, data: ProxyNodeRelationUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_permission("proxy_node:manage"))):
+def update_node_relation(node_id: int, data: ProxyNodeRelationUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_permission("proxy_node:manage"))) -> dict[str, object]:
     with _relation_lock:
         return _update_node_relation_locked(node_id, data, db, current_user)
 
-def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db: Session, current_user: User):
+def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db: Session, current_user: User) -> dict[str, object]:
     # 直接读取 ORM，避免服务层为响应反序列化 sellers 后把 list 写回 Text 列导致提交失败。
     node = db.query(ProxyNode).filter(ProxyNode.id == node_id).first()
     if not node:
@@ -543,7 +544,7 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
             raise HTTPException(status_code=404, detail="运营账号不存在")
         if selected_account.id not in visible_account_ids:
             raise HTTPException(status_code=403, detail="无权关联该运营账号")
-    relation_changes = []
+    relation_changes: list[tuple[Device, list[int], list[int]]] = []
     if "device_id" not in data.model_fields_set:
         pass
     elif data.device_id is None:
@@ -567,9 +568,10 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
                 d.node_id = ids[0] if ids else None
                 relation_changes.append((d, old_ids, ids))
     else:
-        d = db.query(Device).filter(Device.id == data.device_id, Device.is_deleted == False).first()
-        if not d:
+        selected_device = db.query(Device).filter(Device.id == data.device_id, Device.is_deleted == False).first()
+        if not selected_device:
             raise HTTPException(status_code=404, detail="终端不存在或已删除")
+        d = selected_device
         if allowed_owner_ids is not None and d.owner_id not in allowed_owner_ids:
             raise HTTPException(status_code=403, detail="无权关联该终端")
         if node.status not in ("idle", "active"):
@@ -597,7 +599,7 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
             _write_audit_log(db, account.id, "update", "node_id", str(node_id), None, current_user.username)
             record_relation_snapshot(db, account, current_user.username)
     else:
-        account = selected_account
+        account = cast(OpAccount, selected_account)
         if node.status not in ("idle", "active"):
             raise HTTPException(status_code=409, detail="代理节点当前状态不可绑定")
         from app.services.op_account_service import normalize_account_relation
@@ -622,8 +624,8 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
 # DELETE /{node_id}  — 删除节点，成功返回 204
 # ---------------------------------------------------------------------------
 
-@router.delete("/{node_id}", status_code=http_status.HTTP_204_NO_CONTENT)
-def delete_node(node_id: int, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))):
+@router.delete("/{node_id}", status_code=http_status.HTTP_204_NO_CONTENT, response_model=None)
+def delete_node(node_id: int, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))) -> Response:
     """删除节点，成功返回 204，不存在返回 404。"""
     node = proxy_node_service.get_node(db, node_id)
     if not node:
@@ -644,7 +646,7 @@ def delete_node(node_id: int, db: Session = Depends(get_db), _current_user: User
 # ---------------------------------------------------------------------------
 
 @router.post("/{node_id}/test", response_model=ProxyNodeTestResult)
-async def test_node(node_id: int, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))):
+async def test_node(node_id: int, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))) -> ProxyNodeTestResult:
     """测试单个节点连通性，不存在返回 404。"""
     node = proxy_node_service.get_node(db, node_id)
     if not node:

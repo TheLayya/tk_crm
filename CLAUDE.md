@@ -119,6 +119,7 @@ npm run dev -- --host 127.0.0.1 --port 5174
 | 完整运营采集与刷新轮 | 2026-10-06 | 采集链路、粉丝自身基线、昨日统计刷新复审 GATE PASS；全量 403 passed，覆盖率 70.25% < 80% 门禁 FAIL | 专项 68 passed、Node 回归与独立构建通过；按已有发布授权准备 1.1.14，团队升级由用户点击 | [docs/handover/2026-10-06-op-collection-refresh.md](docs/handover/2026-10-06-op-collection-refresh.md) |
 | 成员终端归属可见性轮 | 2026-10-06 | 独立复审 P1/P2 none，GATE PASS；全量 418 passed，覆盖率 71.63% < 80% 门禁 FAIL | 修复 self/dept 终端继承及关联目标越权；权限专项 15 passed，准备 1.1.15；团队仍由用户点击更新 | [docs/handover/2026-10-06-member-device-visibility.md](docs/handover/2026-10-06-member-device-visibility.md) |
 | Windows 1.1.15 冒烟轮 | 2026-10-06 | 独立复审 P1/P2 none，GATE PASS；最终发布审计及安装/卸载实际 exit 0 | 修复 SDK 选择、窗口退出、回执、WebView2 隔离及审计缺失输入；本地包完成，未上传 Windows 资产；覆盖率/mypy 后置 | [docs/handover/2026-10-06-windows-1.1.15-smoke.md](docs/handover/2026-10-06-windows-1.1.15-smoke.md) |
+| 严格类型与覆盖率收敛轮 | 2026-10-06 | 三路独立复审 P1/P2 none，GATE PASS；正式门禁全部 exit 0，448 passed / 83.59%，mypy 73 文件 0 错误 | 保持 SQL 元数据/OpenAPI；补 30 项真实业务测试，修复 CSV/XLSX 24h 变化恒为 0；源码独立提交，未重新发布包或升级团队服务器 | [docs/handover/2026-10-06-strict-typing-and-coverage.md](docs/handover/2026-10-06-strict-typing-and-coverage.md) |
 
 ---
 

@@ -19,10 +19,10 @@ from datetime import datetime
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import httpx
-from apscheduler.jobstores.base import JobLookupError
+from apscheduler.jobstores.base import JobLookupError  # type: ignore[import-untyped]
 
 from sqlalchemy.orm import Session
 
@@ -417,7 +417,7 @@ backup_service = BackupService()
 # Scheduler integration
 # ---------------------------------------------------------------------------
 
-async def _backup_job(db_factory: Callable) -> None:
+async def _backup_job(db_factory: Callable[[], Session]) -> None:
     """APScheduler job: open a DB session and run the backup."""
     db = db_factory()
     try:
@@ -426,7 +426,7 @@ async def _backup_job(db_factory: Callable) -> None:
         db.close()
 
 
-def register_backup_job(scheduler, db_factory: Callable) -> None:
+def register_backup_job(scheduler: Any, db_factory: Callable[[], Session]) -> None:
     """
     Read MonitorSettings (id=1) and register or remove the scheduled backup job.
     Called once at application startup.
@@ -461,7 +461,7 @@ def register_backup_job(scheduler, db_factory: Callable) -> None:
             pass
 
 
-def reschedule_backup_job(scheduler, db_factory: Callable) -> None:
+def reschedule_backup_job(scheduler: Any, db_factory: Callable[[], Session]) -> None:
     """
     Re-read MonitorSettings and update the scheduled backup job.
     Called after settings are updated.

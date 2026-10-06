@@ -1,6 +1,7 @@
 """
 Backup API endpoints
 """
+from app.models.team import User
 import logging
 from datetime import datetime
 from typing import Optional
@@ -47,11 +48,11 @@ class RestoreResponse(BaseModel):
     pre_restore_backup: Optional[PreRestoreBackupInfo]
 
 
-@router.post("/trigger")
+@router.post("/trigger", response_model=None)
 async def trigger_backup(
     db: Session = Depends(get_db),
-    _=Depends(require_permission("settings:edit")),
-):
+    _: User = Depends(require_permission("settings:edit")),
+) -> StreamingResponse:
     """
     手动触发备份，直接返回 ZIP 文件供浏览器下载。
     - 需要 settings:edit 权限
@@ -94,8 +95,8 @@ async def trigger_backup(
 async def restore_backup(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _=Depends(require_permission("settings:edit")),
-):
+    _: User = Depends(require_permission("settings:edit")),
+) -> RestoreResponse:
     """
     上传备份文件并恢复数据库。
     - 需要 settings:edit 权限

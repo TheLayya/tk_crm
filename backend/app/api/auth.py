@@ -1,6 +1,7 @@
 """
 Authentication API endpoints: login, refresh, logout, verify-password
 """
+from app.models.team import User
 import uuid
 import hashlib
 from datetime import datetime, timedelta
@@ -13,6 +14,7 @@ from app.core.database import get_db
 from app.core.security import verify_password
 from app.models.team import OperationToken
 from app.services.auth_service import (
+    LoginResult,
     login as auth_login,
     refresh_token as auth_refresh_token,
     logout as auth_logout,
@@ -49,8 +51,8 @@ def _sha256(value: str) -> str:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@router.post("/login")
-def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
+@router.post("/login", response_model=None)
+def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)) -> LoginResult:
     """
     Authenticate user and return access_token, refresh_token, user info and permissions.
     """
@@ -58,20 +60,20 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     return auth_login(body.username, body.password, ip, db)
 
 
-@router.post("/refresh")
-def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
+@router.post("/refresh", response_model=None)
+def refresh(body: RefreshRequest, db: Session = Depends(get_db)) -> LoginResult:
     """
     Exchange a valid refresh token for a new access_token and refresh_token pair.
     """
     return auth_refresh_token(body.refresh_token, db)
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=None)
 def logout(
     body: LogoutRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-):
+    current_user: User = Depends(get_current_user_from_header),
+) -> dict[str, object]:
     """
     Revoke the provided refresh token, logging the user out.
     """
@@ -79,12 +81,12 @@ def logout(
     return {"message": "已成功登出"}
 
 
-@router.post("/verify-password")
+@router.post("/verify-password", response_model=None)
 def verify_password_and_issue_token(
     body: VerifyPasswordRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user_from_header),
-):
+    current_user: User = Depends(get_current_user_from_header),
+) -> dict[str, object]:
     """
     Verify the current user's password and issue a short-lived OperationToken (5 min).
     """

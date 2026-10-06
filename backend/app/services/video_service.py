@@ -1,30 +1,30 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models.monitor import MonitorAccount
-from app.models.video import Video, VideoStats
+from app.models.video import OpAccountVideo, Video, VideoStats
 from app.services.scraper_service import scraper_service
 
 logger = logging.getLogger(__name__)
 
 
-def get_videos(db: Session, account_id: int, skip: int = 0, limit: int = 100, model=Video) -> List[Video]:
+def get_videos(db: Session, account_id: int, skip: int = 0, limit: int = 100, model: type[Video] | type[OpAccountVideo] = Video) -> list[Video] | list[OpAccountVideo]:
     """获取指定账号的视频列表"""
-    return (
+    return cast(list[Video] | list[OpAccountVideo], (
         db.query(model)
         .filter(model.account_id == account_id)
         .order_by(model.published_at.desc(), model.id.desc())
         .offset(skip)
         .limit(limit)
         .all()
-    )
+    ))
 
 
-def get_yesterday_video_counts(db: Session, account_ids: List[int], now: Optional[datetime] = None, model=Video, collected_at: Optional[dict] = None) -> dict:
+def get_yesterday_video_counts(db: Session, account_ids: List[int], now: Optional[datetime] = None, model: type[Video] | type[OpAccountVideo] = Video, collected_at: Optional[dict[int, datetime]] = None) -> dict[int, int | None]:
     if not account_ids:
         return {}
     start, end = _yesterday_beijing_bounds(now)
@@ -39,14 +39,14 @@ def get_yesterday_video_counts(db: Session, account_ids: List[int], now: Optiona
         .group_by(model.account_id)
         .all()
     )
-    counts = {}
+    counts: dict[int, int | None] = {}
     for account_id, dated_count, yesterday_count, updated_at in rows:
         refreshed = (collected_at or {}).get(account_id) or updated_at
         counts[account_id] = int(yesterday_count) if dated_count and (yesterday_count or refreshed >= end) else None
     return counts
 
 
-def get_yesterday_video_plays(db: Session, account_ids: List[int], now: Optional[datetime] = None, model=Video) -> dict:
+def get_yesterday_video_plays(db: Session, account_ids: List[int], now: Optional[datetime] = None, model: type[Video] | type[OpAccountVideo] = Video) -> dict[int, list[int]]:
     if not account_ids:
         return {}
     start, end = _yesterday_beijing_bounds(now)
@@ -56,13 +56,13 @@ def get_yesterday_video_plays(db: Session, account_ids: List[int], now: Optional
         .order_by(model.account_id, model.published_at.desc(), model.id.desc())
         .all()
     )
-    plays = {}
+    plays: dict[int, list[int]] = {}
     for account_id, play_count in rows:
         plays.setdefault(account_id, []).append(int(play_count))
     return plays
 
 
-def _yesterday_beijing_bounds(now: Optional[datetime] = None):
+def _yesterday_beijing_bounds(now: Optional[datetime] = None) -> tuple[datetime, datetime]:
     beijing = timezone(timedelta(hours=8))
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
@@ -116,7 +116,7 @@ async def fetch_and_save_videos(db: Session, account: MonitorAccount) -> int:
     return new_count
 
 
-def save_video_items(db: Session, account_id: int, video_items: list, model=Video) -> int:
+def save_video_items(db: Session, account_id: int, video_items: list[dict[str, Any]], model: type[Video] | type[OpAccountVideo] = Video) -> int:
     """Persist a fetched list; the caller commits the collection transaction."""
     new_count = 0
     now = datetime.utcnow()
@@ -130,7 +130,7 @@ def save_video_items(db: Session, account_id: int, video_items: list, model=Vide
         query = db.query(model).filter(model.video_id == str(video_id_str))
         if model is not Video:
             query = query.filter(model.account_id == account_id)
-        video = query.first()
+        video = cast(Video | OpAccountVideo | None, query.first())
 
         # 解析 published_at
         published_at: Optional[datetime] = None

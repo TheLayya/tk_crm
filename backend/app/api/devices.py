@@ -50,7 +50,7 @@ router = APIRouter(prefix="/devices", tags=["终端资产"])
 # 响应组装
 # ---------------------------------------------------------------------------
 
-def _build_owner_map(db: Session, devices: List[Device]) -> dict:
+def _build_owner_map(db: Session, devices: List[Device]) -> dict[int, User]:
     owner_ids = {d.owner_id for d in devices}
     if not owner_ids:
         return {}
@@ -58,7 +58,7 @@ def _build_owner_map(db: Session, devices: List[Device]) -> dict:
     return {u.id: u for u in users}
 
 
-def _build_node_map(db: Session, devices: List[Device]) -> dict:
+def _build_node_map(db: Session, devices: List[Device]) -> dict[int, ProxyNode]:
     node_ids = {nid for d in devices for nid in (d.node_ids or ([d.node_id] if d.node_id else []))}
     if not node_ids:
         return {}
@@ -80,7 +80,7 @@ def _node_ip(node: Optional[ProxyNode]) -> Optional[str]:
 
 
 def _device_to_out(
-    db: Session, device: Device, owner_map: dict, node_map: dict, current_user: User
+    db: Session, device: Device, owner_map: dict[int, User], node_map: dict[int, ProxyNode], current_user: User
 ) -> DeviceOut:
     owner = owner_map.get(device.owner_id)
     linked_node_ids = device.node_ids or ([device.node_id] if device.node_id else [])
@@ -109,9 +109,9 @@ def _device_to_out(
             following_count=a.following_count,
             like_count=a.like_count,
             video_count=a.video_count,
-            followers_change=a.followers_change,
-            yesterday_video_count=a.yesterday_video_count,
-            yesterday_video_plays=a.yesterday_video_plays,
+            followers_change=getattr(a, "followers_change", None),
+            yesterday_video_count=getattr(a, "yesterday_video_count", None),
+            yesterday_video_plays=getattr(a, "yesterday_video_plays", None),
         ) for a in accounts],
         remark=device.remark,
         created_at=device.created_at,
@@ -125,11 +125,11 @@ def _node_summary(node: Optional[ProxyNode]) -> Optional[NodeSummary]:
         return None
     # 遗留 Column 风格模型的属性运行时为原生类型
     return NodeSummary(
-        id=cast(int, node.id),
-        ip=cast(str, node.ip),
-        port=cast(int, node.port),
-        protocol=cast(str, node.protocol),
-        status=cast(str, node.status),
+        id=node.id,
+        ip=node.ip,
+        port=node.port,
+        protocol=node.protocol,
+        status=node.status,
     )
 
 
@@ -146,7 +146,7 @@ def list_devices(
     owner_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:view")),
-):
+) -> dict[str, object]:
     """设备列表。非超管强制仅返回自己所属设备（owner_id 参数忽略）。"""
     try:
         data_scope = get_user_data_scope(db, current_user)
@@ -169,8 +169,8 @@ def list_devices(
             device_type=device_type,
             owner_id=owner_id if data_scope == "all" else None,
             # 遗留 Column 风格模型的属性运行时为 int/bool
-            current_user_id=cast(int, current_user.id),
-            is_super_admin=cast(bool, current_user.is_super_admin),
+            current_user_id=current_user.id,
+            is_super_admin=current_user.is_super_admin,
             owner_ids=owner_ids,
         )
         owner_map = _build_owner_map(db, devices)
@@ -195,7 +195,7 @@ def bindable_nodes(
     exclude_device_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:manage")),
-):
+) -> dict[str, object]:
     """可绑定节点（idle/active 节点允许多台设备共享）。
 
     exclude_device_id 归属校验：非超管仅可放行自己所属的设备（防借他人设备 ID 探测其绑定节点）。
@@ -239,7 +239,7 @@ def create_device(
     body: DeviceCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:manage")),
-):
+) -> DeviceOut:
     """创建设备。非超管 owner 强制为当前用户。"""
     try:
         device = device_service.create_device(db, body.model_dump(), current_user)
@@ -263,7 +263,7 @@ def get_device(
     device_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:view")),
-):
+) -> DeviceDetail:
     """设备详情。非超管仅可查看自己所属；已删除返回 404（服务层执行对象级授权）。"""
     try:
         device = device_service.get_device(db, device_id, current_user)
@@ -281,7 +281,7 @@ def get_device(
     return DeviceDetail(
         **out.model_dump(),
         node=_node_summary(node_map.get(device.node_id) if device.node_id else None),
-        nodes=[_node_summary(node_map[nid]) for nid in (device.node_ids or ([device.node_id] if device.node_id else [])) if nid in node_map],
+        nodes=[cast(NodeSummary, _node_summary(node_map[nid])) for nid in (device.node_ids or ([device.node_id] if device.node_id else [])) if nid in node_map],
     )
 
 
@@ -295,7 +295,7 @@ def update_device(
     body: DeviceUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:manage")),
-):
+) -> DeviceOut:
     """更新设备。非超管仅可更新自己所属；owner 仅超管可改；已删除返回 404（服务层执行授权）。"""
     try:
         device = device_service.get_device(db, device_id, current_user)
@@ -317,7 +317,7 @@ def update_device(
     return _device_to_out(db, device, owner_map, node_map, current_user)
 
 @router.put("/{device_id}/relations", response_model=DeviceOut)
-def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Session = Depends(get_db), current_user: User = Depends(require_permission("device:manage"))):
+def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Session = Depends(get_db), current_user: User = Depends(require_permission("device:manage"))) -> DeviceOut:
     try:
         device = device_service.get_device(db, device_id, current_user)
     except device_service.DeviceServiceError as e:
@@ -394,7 +394,7 @@ def delete_device(
     device_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:manage")),
-):
+) -> dict[str, object]:
     """软删除设备（历史轨迹保留）。非超管仅可删除自己所属；已删除返回 404（服务层执行授权）。"""
     try:
         device = device_service.get_device(db, device_id, current_user)
@@ -417,7 +417,7 @@ def delete_device(
 # ---------------------------------------------------------------------------
 
 @router.get("/{resource_id}/association-history", response_model=dict)
-def get_association_history(resource_id: int, db: Session = Depends(get_db), current_user=Depends(require_permission("device:view"))):
+def get_association_history(resource_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_permission("device:view"))) -> dict[str, object]:
     from app.services.relation_history_service import relation_overview
     return relation_overview(db, "device", resource_id, current_user)
 
@@ -429,7 +429,7 @@ def get_device_logs(
     limit: int = Query(100, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:view")),
-):
+) -> dict[str, object]:
     """设备历史轨迹（含已删除设备，仅超管可查已删除；服务层执行授权与计数）。"""
     try:
         logs, total = device_service.get_device_logs(

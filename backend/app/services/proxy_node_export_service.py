@@ -25,7 +25,7 @@ EXPORT_COLUMNS = [
 ]
 
 
-def _node_to_row(node: ProxyNode) -> dict:
+def _node_to_row(node: ProxyNode) -> dict[str, str]:
     """将 ProxyNode ORM 对象转换为可导出的字典（所有值均为字符串）。"""
     return {
         "ip": node.ip or "",
@@ -80,6 +80,7 @@ def export_to_excel(nodes: List[ProxyNode]) -> bytes:
     """
     wb = openpyxl.Workbook()
     ws = wb.active
+    assert ws is not None
     ws.title = "proxy_nodes"
 
     # 写入列名行（加粗）
