@@ -109,6 +109,7 @@ class OpCollectTask(Base):
     completed = Column(Integer, default=0, nullable=False)
     success = Column(Integer, default=0, nullable=False)
     failed = Column(Integer, default=0, nullable=False)
+    created_by = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

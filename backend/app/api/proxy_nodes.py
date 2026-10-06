@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from app.core.database import get_db
 from app.services.account_summary_service import enrich_monitor_summaries
 from app.models.device import Device, DeviceLog
-from app.models.op_account import OpAccount
+from app.models.op_account import EmailAccount, OpAccount
 from app.schemas.proxy_node import (
     ProxyNodeBatchTestResult,
     ProxyNodeCreate,
@@ -31,7 +31,8 @@ from app.schemas.proxy_node import (
 )
 from app.services import proxy_node_export_service, proxy_node_import_service
 from app.services import proxy_node_service, proxy_node_test_service
-from app.services.auth_service import get_current_user_from_header, require_permission, get_user_data_scope, get_dept_member_usernames
+from app.services.auth_service import get_current_user_from_header, require_permission
+from app.services.asset_scope_service import get_scope_user_ids, get_scope_usernames, get_visible_node_ids, scoped_op_accounts
 from app.models.team import User, OperationLog
 from app.models.proxy_node import ProxyNode
 import threading
@@ -44,20 +45,7 @@ router = APIRouter(prefix="/proxy-nodes", tags=["Proxy Nodes"])
 
 
 def _allowed_node_ids(db: Session, user: User) -> Optional[set[int]]:
-    scope = get_user_data_scope(db, user)
-    if scope == "all":
-        return None
-    allowed = set(get_dept_member_usernames(db, user)) if scope == "dept" else {user.username}
-    ids = {node_id for (node_id,) in db.query(ProxyNode.id).filter(ProxyNode.created_by.in_(allowed)).all()}
-    ids.update(node_id for (node_id,) in db.query(OpAccount.node_id).filter(
-        OpAccount.node_id.isnot(None),
-        (OpAccount.registrant.in_(allowed)) | (OpAccount.operator.in_(allowed)),
-    ).all())
-    return ids
-
-
-def _account_in_scope(account: OpAccount, usernames: Optional[set[str]]) -> bool:
-    return usernames is None or bool({account.registrant, account.operator} & usernames)
+    return get_visible_node_ids(db, user)
 
 
 def _require_node_scope(db: Session, node: ProxyNode, user: User) -> None:
@@ -66,23 +54,22 @@ def _require_node_scope(db: Session, node: ProxyNode, user: User) -> None:
         raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
-def _scope_names(db: Session, user: User) -> Optional[set[str]]:
-    scope = get_user_data_scope(db, user)
-    if scope == "all":
-        return None
-    return set(get_dept_member_usernames(db, user)) if scope == "dept" else {user.username}
-
-
 def _require_node_delete_scope(db: Session, node_ids: set[int], user: User) -> None:
-    allowed = _scope_names(db, user)
-    if allowed is None:
+    owner_ids = get_scope_user_ids(db, user)
+    if owner_ids is None:
         return
-    foreign_account = db.query(OpAccount).filter(OpAccount.node_id.in_(node_ids)).all()
-    if any(not _account_in_scope(account, allowed) for account in foreign_account):
-        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Node is linked to another member's account")
-    owner_ids = {
-        owner_id for (owner_id,) in db.query(User.id).filter(User.username.in_(allowed)).all()
+    visible_account_ids = {
+        account_id for (account_id,) in scoped_op_accounts(db, user).with_entities(OpAccount.id).filter(
+            OpAccount.node_id.in_(node_ids)
+        ).all()
     }
+    linked_accounts = db.query(OpAccount).filter(OpAccount.node_id.in_(node_ids)).all()
+    if any(account.id not in visible_account_ids for account in linked_accounts):
+        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Node is linked to another member's account")
+    names = get_scope_usernames(db, user)
+    linked_emails = db.query(EmailAccount).filter(EmailAccount.node_id.in_(node_ids)).all()
+    if any(not ({email.registrant, email.operator} & names) for email in linked_emails):
+        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Node is linked to another member's email")
     for device in db.query(Device).filter(Device.is_deleted == False).all():
         ids = device.node_ids or ([device.node_id] if device.node_id else [])
         if node_ids.intersection(ids) and device.owner_id not in owner_ids:
@@ -136,27 +123,18 @@ def list_nodes(
             expire_date_from=expire_date_from,
             expire_date_to=expire_date_to,
         )
-        nodes, total = proxy_node_service.get_nodes(db, filter=f, skip=0, limit=5000)
         visible_ids = _allowed_node_ids(db, _current_user)
-        if visible_ids is not None:
-            nodes = [n for n in nodes if n.id in visible_ids]
-        total = len(nodes)
-        nodes = nodes[skip:skip + limit]
-        allowed_names = _scope_names(db, _current_user)
-        allowed_owner_ids = None
-        if allowed_names is not None:
-            allowed_owner_ids = {
-                owner_id for (owner_id,) in db.query(User.id).filter(User.username.in_(allowed_names)).all()
-            }
+        nodes, total = proxy_node_service.get_nodes(
+            db, filter=f, skip=skip, limit=limit, allowed_node_ids=visible_ids
+        )
+        allowed_owner_ids = get_scope_user_ids(db, _current_user)
         all_devices = db.query(Device).filter(Device.is_deleted == False).all()
         for n in nodes:
             linked_devices = [d for d in all_devices if n.id in ((d.node_ids or []) or ([d.node_id] if d.node_id else []))]
             if allowed_owner_ids is not None:
                 linked_devices = [d for d in linked_devices if d.owner_id in allowed_owner_ids]
             device = linked_devices[0] if linked_devices else None
-            accounts = db.query(OpAccount).filter(OpAccount.node_id == n.id).all()
-            if allowed_names is not None:
-                accounts = [a for a in accounts if a.registrant in allowed_names or a.operator in allowed_names]
+            accounts = scoped_op_accounts(db, _current_user).filter(OpAccount.node_id == n.id).all()
             n.device_id = device.id if device else None
             n.device_name = device.name if device else None
             n.account_count = len(accounts)
@@ -324,10 +302,10 @@ def export_nodes(
             expire_date_to=expire_date_to,
         )
         # 不分页，导出全部匹配节点
-        nodes, _ = proxy_node_service.get_nodes(db, filter=f, skip=0, limit=100000)
         visible_ids = _allowed_node_ids(db, _current_user)
-        if visible_ids is not None:
-            nodes = [n for n in nodes if n.id in visible_ids]
+        nodes, _ = proxy_node_service.get_nodes(
+            db, filter=f, skip=0, limit=100000, allowed_node_ids=visible_ids
+        )
 
         if format == "xlsx":
             file_content = proxy_node_export_service.export_to_excel(nodes)
@@ -361,8 +339,7 @@ def export_nodes(
 def batch_delete_nodes(body: BatchDeleteBody, db: Session = Depends(get_db), _current_user: User = Depends(require_permission("proxy_node:manage"))):
     """批量删除节点。"""
     try:
-        scope = get_user_data_scope(db, _current_user)
-        if scope != "all":
+        if _allowed_node_ids(db, _current_user) is not None:
             visible = _allowed_node_ids(db, _current_user) or set()
             if set(body.node_ids) - visible:
                 raise HTTPException(status_code=403, detail="无权删除部分代理节点")
@@ -388,8 +365,7 @@ def batch_update_status(body: BatchStatusBody, db: Session = Depends(get_db), _c
     """批量修改节点状态。"""
     try:
         nodes = db.query(ProxyNode).filter(ProxyNode.id.in_(body.node_ids)).all()
-        scope = get_user_data_scope(db, _current_user)
-        if scope != "all":
+        if _allowed_node_ids(db, _current_user) is not None:
             visible = _allowed_node_ids(db, _current_user) or set()
             nodes = [n for n in nodes if n.id in visible]
         if len(nodes) != len(set(body.node_ids)):
@@ -527,8 +503,7 @@ def get_node_logs(
     node = db.query(ProxyNode).filter(ProxyNode.id == node_id).first()
     if node is None:
         raise HTTPException(status_code=404, detail="代理节点不存在")
-    scope = get_user_data_scope(db, current_user)
-    if not current_user.is_super_admin and scope != "all" and node_id not in (_allowed_node_ids(db, current_user) or set()):
+    if _allowed_node_ids(db, current_user) is not None and node_id not in (_allowed_node_ids(db, current_user) or set()):
         raise HTTPException(status_code=403, detail="Forbidden")
     paths = [f"{method} /api/proxy-nodes/{node_id}{suffix}" for method, suffix in (
         ("UPDATE", ""), ("UPDATE", "/relation"), ("DELETE", ""), ("VIEW_SECRET", "/uri"),
@@ -557,17 +532,24 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
     if not node:
         raise HTTPException(status_code=404, detail="代理节点不存在")
     _require_node_scope(db, node, current_user)
+    allowed_owner_ids = get_scope_user_ids(db, current_user)
+    visible_account_ids = {
+        account_id for (account_id,) in scoped_op_accounts(db, current_user).with_entities(OpAccount.id).all()
+    }
+    selected_account = None
+    if "account_id" in data.model_fields_set and data.account_id is not None:
+        selected_account = db.query(OpAccount).filter(OpAccount.id == data.account_id).first()
+        if not selected_account:
+            raise HTTPException(status_code=404, detail="运营账号不存在")
+        if selected_account.id not in visible_account_ids:
+            raise HTTPException(status_code=403, detail="无权关联该运营账号")
     relation_changes = []
     if "device_id" not in data.model_fields_set:
         pass
     elif data.device_id is None:
-        allowed_names = _scope_names(db, current_user)
-        allowed_owner_ids = None if allowed_names is None else {
-            owner_id for (owner_id,) in db.query(User.id).filter(User.username.in_(allowed_names)).all()
-        }
-        foreign_accounts = [] if allowed_names is None else [
+        foreign_accounts = [] if allowed_owner_ids is None else [
             account for account in db.query(OpAccount).filter(OpAccount.device_id.isnot(None)).all()
-            if not _account_in_scope(account, allowed_names)
+            if account.id not in visible_account_ids
         ]
         candidates = [
             d for d in db.query(Device).filter(Device.is_deleted == False).all()
@@ -588,13 +570,8 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
         d = db.query(Device).filter(Device.id == data.device_id, Device.is_deleted == False).first()
         if not d:
             raise HTTPException(status_code=404, detail="终端不存在或已删除")
-        allowed_names = _scope_names(db, current_user)
-        if allowed_names is not None:
-            allowed_owner_ids = {
-                owner_id for (owner_id,) in db.query(User.id).filter(User.username.in_(allowed_names)).all()
-            }
-            if d.owner_id not in allowed_owner_ids:
-                raise HTTPException(status_code=403, detail="无权关联该终端")
+        if allowed_owner_ids is not None and d.owner_id not in allowed_owner_ids:
+            raise HTTPException(status_code=403, detail="无权关联该终端")
         if node.status not in ("idle", "active"):
             raise HTTPException(status_code=409, detail="代理节点当前状态不可绑定")
 
@@ -607,9 +584,7 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
         pass
     elif data.account_id is None:
         accounts = db.query(OpAccount).filter(OpAccount.node_id == node_id).all()
-        allowed_names = _scope_names(db, current_user)
-        if allowed_names is not None:
-            accounts = [a for a in accounts if _account_in_scope(a, allowed_names)]
+        accounts = [a for a in accounts if a.id in visible_account_ids]
         if len(accounts) > 1:
             raise HTTPException(status_code=409, detail="该节点绑定多个账号，请从账号列表逐个解除")
         for account in accounts:
@@ -622,12 +597,7 @@ def _update_node_relation_locked(node_id: int, data: ProxyNodeRelationUpdate, db
             _write_audit_log(db, account.id, "update", "node_id", str(node_id), None, current_user.username)
             record_relation_snapshot(db, account, current_user.username)
     else:
-        account = db.query(OpAccount).filter(OpAccount.id == data.account_id).first()
-        if not account:
-            raise HTTPException(status_code=404, detail="运营账号不存在")
-        allowed_names = _scope_names(db, current_user)
-        if allowed_names is not None and not _account_in_scope(account, allowed_names):
-            raise HTTPException(status_code=403, detail="无权关联该运营账号")
+        account = selected_account
         if node.status not in ("idle", "active"):
             raise HTTPException(status_code=409, detail="代理节点当前状态不可绑定")
         from app.services.op_account_service import normalize_account_relation

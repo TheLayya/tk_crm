@@ -117,6 +117,7 @@ npm run dev -- --host 127.0.0.1 --port 5174
 | Windows 续接轮 | 2026-10-05 | 邮箱空白原因和旧请求覆盖新领取已修复，复审 GATE PASS；更新并发 P2 已登记；全量验证门禁 FAIL（325 passed、覆盖率 66.20% < 80%） | 本地包重建、发布审计及独立安装冒烟通过；未发布部署，不宣称全量验证通过 | [docs/handover/2026-10-05-windows-packaging-handoff.md](docs/handover/2026-10-05-windows-packaging-handoff.md) |
 | 运营视频与邮箱复制轮 | 2026-10-06 | 独立运营视频、邮箱复制、更新断连恢复复审 GATE PASS；全量 372 passed，覆盖率 69.51% < 80% 门禁 FAIL | 本地修复，未提交发布；mypy/最终序列构建 NOT RUN；浏览器关闭环境限制单独登记 | [docs/handover/2026-10-06-op-videos-email-copy.md](docs/handover/2026-10-06-op-videos-email-copy.md) |
 | 完整运营采集与刷新轮 | 2026-10-06 | 采集链路、粉丝自身基线、昨日统计刷新复审 GATE PASS；全量 403 passed，覆盖率 70.25% < 80% 门禁 FAIL | 专项 68 passed、Node 回归与独立构建通过；按已有发布授权准备 1.1.14，团队升级由用户点击 | [docs/handover/2026-10-06-op-collection-refresh.md](docs/handover/2026-10-06-op-collection-refresh.md) |
+| 成员终端归属可见性轮 | 2026-10-06 | 独立复审 P1/P2 none，GATE PASS；全量 418 passed，覆盖率 71.63% < 80% 门禁 FAIL | 修复 self/dept 终端继承及关联目标越权；权限专项 15 passed，准备 1.1.15；团队仍由用户点击更新 | [docs/handover/2026-10-06-member-device-visibility.md](docs/handover/2026-10-06-member-device-visibility.md) |
 
 ---
 

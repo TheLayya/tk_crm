@@ -29,7 +29,8 @@ from app.schemas.op_account import (
 from app.services import op_account_service, video_service
 from app.services.gmail_checker_service import MAX_BATCH_SIZE, apply_check_results, check_gmail_accounts
 
-from app.services.auth_service import require_permission, get_current_user_from_header, get_user_data_scope, get_dept_member_usernames
+from app.services.auth_service import require_permission, get_current_user_from_header
+from app.services.asset_scope_service import get_scope_usernames, require_op_account_scope, require_visible_op_account, require_account_relation_scope
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +42,10 @@ gmail_check_lock = threading.Lock()
 def get_stats(
     exclude_gmail: bool = Query(False),
     db: Session = Depends(get_db),
-    _=Depends(require_permission("op_account:view")),
+    current_user=Depends(require_permission("op_account:view")),
 ):
     """获取运营账号统计数据。"""
-    return op_account_service.get_op_account_stats(db, exclude_gmail=exclude_gmail)
+    return op_account_service.get_op_account_stats(db, exclude_gmail=exclude_gmail, current_user=current_user)
 
 
 @router.get("", response_model=dict)
@@ -62,11 +63,6 @@ def list_op_accounts(
     current_user=Depends(get_current_user_from_header),
     _=Depends(require_permission("op_account:view")),
 ):
-    # 数据范围过滤
-    data_scope = get_user_data_scope(db, current_user)
-    scope_username = current_user.username if data_scope == "self" else None
-    scope_usernames = get_dept_member_usernames(db, current_user) if data_scope == "dept" else None
-
     items, total = op_account_service.list_op_accounts(
         db,
         platform=platform,
@@ -77,8 +73,7 @@ def list_op_accounts(
         sale_customer=sale_customer,
         skip=skip,
         limit=limit,
-        scope_username=scope_username,
-        scope_usernames=scope_usernames,
+        current_user=current_user,
         exclude_gmail=exclude_gmail,
     )
     enrich_monitor_summaries(db, items, current_user)
@@ -102,13 +97,14 @@ def create_op_account(
     _=Depends(require_permission("op_account:create")),
 ):
     try:
+        require_account_relation_scope(db, data.model_dump(exclude_unset=True), current_user)
         # 如果未填 registrant，自动设为当前用户，确保数据范围过滤能匹配到自己
         if not data.registrant:
             data = data.model_copy(update={"registrant": current_user.username})
         account = op_account_service.create_op_account(db, data, actor=current_user.username)
         # 创建后触发采集
         if account.platform == "tiktok":
-            op_account_service.trigger_collect(db, [account.id], background_tasks)
+            op_account_service.trigger_collect(db, [account.id], background_tasks, actor=current_user.username)
         return OpAccountResponse.model_validate(account)
     except Exception as e:
         logger.error(f"Failed to create op_account: {e}")
@@ -135,14 +131,7 @@ def download_import_template(_=Depends(require_permission("op_account:import")))
 
 @router.post("/batch-status", response_model=dict)
 def batch_update_status(data: BatchStatusUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user_from_header), _=Depends(require_permission("op_account:edit"))):
-    scope = get_user_data_scope(db, current_user)
-    if scope != "all":
-        allowed = set(get_dept_member_usernames(db, current_user)) if scope == "dept" else {current_user.username}
-        accounts = db.query(op_account_service.OpAccount).filter(op_account_service.OpAccount.id.in_(data.ids)).all()
-        if len(accounts) != len(set(data.ids)):
-            raise HTTPException(status_code=404, detail="部分运营账号不存在")
-        if any(not ({a.registrant, a.operator} & allowed) for a in accounts):
-            raise HTTPException(status_code=403, detail="无权批量操作部分运营账号")
+    require_op_account_scope(db, data.ids, current_user)
     count = op_account_service.batch_update_status(
         db,
         ids=data.ids,
@@ -209,7 +198,7 @@ async def import_from_csv(
     if account_ids:
         tiktok_ids = [item.id for item in db.query(op_account_service.OpAccount).filter(op_account_service.OpAccount.id.in_(account_ids), op_account_service.OpAccount.platform == "tiktok").all()]
         if tiktok_ids:
-            result.task_id = op_account_service.trigger_collect(db, tiktok_ids, background_tasks)
+            result.task_id = op_account_service.trigger_collect(db, tiktok_ids, background_tasks, actor=current_user.username)
     return result
 
 
@@ -224,7 +213,7 @@ def export_op_accounts(
     format: str = Query("csv"),
     localized: bool = Query(False, description="是否使用中文表头"),
     db: Session = Depends(get_db),
-    _=Depends(require_permission("op_account:export")),
+    current_user=Depends(require_permission("op_account:export")),
 ):
     if format not in {"csv", "xlsx"}:
         raise HTTPException(status_code=422, detail="导出格式仅支持 CSV 或 XLSX")
@@ -236,7 +225,7 @@ def export_op_accounts(
         "purchase_channel": purchase_channel,
         "sale_customer": sale_customer,
     }
-    data = op_account_service.export_op_accounts(db, filters=filters, format=format, localized=localized)
+    data = op_account_service.export_op_accounts(db, filters=filters, format=format, localized=localized, current_user=current_user)
 
     if format == "xlsx":
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -257,18 +246,24 @@ def trigger_collect(
     body: dict,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    _=Depends(require_permission("op_account:collect")),
+    current_user=Depends(require_permission("op_account:collect")),
 ):
     account_ids = body.get("account_ids", [])
-    task_id = op_account_service.trigger_collect(db, account_ids=account_ids, background_tasks=background_tasks)
+    if not isinstance(account_ids, list) or not account_ids or any(type(account_id) is not int or account_id <= 0 for account_id in account_ids):
+        raise HTTPException(status_code=422, detail="请选择有效的运营账号")
+    require_op_account_scope(db, account_ids, current_user)
+    task_id = op_account_service.trigger_collect(db, account_ids=account_ids, background_tasks=background_tasks, actor=current_user.username)
     return {"task_id": task_id}
 
 
 @router.get("/tasks/{task_id}", response_model=CollectTaskResponse)
-def get_collect_task(task_id: str, db: Session = Depends(get_db), _=Depends(require_permission("op_account:view"))):
+def get_collect_task(task_id: str, db: Session = Depends(get_db), current_user=Depends(require_permission("op_account:view"))):
     task = op_account_service.get_collect_task(db, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    names = get_scope_usernames(db, current_user)
+    if names is not None and task.created_by not in names:
+        raise HTTPException(status_code=403, detail="无权查看该采集任务")
     return CollectTaskResponse(
         task_id=task.id,
         status=task.status,
@@ -295,10 +290,7 @@ def check_gmail_status(
     ).all()
     if len(accounts) != len(account_ids):
         raise HTTPException(status_code=422, detail="只能检测已选择的 Gmail 账号")
-    scope = get_user_data_scope(db, current_user)
-    allowed = set(get_dept_member_usernames(db, current_user)) if scope == "dept" else {current_user.username}
-    if scope != "all" and any(not ({account.registrant, account.operator} & allowed) for account in accounts):
-        raise HTTPException(status_code=403, detail="无权检测部分运营账号")
+    require_op_account_scope(db, account_ids, current_user)
     if not gmail_check_lock.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="已有 Gmail 检测进行中，请稍后重试")
     try:
@@ -324,13 +316,8 @@ def check_gmail_status(
 
 @router.put("/{id}", response_model=OpAccountResponse)
 def update_op_account(id: int, data: OpAccountUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user_from_header), _=Depends(require_permission("op_account:edit"))):
-    account = op_account_service.get_op_account(db, id)
-    if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    scope = get_user_data_scope(db, current_user)
-    allowed = {account.registrant, account.operator}
-    if (scope == "self" and current_user.username not in allowed) or (scope == "dept" and not allowed.intersection(get_dept_member_usernames(db, current_user))):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作该运营账号")
+    account = require_visible_op_account(db, id, current_user)
+    require_account_relation_scope(db, data.model_dump(exclude_unset=True), current_user)
     account = op_account_service.update_op_account(db, id, data, actor=current_user.username)
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
@@ -345,14 +332,7 @@ def get_op_account_videos(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission("op_account:view")),
 ):
-    account = op_account_service.get_op_account(db, id)
-    if not account:
-        raise HTTPException(status_code=404, detail="运营账号不存在")
-    scope = get_user_data_scope(db, current_user)
-    allowed = {account.registrant, account.operator}
-    if ((scope == "self" and current_user.username not in allowed)
-            or (scope == "dept" and not allowed.intersection(get_dept_member_usernames(db, current_user)))):
-        raise HTTPException(status_code=403, detail="无权查看该运营账号")
+    account = require_visible_op_account(db, id, current_user)
     return {
         "items": video_service.get_videos(db, id, skip, limit, model=OpAccountVideo),
         "total": db.query(OpAccountVideo).filter(OpAccountVideo.account_id == id).count(),
@@ -363,13 +343,7 @@ def get_op_account_videos(
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_op_account(id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user_from_header), _=Depends(require_permission("op_account:delete"))):
-    account = op_account_service.get_op_account(db, id)
-    if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    scope = get_user_data_scope(db, current_user)
-    allowed = {account.registrant, account.operator}
-    if (scope == "self" and current_user.username not in allowed) or (scope == "dept" and not allowed.intersection(get_dept_member_usernames(db, current_user))):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作该运营账号")
+    account = require_visible_op_account(db, id, current_user)
     ok = op_account_service.delete_op_account(db, id)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
@@ -405,9 +379,7 @@ def get_association_history(resource_id: int, db: Session = Depends(get_db), cur
 
 @router.get("/{id}/logs", response_model=List[AuditLogResponse])
 def get_audit_logs(id: int, db: Session = Depends(get_db), current_user=Depends(require_permission("op_account:view"))):
-    account = op_account_service.get_op_account(db, id)
-    if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    account = require_visible_op_account(db, id, current_user)
     from app.services.relation_history_service import relation_overview, readable_account_log
     relation_overview(db, "account", id, current_user)
     logs = op_account_service.get_audit_logs(db, account_id=id)

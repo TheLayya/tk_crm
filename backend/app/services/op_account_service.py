@@ -15,7 +15,7 @@ from app.core.database import SessionLocal
 from app.models.op_account import OpAccount, OpAuditLog, OpCollectTask
 from app.models.team import User
 from app.services.sale_validation_service import validate_sale_information
-from app.services.auth_service import get_user_data_scope, get_dept_member_usernames
+from app.services.asset_scope_service import require_op_account_scope, scoped_op_accounts
 from app.schemas.op_account import (
     OpAccountCreate,
     OpAccountUpdate,
@@ -232,11 +232,10 @@ def list_op_accounts(
     sale_customer: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
-    scope_username: Optional[str] = None,
-    scope_usernames: Optional[List[str]] = None,
+    current_user: Optional[User] = None,
     exclude_gmail: bool = False,
 ) -> tuple:
-    query = db.query(OpAccount)
+    query = scoped_op_accounts(db, current_user) if current_user is not None else db.query(OpAccount)
     if exclude_gmail:
         query = query.filter(OpAccount.platform != "gmail")
     if project_id is not None:
@@ -256,20 +255,6 @@ def list_op_accounts(
         query = query.filter(OpAccount.purchase_channel == purchase_channel)
     if sale_customer:
         query = query.filter(OpAccount.sale_customer == sale_customer)
-    # 数据范围：只看自己相关的（注册人或使用人）
-    if scope_username:
-        from sqlalchemy import or_
-        query = query.filter(
-            or_(
-                OpAccount.registrant == scope_username,
-                OpAccount.operator == scope_username,
-            )
-        )
-    elif scope_usernames is not None:
-        from sqlalchemy import or_
-        query = query.filter(
-            or_(OpAccount.registrant.in_(scope_usernames), OpAccount.operator.in_(scope_usernames))
-        )
     total = query.count()
     items = query.offset(skip).limit(limit).all()
     # 反序列化每条记录的 sellers
@@ -282,14 +267,14 @@ def list_op_accounts(
 # Stats
 # ---------------------------------------------------------------------------
 
-def get_op_account_stats(db: Session, exclude_gmail: bool = False) -> dict:
+def get_op_account_stats(db: Session, exclude_gmail: bool = False, current_user: Optional[User] = None) -> dict:
     """
     统计运营账号的汇总数据：总数、各状态数量、总采购成本、总出售收入、净收益。
     """
     from decimal import Decimal
     from sqlalchemy import func
 
-    query = db.query(OpAccount)
+    query = scoped_op_accounts(db, current_user) if current_user is not None else db.query(OpAccount)
     if exclude_gmail:
         query = query.filter(OpAccount.platform != "gmail")
     total = query.count()
@@ -384,11 +369,7 @@ def batch_assign_operator(db: Session, ids: list, operator: str, current_user: U
     accounts = db.query(OpAccount).filter(OpAccount.id.in_(account_ids)).all()
     if not account_ids or len(accounts) != len(account_ids):
         raise HTTPException(status_code=404, detail="部分运营账号不存在，请刷新后重试")
-    scope = get_user_data_scope(db, current_user)
-    if scope != "all":
-        allowed = set(get_dept_member_usernames(db, current_user)) if scope == "dept" else {current_user.username}
-        if any(not ({a.registrant, a.operator} & allowed) for a in accounts):
-            raise HTTPException(status_code=403, detail="无权批量分配部分运营账号")
+    require_op_account_scope(db, [account.id for account in accounts], current_user)
 
     count = 0
     for account in accounts:
@@ -499,8 +480,8 @@ def create_import_template() -> bytes:
     return buffer.getvalue()
 
 
-def export_op_accounts(db: Session, filters: dict, format: str = "csv", localized: bool = False) -> bytes:
-    items, _ = list_op_accounts(db, **filters, skip=0, limit=999999)
+def export_op_accounts(db: Session, filters: dict, format: str = "csv", localized: bool = False, current_user: Optional[User] = None) -> bytes:
+    items, _ = list_op_accounts(db, **filters, skip=0, limit=999999, current_user=current_user)
     columns = [_COLUMN_LABELS.get(col, col) for col in _EXPORT_COLUMNS] if localized else _EXPORT_COLUMNS
 
     if format == "xlsx":
@@ -800,7 +781,8 @@ def register_scheduler_job(scheduler, db_factory: Callable) -> None:
     logger.info("Registered scheduled op-account collection job (every minute)")
 
 
-def trigger_collect(db: Session, account_ids: list, background_tasks: BackgroundTasks) -> str:
+def trigger_collect(db: Session, account_ids: list, background_tasks: BackgroundTasks, actor=None) -> str:
+    account_ids = list(dict.fromkeys(account_ids))
     task_id = str(uuid.uuid4())
     task = OpCollectTask(
         id=task_id,
@@ -809,6 +791,7 @@ def trigger_collect(db: Session, account_ids: list, background_tasks: Background
         completed=0,
         success=0,
         failed=0,
+        created_by=actor,
     )
     db.add(task)
     db.commit()

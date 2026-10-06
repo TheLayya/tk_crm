@@ -33,6 +33,7 @@ from app.schemas.device import (
 from app.services import device_service
 from app.services.account_summary_service import enrich_monitor_summaries
 from app.services.auth_service import require_permission, get_user_data_scope, get_dept_member_usernames
+from app.services.asset_scope_service import get_visible_node_ids, scoped_op_accounts
 
 class DeviceRelationsBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -218,7 +219,8 @@ def bindable_nodes(
             if allowed_owner_ids is not None and excluded.owner_id not in allowed_owner_ids:
                 raise HTTPException(status_code=403, detail="无权操作此设备")
         items = device_service.get_bindable_nodes(
-            db, q=q, exclude_device_id=exclude_device_id
+            db, q=q, exclude_device_id=exclude_device_id,
+            allowed_node_ids=get_visible_node_ids(db, current_user),
         )
         return {"items": items, "total": len(items)}
     except HTTPException:
@@ -316,7 +318,10 @@ def update_device(
 
 @router.put("/{device_id}/relations", response_model=DeviceOut)
 def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Session = Depends(get_db), current_user: User = Depends(require_permission("device:manage"))):
-    device = device_service.get_device(db, device_id, current_user)
+    try:
+        device = device_service.get_device(db, device_id, current_user)
+    except device_service.DeviceServiceError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     if device is None:
         raise HTTPException(status_code=404, detail="设备不存在")
     node_ids = body.node_ids
@@ -326,27 +331,8 @@ def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Sessi
     invalid = [n for n in nodes if n.status not in ("idle", "active")]
     if invalid:
         raise HTTPException(status_code=409, detail=f"节点 {invalid[0].ip}:{invalid[0].port} 当前状态不可绑定")
-    visible_node_ids = None
-    if not current_user.is_super_admin:
-        scope = get_user_data_scope(db, current_user)
-        if scope == "all":
-            names = None
-        else:
-            names = get_dept_member_usernames(db, current_user) if scope == "dept" else [current_user.username]
-        if names is None:
-            visible_node_ids = {node_id for (node_id,) in db.query(ProxyNode.id).all()}
-        else:
-            visible_node_ids = {
-                node_id for (node_id,) in db.query(ProxyNode.id).filter(
-                    ProxyNode.created_by.in_(names)
-                ).all()
-            }
-            visible_node_ids.update(
-                node_id for (node_id,) in db.query(OpAccount.node_id).filter(
-                    OpAccount.node_id.isnot(None),
-                    (OpAccount.registrant.in_(names)) | (OpAccount.operator.in_(names)),
-                ).all()
-            )
+    visible_node_ids = get_visible_node_ids(db, current_user)
+    if visible_node_ids is not None:
         if set(node_ids) - visible_node_ids:
             raise HTTPException(status_code=403, detail="无权关联部分代理节点")
 
@@ -354,10 +340,9 @@ def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Sessi
     account_ids = list(dict.fromkeys(body.account_ids if body.account_ids is not None else ([body.account_id] if body.account_id else [])))
     from app.services.op_account_service import _write_audit_log, record_relation_snapshot
     selected_accounts = []
-    scope = get_user_data_scope(db, current_user)
-    allowed_names = None if scope == "all" else set(
-        get_dept_member_usernames(db, current_user) if scope == "dept" else [current_user.username]
-    )
+    visible_account_ids = {
+        account_id for (account_id,) in scoped_op_accounts(db, current_user).with_entities(OpAccount.id).all()
+    }
     if account_ids:
         if device.device_type != "phone":
             raise HTTPException(status_code=409, detail="运营账号只能绑定手机终端")
@@ -365,17 +350,15 @@ def update_device_relations(device_id: int, body: DeviceRelationsBody, db: Sessi
         if len(selected_accounts) != len(account_ids):
             raise HTTPException(status_code=404, detail="部分账号不存在")
         for account in selected_accounts:
-            if allowed_names is not None and not ({account.registrant, account.operator} & allowed_names):
+            if account.id not in visible_account_ids:
                 raise HTTPException(status_code=403, detail="无权关联该运营账号")
             if account.device_id and account.device_id != device.id:
                 old_device = db.query(Device).filter(Device.id == account.device_id, Device.is_deleted == False).first()
                 raise HTTPException(status_code=409, detail=f"账号 {account.account} 已绑定终端 {old_device.name if old_device else account.device_id}")
     selected_ids = {a.id for a in selected_accounts}
     existing_accounts = db.query(OpAccount).filter(OpAccount.device_id == device.id).all()
-    if allowed_names is not None:
-        foreign_existing = [item for item in existing_accounts if not ({item.registrant, item.operator} & allowed_names)]
-        if foreign_existing and not {item.id for item in selected_accounts}.intersection({item.id for item in foreign_existing}):
-            raise HTTPException(status_code=403, detail="无权解除其他成员的运营账号关联")
+    if any(item.id not in visible_account_ids and item.id not in selected_ids for item in existing_accounts):
+        raise HTTPException(status_code=403, detail="无权解除其他成员的运营账号关联")
     for item in existing_accounts:
         if item.id not in selected_ids:
             _write_audit_log(db, item.id, "update", "node_id", str(item.node_id) if item.node_id else None, None, current_user.username)

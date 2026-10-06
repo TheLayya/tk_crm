@@ -20,6 +20,7 @@ from app.schemas.op_account import (
     EmailImportRequest, EmailRelationRequest, GmailCheckRequest,
 )
 from app.services.auth_service import require_permission, get_user_data_scope, get_dept_member_usernames
+from app.services.asset_scope_service import scoped_op_accounts, get_visible_node_ids
 from app.services.gmail_checker_service import check_gmail_accounts, normalize_status
 from app.services.op_account_service import parse_email_import_line
 from app.services.sale_validation_service import validate_sale_information
@@ -40,6 +41,8 @@ def list_email_platforms(db: Session = Depends(get_db), _=Depends(require_permis
 
 
 def scoped_query(db, model, user):
+    if model is OpAccount:
+        return scoped_op_accounts(db, user)
     query = db.query(model)
     scope = get_user_data_scope(db, user)
     if scope != "all":
@@ -112,7 +115,7 @@ def validate_assets(db, values, user):
         if scope != "all":
             visible = scoped_query(db, OpAccount, user).filter_by(node_id=node_id).first()
             email_visible = scoped_query(db, EmailAccount, user).filter_by(node_id=node_id).first()
-            if not visible and not email_visible:
+            if node_id not in (get_visible_node_ids(db, user) or set()) and not visible and not email_visible:
                 raise HTTPException(status_code=403, detail="无权绑定此节点")
 
 

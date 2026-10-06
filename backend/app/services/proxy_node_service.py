@@ -74,10 +74,13 @@ def get_nodes(
     filter: ProxyNodeFilter,
     skip: int = 0,
     limit: int = 100,
+    allowed_node_ids: Optional[set[int]] = None,
 ) -> Tuple[List[ProxyNode], int]:
     """带筛选的分页查询，返回 (nodes_list, total_count)。"""
     query = db.query(ProxyNode)
     query = _apply_filter(query, filter)
+    if allowed_node_ids is not None:
+        query = query.filter(ProxyNode.id.in_(allowed_node_ids))
 
     total = query.count()
     nodes = query.offset(skip).limit(limit).all()

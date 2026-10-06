@@ -3,7 +3,7 @@ from fastapi import HTTPException
 from app.models.device import Device, DeviceLog
 from app.models.proxy_node import ProxyNode
 from app.models.op_account import OpAccount, OpAuditLog
-from app.services.auth_service import get_user_data_scope, get_dept_member_usernames
+from app.services.asset_scope_service import get_visible_node_ids, scoped_op_accounts
 
 
 def account_relation_snapshot(db, account):
@@ -18,12 +18,7 @@ def account_relation_snapshot(db, account):
 
 
 def visible_accounts(db, user):
-    query = db.query(OpAccount)
-    scope = get_user_data_scope(db, user)
-    if not user.is_super_admin and scope != "all":
-        allowed = get_dept_member_usernames(db, user) if scope == "dept" else [user.username]
-        query = query.filter((OpAccount.registrant.in_(allowed)) | (OpAccount.operator.in_(allowed)))
-    return query.all()
+    return scoped_op_accounts(db, user).all()
 
 
 def parse_snapshot(log):
@@ -50,10 +45,9 @@ def relation_overview(db, kind, resource_id, user):
                 raise HTTPException(404, "终端不存在")
         except DeviceServiceError as error:
             raise HTTPException(error.status_code, error.detail)
-    if kind == "node" and not user.is_super_admin:
-        scope = get_user_data_scope(db, user)
-        allowed = get_dept_member_usernames(db, user) if scope == "dept" else [user.username]
-        if scope != "all" and resource.created_by not in allowed and not any(account.node_id == resource_id for account in accounts):
+    if kind == "node":
+        node_ids = get_visible_node_ids(db, user)
+        if node_ids is not None and resource_id not in node_ids:
             raise HTTPException(403, "无权查看节点关联")
     if kind == "account":
         accounts = [by_id[resource_id]]

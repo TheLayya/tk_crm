@@ -17,6 +17,7 @@ from app.models.device import Device, DeviceLog
 from app.models.proxy_node import ProxyNode
 from app.models.team import User
 from app.services.auth_service import get_user_data_scope, get_dept_member_usernames
+from app.services.asset_scope_service import get_visible_node_ids
 
 logger = logging.getLogger(__name__)
 _device_mutation_lock = threading.RLock()
@@ -84,12 +85,15 @@ def _require_active_owner(db: Session, owner_id: int) -> User:
     return owner
 
 
-def _require_bindable_node(db: Session, node_id: int) -> ProxyNode:
+def _require_bindable_node(db: Session, node_id: int, user: User) -> ProxyNode:
     node = db.query(ProxyNode).filter(ProxyNode.id == node_id).first()
     if node is None:
         raise DeviceServiceError(404, "绑定节点不存在")
     if node.status not in BINDABLE_NODE_STATUSES:
         raise DeviceServiceError(400, "该节点状态不可绑定（仅空闲/使用中节点可绑定）")
+    visible_ids = get_visible_node_ids(db, user)
+    if visible_ids is not None and node_id not in visible_ids:
+        raise DeviceServiceError(403, "无权关联该代理节点")
     return node
 
 
@@ -213,9 +217,11 @@ def _create_device_locked(db: Session, data: dict, user: User) -> Device:
     _require_active_owner(db, owner_id)
 
     # 节点校验
+    if data.get("node_ids"):
+        raise DeviceServiceError(400, "请使用关联管理接口修改代理节点关系")
     node_id = data.get("node_id")
     if node_id is not None:
-        _require_bindable_node(db, node_id)
+        _require_bindable_node(db, node_id, user)
 
 
     device = Device(
@@ -291,7 +297,7 @@ def update_device(db: Session, device: Device, data: dict, user: User) -> Tuple[
     if "node_id" in data:
         new_node_id = data["node_id"]
         if new_node_id is not None and new_node_id != device.node_id:
-            _require_bindable_node(db, new_node_id)
+            _require_bindable_node(db, new_node_id, user)
 
             target_node_id = new_node_id
 
@@ -469,9 +475,12 @@ def get_bindable_nodes(
     q: Optional[str] = None,
     exclude_device_id: Optional[int] = None,
     limit: int = 100,
+    allowed_node_ids: Optional[set[int]] = None,
 ) -> List[dict]:
     """返回可共享绑定的空闲或使用中节点。"""
     query = db.query(ProxyNode).filter(ProxyNode.status.in_(BINDABLE_NODE_STATUSES))
+    if allowed_node_ids is not None:
+        query = query.filter(ProxyNode.id.in_(allowed_node_ids))
 
     if q:
         query = query.filter(or_(ProxyNode.ip.contains(q)))

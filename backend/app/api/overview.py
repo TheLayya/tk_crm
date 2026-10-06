@@ -13,28 +13,16 @@ from app.models.proxy_node import ProxyNode
 from app.models.team import User
 from app.services.account_summary_service import enrich_monitor_summaries
 from app.services.auth_service import (
-    get_dept_member_usernames,
-    get_user_data_scope,
     require_permission,
     _get_user_permissions,
 )
+from app.services.asset_scope_service import scoped_op_accounts, get_visible_node_ids, get_scope_usernames
 
 router = APIRouter(prefix="/overview", tags=["数据总览"])
 
 
 def _name(user: Optional[User]) -> str:
     return (user.real_name or user.username) if user else "未分配"
-
-
-def _scope_usernames(db: Session, user: User) -> Optional[set[str]]:
-    scope = get_user_data_scope(db, user)
-    if scope == "all":
-        return None
-    return set(get_dept_member_usernames(db, user)) if scope == "dept" else {user.username}
-
-
-def _visible_account(account: OpAccount, usernames: Optional[set[str]]) -> bool:
-    return usernames is None or account.registrant in usernames or account.operator in usernames
 
 
 def _visible_email(email: EmailAccount, usernames: Optional[set[str]]) -> bool:
@@ -56,21 +44,19 @@ def get_overview(
     def in_period(value):
         return date_from is None and date_to is None or value is not None and (date_from is None or value >= date_from) and (date_to is None or value <= date_to)
 
-    usernames = _scope_usernames(db, current_user)
+    usernames = get_scope_usernames(db, current_user)
     users = {u.id: u for u in db.query(User).all()}
     devices = [d for d in db.query(Device).filter(Device.is_deleted == False).all()
                if usernames is None or (d.owner_id in users and users[d.owner_id].username in usernames)]
-    accounts = [a for a in db.query(OpAccount).all() if _visible_account(a, usernames) and a.platform != "gmail"]
+    accounts = scoped_op_accounts(db, current_user).filter(OpAccount.platform != "gmail").all()
     enrich_monitor_summaries(db, accounts, current_user)
     permissions = set(_get_user_permissions(db, current_user.id))
     emails_visible = current_user.is_super_admin or bool(permissions & {"email:view", "op_account:view"})
     emails = [e for e in db.query(EmailAccount).all() if _visible_email(e, usernames)] if emails_visible else []
     nodes = db.query(ProxyNode).all()
-    if usernames is not None:
-        visible_node_ids = {a.node_id for a in accounts if a.node_id}
-        visible_node_ids.update(e.node_id for e in emails if e.node_id)
-        visible_node_ids.update(nid for d in devices for nid in (d.node_ids or ([d.node_id] if d.node_id else [])))
-        nodes = [n for n in nodes if n.created_by in usernames or n.id in visible_node_ids]
+    visible_node_ids = get_visible_node_ids(db, current_user)
+    if visible_node_ids is not None:
+        nodes = [n for n in nodes if n.id in visible_node_ids]
 
     node_map = {n.id: n for n in nodes}
     accounts_by_device = defaultdict(list)
