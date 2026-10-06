@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace TkCrm.Updater;
 
 /// <summary>Owns the per-user update lock for the whole update transaction.</summary>
@@ -6,6 +8,17 @@ public sealed class UpdateLock : IDisposable
     private readonly FileStream stream;
 
     private UpdateLock(FileStream stream) => this.stream = stream;
+
+    public static async Task<UpdateLock?> AcquireAsync(string statusFile, TimeSpan timeout)
+    {
+        var wait = Stopwatch.StartNew();
+        while (true)
+        {
+            if (TryAcquire(statusFile, out var acquired)) return acquired;
+            if (wait.Elapsed >= timeout) return null;
+            await Task.Delay(50);
+        }
+    }
 
     public static bool TryAcquire(string statusFile, out UpdateLock? updateLock)
     {

@@ -26,7 +26,9 @@ var startupReceipt = arguments.GetValueOrDefault("startup-receipt", "");
 
 try
 {
-    if (!UpdateLock.TryAcquire(statusFile, out updateLock))
+    // A status query briefly probes the lock to detect an interrupted updater.
+    updateLock = await UpdateLock.AcquireAsync(statusFile, TimeSpan.FromSeconds(1));
+    if (updateLock is null)
     {
         if (!string.IsNullOrWhiteSpace(startupReceipt)) WriteStartupReceipt(startupReceipt, "busy", "已有更新正在进行");
         Environment.ExitCode = 1;

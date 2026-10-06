@@ -5,7 +5,19 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 
-if (args.Length == 3 && args[0] == "--fixture") { await RunFixture(args[1], args[2]); return; }
+if (args.Length == 3 && args[0] == "--fixture")
+{
+    try
+    {
+        await RunFixture(args[1], args[2]);
+    }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine(error.Message);
+        Environment.ExitCode = 1;
+    }
+    return;
+}
 if (args.Length != 1) throw new ArgumentException("Pass the compiled failure-setup.exe path");
 var root = Path.Combine(Path.GetTempPath(), "TkCRM-inno-rollback-" + Guid.NewGuid().ToString("N"));
 var installation = Path.Combine(root, "中文安装目录");

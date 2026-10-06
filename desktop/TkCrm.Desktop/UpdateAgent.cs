@@ -215,18 +215,20 @@ public sealed class UpdateAgent : IDisposable
         if ((status is "running" or "waiting_exit" or "installed")
             && UpdateLock.TryAcquire(statusFile, out var recoveredLock))
         {
+            object response;
             using (recoveredLock)
-            using (var currentState = JsonDocument.Parse(await File.ReadAllTextAsync(statusFile)))
+            using (var currentState = JsonDocument.Parse(File.ReadAllText(statusFile)))
             {
                 var currentStatus = currentState.RootElement.GetProperty("status").GetString();
                 if (currentStatus is "running" or "waiting_exit" or "installed")
                 {
                     var latestVersion = currentState.RootElement.TryGetProperty("latest_version", out var versionElement)
                         ? versionElement.GetString() : null;
-                    await WriteJsonAsync(context, new { status = "failed", message = "更新进程已中断，请重新检查更新", latest_version = latestVersion });
+                    response = new { status = "failed", message = "更新进程已中断，请重新检查更新", latest_version = latestVersion };
                 }
-                else await WriteJsonAsync(context, currentState.RootElement);
+                else response = currentState.RootElement.Clone();
             }
+            await WriteJsonAsync(context, response);
             return;
         }
         await WriteJsonAsync(context, state.RootElement);
