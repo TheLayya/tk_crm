@@ -88,3 +88,20 @@ def test_desktop_accepts_windows_only_release(release, monkeypatch):
 def test_invalid_windows_manifest_is_rejected(fields):
     with pytest.raises(ValueError):
         updates._has_windows_package(fields)
+
+
+def test_apply_timeout_allows_updater_startup_handshake(monkeypatch):
+    from io import BytesIO
+
+    calls = []
+
+    def open_agent(request, timeout):
+        calls.append((request.method, timeout))
+        return BytesIO(b'{"status":"running"}')
+
+    monkeypatch.setattr(updates.settings, "UPDATE_AGENT_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr(updates.settings, "UPDATE_AGENT_TOKEN", "fixture-token")
+    monkeypatch.setattr(updates, "urlopen", open_agent)
+    assert updates._agent_request("POST", "/apply", {}) == {"status": "running"}
+    assert updates._agent_request("GET", "/status") == {"status": "running"}
+    assert calls == [("POST", 15), ("GET", 5)]

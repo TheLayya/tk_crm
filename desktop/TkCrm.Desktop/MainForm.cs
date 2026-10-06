@@ -61,8 +61,12 @@ public sealed class MainForm : Form
             updateAgent = UpdateAgent.Start(AppContext.BaseDirectory, RequestCloseForUpdateAsync);
             server = await ManagedServer.StartFromEnvironmentAsync(startupCancellation.Token, legacyDirectory, updateAgent?.Url, updateAgent?.Token);
             if (IsDisposed) { server?.Dispose(); return; }
-            var userData = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TkCRM", "webview2");
+            var userData = Environment.GetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER");
+            if (string.IsNullOrWhiteSpace(userData))
+                userData = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TkCRM", "webview2");
+            else if (!Path.IsPathFullyQualified(userData))
+                throw new InvalidOperationException("WEBVIEW2_USER_DATA_FOLDER 必须是绝对路径");
             Directory.CreateDirectory(userData);
             var environment = await CoreWebView2Environment.CreateAsync(null, userData);
             await browser.EnsureCoreWebView2Async(environment);

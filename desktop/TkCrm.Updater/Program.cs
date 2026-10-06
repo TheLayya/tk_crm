@@ -18,13 +18,20 @@ var installerUrl = new Uri(Required(arguments, "installer-url"));
 var expectedHash = Required(arguments, "sha256").ToLowerInvariant();
 var launchPath = Path.Combine(installDirectory, "TkCrm.Desktop.exe");
 var workDirectory = Path.Combine(Path.GetDirectoryName(statusFile)!, "updates", Guid.NewGuid().ToString("N"));
-Directory.CreateDirectory(workDirectory);
 var parentExited = false;
 UpdateBackup? completedBackup = null;
 Process? launched = null;
+UpdateLock? updateLock = null;
+var startupReceipt = arguments.GetValueOrDefault("startup-receipt", "");
 
 try
 {
+    if (!UpdateLock.TryAcquire(statusFile, out updateLock))
+    {
+        if (!string.IsNullOrWhiteSpace(startupReceipt)) WriteStartupReceipt(startupReceipt, "busy", "已有更新正在进行");
+        Environment.ExitCode = 1;
+        return;
+    }
     ValidateInstallation(installDirectory, dataDirectory, statusFile);
     if (!Version.TryParse(expectedVersion, out _))
         throw new InvalidOperationException("目标版本格式错误");
@@ -36,7 +43,9 @@ try
         throw new InvalidOperationException("更新地址不是受信任的 Windows 发布资产");
     if (expectedHash.Length != 64 || !expectedHash.All(Uri.IsHexDigit))
         throw new InvalidOperationException("安装包 SHA-256 格式错误");
+    Directory.CreateDirectory(workDirectory);
     WriteStatus(statusFile, "running", "正在下载并校验 Windows 安装包");
+    if (!string.IsNullOrWhiteSpace(startupReceipt)) WriteStartupReceipt(startupReceipt, "accepted", "更新器已取得更新锁");
     var installer = Path.Combine(workDirectory, "TkCRM-update.exe");
     await DownloadAndVerifyAsync(installerUrl, installer, expectedHash);
     WriteStatus(statusFile, "waiting_exit", "等待 TkCRM 主窗口退出");
@@ -61,6 +70,11 @@ try
 }
 catch (Exception error)
 {
+    if (updateLock is null)
+    {
+        Environment.ExitCode = 1;
+        return;
+    }
     if (parentExited)
     {
         try
@@ -88,6 +102,10 @@ catch (Exception error)
     }
     WriteStatus(statusFile, "failed", error.Message);
     Environment.ExitCode = 1;
+}
+finally
+{
+    updateLock?.Dispose();
 }
 
 static Dictionary<string, string> ParseArguments(string[] values)
@@ -177,10 +195,18 @@ static void ValidateInstallation(string installation, string dataDirectory, stri
 }
 
 
-static void WriteStatus(string path, string status, string message)
+void WriteStatus(string path, string status, string message)
 {
     Directory.CreateDirectory(Path.GetDirectoryName(path)!);
     var temporary = path + ".tmp";
-    File.WriteAllText(temporary, JsonSerializer.Serialize(new { status, message, updated_at = DateTimeOffset.UtcNow }));
+    File.WriteAllText(temporary, JsonSerializer.Serialize(new { status, message, latest_version = expectedVersion, updated_at = DateTimeOffset.UtcNow }));
+    File.Move(temporary, path, true);
+}
+
+static void WriteStartupReceipt(string path, string status, string message)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    var temporary = path + ".tmp";
+    File.WriteAllText(temporary, JsonSerializer.Serialize(new { pid = Environment.ProcessId, status, message }));
     File.Move(temporary, path, true);
 }

@@ -155,11 +155,16 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.15'
+const APP_VERSION = '1.1.16'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
+    date: '2026-10-06',
+    items: ['修复监控账号导出24小时变化量始终为0', '严格类型检查与80%测试覆盖率门禁全部通过', 'Windows更新增加跨进程互斥，防止重开窗口重复更新']
+  },
+  {
+    version: '1.1.15',
     date: '2026-10-06',
     items: ['成员可查看本人终端绑定的运营账号和节点', '列表、统计、导出和关联操作统一数据范围', '修复越权关联校验，采集任务按发起成员隔离']
   },

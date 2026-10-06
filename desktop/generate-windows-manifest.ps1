@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$PackagePath,
   [Parameter(Mandatory = $true)][string]$PackageUrl,
-  [string]$OutputPath = ''
+  [string]$OutputPath = '',
+  [string]$BaseManifestPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +15,10 @@ $packageName = [IO.Path]::GetFileName($package)
 if ($packageName -ne "TkCRM-$version-win-x64-setup.exe") { throw "Package filename does not match APP_VERSION: $packageName" }
 $uri = [Uri]$PackageUrl
 if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'github.com' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or -not $uri.AbsolutePath.StartsWith("/TheLayya/tk_crm/releases/download/v$version/", [StringComparison]::Ordinal) -or -not $uri.AbsolutePath.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid GitHub Windows package URL' }
-$basePath = Join-Path $root 'version.json'
+$basePath = if ($BaseManifestPath) {
+  (Resolve-Path -LiteralPath $BaseManifestPath -ErrorAction Stop).Path
+} else { Join-Path $root 'version.json' }
+if (-not (Test-Path -LiteralPath $basePath -PathType Leaf)) { throw "Base manifest not found: $basePath" }
 $base = if (Test-Path -LiteralPath $basePath) { Get-Content -LiteralPath $basePath -Raw -Encoding utf8 | ConvertFrom-Json } else { [pscustomobject]@{} }
 if (($base.package_url -or $base.sha256 -or $base.changes) -and [string]$base.version -ne $version) { throw 'Base manifest version does not match APP_VERSION' }
 $output = if ($OutputPath) { [IO.Path]::GetFullPath($OutputPath) } else { Join-Path $PSScriptRoot 'build\version.windows.json' }

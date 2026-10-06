@@ -39,7 +39,7 @@ export function checkUpdate() {
 }
 
 export function applyUpdate() {
-  return request({ url: '/updates/apply', method: 'post', timeout: 20000, silentNetworkError: true })
+  return request({ url: '/updates/apply', method: 'post', timeout: 30000, silentNetworkError: true })
 }
 
 export function getUpdateStatus() {

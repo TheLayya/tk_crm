@@ -15,6 +15,8 @@ foreach ($required in @($updaterSecurityTest, $packageUiTest, $candidateManifest
 
 & (Join-Path $scriptRoot 'update-process.ps1')
 
+& (Join-Path $scriptRoot 'update-lock.ps1')
+
 & (Join-Path $scriptRoot 'window-geometry.ps1')
 
 & (Join-Path $scriptRoot 'installer-rollback.ps1')

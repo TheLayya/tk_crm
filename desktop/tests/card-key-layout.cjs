@@ -34,7 +34,7 @@ async function main() {
         const endpoint = new URL(route.request().url()).pathname
         const responses = {
           '/api/settings/public': { site_name: '布局验收' },
-          '/api/updates/check': { current_version: '1.1.15', has_update: false },
+          '/api/updates/check': { current_version: '1.1.16', has_update: false },
           '/api/updates/status': { status: 'idle' },
           '/api/updates/history': { items: [] },
           '/api/card-keys': [project],

@@ -141,7 +141,7 @@ def _agent_request(method: str, path: str, payload: dict[str, Any] | None = None
         request.data = body
         request.add_header("Content-Type", "application/json")
     try:
-        with urlopen(request, timeout=5) as response:
+        with urlopen(request, timeout=15 if method == "POST" and path == "/apply" else 5) as response:
             return json.loads(response.read())
     except HTTPError as exc:
         detail = exc.read().decode(errors="replace")

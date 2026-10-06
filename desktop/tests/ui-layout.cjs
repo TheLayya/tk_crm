@@ -33,7 +33,7 @@ async function main() {
           site_name: 'Windows高缩放布局验收LongTeamNameWithoutSpaces'.repeat(3),
           login_screen_text: '数据连接团队，协作创造价值',
         },
-        '/api/updates/check': { current_version: '1.1.15', has_update: false },
+        '/api/updates/check': { current_version: '1.1.16', has_update: false },
         '/api/updates/status': { status: 'idle' },
         '/api/updates/history': { items: [] },
       }

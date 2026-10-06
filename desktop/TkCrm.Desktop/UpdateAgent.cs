@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using TkCrm.Updater;
 
 namespace TkCrm.Desktop;
 
@@ -18,11 +19,11 @@ public sealed class UpdateAgent : IDisposable
     private readonly object gate = new();
     private bool running;
 
-    private UpdateAgent(string installDirectory, Func<Task> closeApplication)
+    private UpdateAgent(string installDirectory, Func<Task> closeApplication, string? statusPath)
     {
         this.installDirectory = installDirectory;
         this.closeApplication = closeApplication;
-        statusFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TkCRM", "update-status.json");
+        statusFile = Path.GetFullPath(statusPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TkCRM", "update-status.json"));
         updaterPath = Path.Combine(installDirectory, "TkCrm.Updater.exe");
         token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
     }
@@ -30,11 +31,11 @@ public sealed class UpdateAgent : IDisposable
     public string Url { get; private set; } = "";
     public string Token => token;
 
-    public static UpdateAgent Start(string installDirectory, Func<Task> closeApplication)
+    public static UpdateAgent Start(string installDirectory, Func<Task> closeApplication, string? statusPath = null)
     {
         if (!File.Exists(Path.Combine(installDirectory, "TkCrm.Updater.exe")))
             throw new FileNotFoundException("缺少 TkCRM 更新器，请重新安装完整桌面安装包");
-        var agent = new UpdateAgent(installDirectory, closeApplication);
+        var agent = new UpdateAgent(installDirectory, closeApplication, statusPath);
         for (var port = 8765; port < 8775; port++)
         {
             try
@@ -118,6 +119,7 @@ public sealed class UpdateAgent : IDisposable
             if (running) { context.Response.StatusCode = 409; return; }
             running = true;
         }
+        Process? process = null;
         try
         {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var packageUrl) || packageUrl.Scheme != Uri.UriSchemeHttps
@@ -134,7 +136,7 @@ public sealed class UpdateAgent : IDisposable
         var manifestFile = Path.Combine(runDirectory, "release.json");
         File.WriteAllText(manifestFile, root.GetRawText());
         var runStatus = statusFile;
-        File.WriteAllText(runStatus, JsonSerializer.Serialize(new { status = "running", message = "正在准备更新" }));
+        var startupReceipt = Path.Combine(runDirectory, "startup.json");
         var info = new ProcessStartInfo
         {
             FileName = runUpdater,
@@ -144,15 +146,29 @@ public sealed class UpdateAgent : IDisposable
         };
         foreach (var argument in new[] { "--parent-pid", Environment.ProcessId.ToString(), "--install-dir", installDirectory, "--data-dir", dataDirectory, "--expected-version", version, "--manifest-file", manifestFile, "--installer-url", packageUrl.ToString(), "--sha256", sha256, "--status-file", runStatus })
             info.ArgumentList.Add(argument);
-        var process = Process.Start(info) ?? throw new InvalidOperationException("无法启动更新器");
-        await WriteJsonAsync(context, new { status = "running" });
+        info.ArgumentList.Add("--startup-receipt");
+        info.ArgumentList.Add(startupReceipt);
+        process = Process.Start(info) ?? throw new InvalidOperationException("无法启动更新器");
+        var startup = await WaitForStartupAsync(process, startupReceipt, TimeSpan.FromSeconds(10));
+        if (startup == "busy")
+        {
+            context.Response.StatusCode = 409;
+            await WriteJsonAsync(context, new { status = "busy", message = "已有更新正在进行" });
+            process.Dispose();
+            process = null;
+            lock (gate) running = false;
+            return;
+        }
+        if (startup != "accepted") throw new InvalidOperationException("更新器未能取得更新锁");
+        await WriteJsonAsync(context, new { status = "running", latest_version = version.TrimStart('v', 'V') });
+        var acceptedProcess = process;
         _ = Task.Run(async () =>
         {
-            using (process)
+            using (acceptedProcess)
             {
                 try
                 {
-                    while (!process.HasExited && !cancellation.IsCancellationRequested)
+                    while (!acceptedProcess.HasExited && !cancellation.IsCancellationRequested)
                     {
                         try
                         {
@@ -175,6 +191,16 @@ public sealed class UpdateAgent : IDisposable
         }
         catch
         {
+            if (process is not null)
+            {
+                try
+                {
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                    process.WaitForExit(10000);
+                }
+                catch (InvalidOperationException) { }
+                process.Dispose();
+            }
             lock (gate) running = false;
             throw;
         }
@@ -184,7 +210,49 @@ public sealed class UpdateAgent : IDisposable
     {
         if (!File.Exists(statusFile)) { await WriteJsonAsync(context, new { status = "idle", message = "" }); return; }
         using var state = JsonDocument.Parse(await File.ReadAllTextAsync(statusFile));
+        var status = state.RootElement.TryGetProperty("status", out var statusElement)
+            ? statusElement.GetString() : null;
+        if ((status is "running" or "waiting_exit" or "installed")
+            && UpdateLock.TryAcquire(statusFile, out var recoveredLock))
+        {
+            using (recoveredLock)
+            using (var currentState = JsonDocument.Parse(await File.ReadAllTextAsync(statusFile)))
+            {
+                var currentStatus = currentState.RootElement.GetProperty("status").GetString();
+                if (currentStatus is "running" or "waiting_exit" or "installed")
+                {
+                    var latestVersion = currentState.RootElement.TryGetProperty("latest_version", out var versionElement)
+                        ? versionElement.GetString() : null;
+                    await WriteJsonAsync(context, new { status = "failed", message = "更新进程已中断，请重新检查更新", latest_version = latestVersion });
+                }
+                else await WriteJsonAsync(context, currentState.RootElement);
+            }
+            return;
+        }
         await WriteJsonAsync(context, state.RootElement);
+    }
+
+    private static async Task<string> WaitForStartupAsync(Process process, string receiptPath, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using var receipt = JsonDocument.Parse(await File.ReadAllTextAsync(receiptPath));
+                var root = receipt.RootElement;
+                if (root.GetProperty("pid").GetInt32() != process.Id) return "failed";
+                var status = root.GetProperty("status").GetString();
+                if (status == "busy") return status;
+                if (status == "accepted") return process.HasExited ? "failed" : status;
+            }
+            catch (IOException) { }
+            catch (JsonException) { }
+            catch (KeyNotFoundException) { return "failed"; }
+            if (process.HasExited) return "failed";
+            await Task.Delay(100);
+        }
+        return "failed";
     }
 
     private static async Task WriteJsonAsync(HttpListenerContext context, object value)

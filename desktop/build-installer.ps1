@@ -1,5 +1,6 @@
 param(
-    [string]$Iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+    [string]$Iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+    [string]$BaseManifestPath = ''
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,7 +26,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup build failed" }
     $package = Join-Path $PSScriptRoot ("build\installer\TkCRM-{0}-win-x64-setup.exe" -f $version)
     $packageUrl = "https://github.com/TheLayya/tk_crm/releases/download/v$version/TkCRM-$version-win-x64-setup.exe"
-    & (Join-Path $PSScriptRoot "generate-windows-manifest.ps1") -PackagePath $package -PackageUrl $packageUrl
+    & (Join-Path $PSScriptRoot "generate-windows-manifest.ps1") -PackagePath $package -PackageUrl $packageUrl -BaseManifestPath $BaseManifestPath
     & (Join-Path $PSScriptRoot 'tests\release-audit.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Release audit failed' }
     Write-Host "Installer output: $PSScriptRoot\build\installer"
