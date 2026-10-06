@@ -122,7 +122,10 @@ class ScraperService:
                             'nickname': user.get('nickname'),
                             'avatar_url': user.get('avatarMedium') or user.get('avatarLarger'),
                             'bio': user.get('signature'),
-                            'follower_count': stats.get('followerCount', 0),
+                            **({'follower_count': stats['followerCount']}
+                               if isinstance(stats.get('followerCount'), int)
+                               and not isinstance(stats['followerCount'], bool)
+                               and stats['followerCount'] >= 0 else {}),
                             'following_count': stats.get('followingCount', 0),
                             'like_count': stats.get('heartCount', 0),
                             'video_count': stats.get('videoCount', 0),
@@ -183,7 +186,10 @@ class ScraperService:
                                     'nickname': user.get('nickname'),
                                     'avatar_url': user.get('avatarMedium') or user.get('avatarLarger'),
                                     'bio': user.get('signature'),
-                                    'follower_count': stats.get('followerCount', 0),
+                                    **({'follower_count': stats['followerCount']}
+                                       if isinstance(stats.get('followerCount'), int)
+                                       and not isinstance(stats['followerCount'], bool)
+                                       and stats['followerCount'] >= 0 else {}),
                                     'following_count': stats.get('followingCount', 0),
                                     'like_count': stats.get('heartCount', 0),
                                     'video_count': stats.get('videoCount', 0),

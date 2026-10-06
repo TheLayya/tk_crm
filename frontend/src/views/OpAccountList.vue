@@ -54,7 +54,7 @@
     <!-- 采集进度 -->
     <el-card v-if="collectTask.visible" class="collect-progress-card">
       <div class="collect-progress">
-        <span>采集进度：{{ collectTask.completed }}/{{ collectTask.total }}</span>
+        <span>账号与视频采集进度：{{ collectTask.completed }}/{{ collectTask.total }}</span>
         <el-progress :percentage="collectTask.percentage" :status="collectTask.status" style="flex:1;margin:0 16px" />
         <span style="color:#67C23A">成功 {{ collectTask.success }}</span>
         <span style="color:#F56C6C;margin-left:8px">失败 {{ collectTask.failed }}</span>
@@ -69,7 +69,7 @@
         <el-table-column type="expand" width="36" fixed="left">
           <template #default="{ row }">
             <div class="op-inline-details">
-              <el-alert v-if="row.collect_status === 'failed'" :title="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号已不可访问：TikTok 提示找不到此账号' : row.collect_error?.startsWith('VIDEO_COLLECTION_FAILED:') ? '账号基础数据已更新，视频采集未完成' : '采集未完成，当前账号状态尚未确认'" :description="row.collect_error?.startsWith('VIDEO_COLLECTION_FAILED:') ? '视频保留上次采集记录，请稍后重新采集。' : '下方粉丝和视频仅为历史记录，不代表当前数据；请打开 TikTok 主页核实。'" :type="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'error' : 'warning'" :closable="false" show-icon />
+              <el-alert v-if="row.collect_status === 'failed' && !isCollecting(row.id)" :title="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号已不可访问：TikTok 提示找不到此账号' : row.collect_error?.startsWith('VIDEO_COLLECTION_FAILED:') ? '账号基础数据已更新，视频采集未完成' : '采集未完成，当前账号状态尚未确认'" :description="row.collect_error?.startsWith('VIDEO_COLLECTION_FAILED:') ? '视频保留上次采集记录，请稍后重新采集。' : '下方粉丝和视频仅为历史记录，不代表当前数据；请打开 TikTok 主页核实。'" :type="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'error' : 'warning'" :closable="false" show-icon />
               <div class="inline-summary">
                 <strong>{{ row.account }}</strong>
                 <span v-if="row.nickname && row.nickname !== row.account">{{ row.nickname }}</span>
@@ -84,7 +84,7 @@
               </div>
               <AssociationOverview kind="account" :resource-id="row.id" />
               <AccountEmailRelations v-if="authStore.hasPermission('email:view')" :account-id="row.id" />
-              <InlineAccountVideos v-if="row.platform === 'tiktok'" :account-id="row.video_source === 'monitor' ? row.monitor_account_id : row.id" :source="row.video_source || 'op'" />
+              <InlineAccountVideos v-if="row.platform === 'tiktok'" :key="videoComponentKey(row)" :account-id="row.video_source === 'monitor' ? row.monitor_account_id : row.id" :source="row.video_source || 'op'" />
 
         <!-- 账号凭证 -->
         <div class="section-group">
@@ -151,7 +151,7 @@
             <div class="info-row"><span class="info-row__label">账号来源</span><span class="info-row__value">{{ row.source || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">注册时间</span><span class="info-row__value">{{ row.account_created_at ? formatDate(row.account_created_at) : row.account_created_year || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">最后采集</span><span class="info-row__value">{{ row.last_collected_at ? formatDate(row.last_collected_at) : '-' }}</span></div>
-            <div class="info-row"><span class="info-row__label">采集状态</span><span class="info-row__value">{{ collectStatusLabel(row.collect_status) }}</span></div>
+            <div class="info-row"><span class="info-row__label">采集状态</span><span class="info-row__value">{{ collectStatusLabel(row.collect_status, isCollecting(row.id)) }}</span></div>
 <div class="info-row info-row--full"><span class="info-row__label">备注</span><div class="info-row__value"><details v-if="row.remark" class="inline-remark"><summary :title="row.remark">{{ row.remark }}</summary><div>{{ row.remark }}</div></details><span v-else>-</span></div></div>
           </div>
         </div>
@@ -192,7 +192,7 @@
           </template>
         </el-table-column>
         <el-table-column v-if="filters.platform !== 'gmail'" label="粉丝数" width="100" align="right"><template #default="{ row }">{{ formatNum(row.follower_count) }}</template></el-table-column>
-        <el-table-column v-if="filters.platform !== 'gmail'" label="粉丝变化" width="110" align="right"><template #default="{ row }"><el-tooltip content="关联监控账号最近两次成功检查的粉丝变化"><span :class="row.followers_change > 0 ? 'op-delta-up' : row.followers_change < 0 ? 'op-delta-down' : 'op-delta-neutral'">{{ row.followers_change == null ? '暂无对比' : (row.followers_change > 0 ? '+' : '') + row.followers_change }}</span></el-tooltip></template></el-table-column>
+        <el-table-column v-if="filters.platform !== 'gmail'" label="粉丝变化" width="110" align="right"><template #default="{ row }"><el-tooltip :content="row.followers_change == null ? '首次采集后，需再成功采集一次才能对比粉丝变化' : '最近两次成功采集的粉丝变化'"><span :class="row.followers_change > 0 ? 'op-delta-up' : row.followers_change < 0 ? 'op-delta-down' : 'op-delta-neutral'">{{ row.followers_change == null ? '暂无对比' : (row.followers_change > 0 ? '+' : '') + row.followers_change }}</span></el-tooltip></template></el-table-column>
         <el-table-column v-if="filters.platform !== 'gmail'" label="昨日更新（北京时间）" width="170"><template #default="{ row }">{{ row.yesterday_video_count == null ? '视频数据待采集' : row.yesterday_video_count > 0 ? '已更新 ' + row.yesterday_video_count + ' 条' : '未发现更新' }}</template></el-table-column>
         <el-table-column v-if="filters.platform !== 'gmail'" label="昨日视频流量" min-width="170"><template #default="{ row }"><el-tooltip content="昨日发布视频的最新累计播放量，不是昨日新增播放；按发布时间从新到旧排列。"><span>{{ row.yesterday_video_plays == null ? '暂无可靠数据' : row.yesterday_video_plays.join(' / ') || '—' }}</span></el-tooltip></template></el-table-column>
         <el-table-column v-if="filters.platform === 'gmail'" label="辅助邮箱" min-width="180"><template #default="{ row }">{{ row.recovery_email || '—' }}</template></el-table-column>
@@ -298,7 +298,7 @@
         </el-table-column>
         <el-table-column v-if="filters.platform !== 'gmail' && colVisible('collect_status')" label="采集状态" width="90">
           <template #default="{ row }">
-<el-tooltip :content="row.collect_error || '最近基础数据采集结果'"><el-tag :type="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'danger' : collectStatusType(row.collect_status)" size="small">{{ row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号不存在' : collectStatusLabel(row.collect_status) }}</el-tag></el-tooltip>
+<el-tooltip :content="collectStatusHint(row)"><el-tag :type="isCollecting(row.id) ? 'info' : row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'danger' : collectStatusType(row.collect_status)" size="small">{{ !isCollecting(row.id) && row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号不存在' : collectStatusLabel(row.collect_status, isCollecting(row.id)) }}</el-tag></el-tooltip>
           </template>
         </el-table-column>
         <!-- 采购 -->
@@ -352,7 +352,7 @@
             <el-button link type="success" size="small" @click="openRelation(row)">关联</el-button>
             <el-tooltip content="编辑"><el-button link type="primary" size="small" @click="handleEdit(row)"><el-icon><Edit /></el-icon></el-button></el-tooltip>
             <el-tooltip v-if="row.platform === 'gmail'" content="检测 Gmail"><el-button link type="warning" size="small" :loading="gmailCheckLoading" @click="handleGmailCheck([row.id])"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
-            <el-tooltip v-if="row.platform === 'tiktok'" content="采集"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
+            <el-tooltip v-if="row.platform === 'tiktok'" content="采集账号信息和视频"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
             <el-tooltip content="历史"><el-button link type="primary" size="small" @click="showLogs(row)"><el-icon><Document /></el-icon></el-button></el-tooltip>
             <el-tooltip content="删除"><el-button link type="danger" size="small" @click="handleDelete(row)"><el-icon><Delete /></el-icon></el-button></el-tooltip>
           </template>
@@ -407,7 +407,7 @@
           <div class="ios-card-actions">
             <el-tooltip content="编辑"><el-button link type="primary" size="small" @click="handleEdit(row)"><el-icon><Edit /></el-icon></el-button></el-tooltip>
             <el-tooltip v-if="row.platform === 'gmail'" content="检测 Gmail"><el-button link type="warning" size="small" :loading="gmailCheckLoading" @click="handleGmailCheck([row.id])"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
-            <el-tooltip v-if="row.platform === 'tiktok'" content="采集"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
+            <el-tooltip v-if="row.platform === 'tiktok'" content="采集账号信息和视频"><el-button link type="primary" size="small" @click="handleCollectOne(row)"><el-icon><Refresh /></el-icon></el-button></el-tooltip>
             <el-tooltip content="历史"><el-button link type="primary" size="small" @click="showLogs(row)"><el-icon><Document /></el-icon></el-button></el-tooltip>
             <el-tooltip content="删除"><el-button link type="danger" size="small" @click="handleDelete(row)"><el-icon><Delete /></el-icon></el-button></el-tooltip>
           </div>
@@ -739,7 +739,7 @@
           </div>
         </div>
 
-        <InlineAccountVideos v-if="detailDialog.row.platform === 'tiktok' && detailDialog.visible" :account-id="detailDialog.row.video_source === 'monitor' ? detailDialog.row.monitor_account_id : detailDialog.row.id" :source="detailDialog.row.video_source || 'op'" />
+        <InlineAccountVideos v-if="detailDialog.row.platform === 'tiktok' && detailDialog.visible" :key="videoComponentKey(detailDialog.row)" :account-id="detailDialog.row.video_source === 'monitor' ? detailDialog.row.monitor_account_id : detailDialog.row.id" :source="detailDialog.row.video_source || 'op'" />
 
         <!-- 账号凭证 -->
         <div class="section-group">
@@ -806,7 +806,7 @@
             <div class="info-row"><span class="info-row__label">账号来源</span><span class="info-row__value">{{ detailDialog.row.source || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">注册时间</span><span class="info-row__value">{{ detailDialog.row.account_created_at ? formatDate(detailDialog.row.account_created_at) : detailDialog.row.account_created_year || '-' }}</span></div>
             <div class="info-row"><span class="info-row__label">最后采集</span><span class="info-row__value">{{ detailDialog.row.last_collected_at ? formatDate(detailDialog.row.last_collected_at) : '-' }}</span></div>
-            <div class="info-row"><span class="info-row__label">采集状态</span><span class="info-row__value">{{ collectStatusLabel(detailDialog.row.collect_status) }}</span></div>
+            <div class="info-row"><span class="info-row__label">采集状态</span><span class="info-row__value">{{ collectStatusLabel(detailDialog.row.collect_status, isCollecting(detailDialog.row.id)) }}</span></div>
             <div class="info-row info-row--full"><span class="info-row__label">备注</span><span class="info-row__value">{{ detailDialog.row.remark || '-' }}</span></div>
           </div>
         </div>
@@ -858,6 +858,10 @@ const canBatchAssign = computed(() => authStore.hasPermission('op_account:edit')
 // ===== 数据 =====
 const accounts = ref([])
 const loading = ref(false)
+const collectingIds = ref(new Set())
+let disposed = false
+let accountRequestVersion = 0
+let pendingAccountRequests = 0
 const selectedIds = ref([])
 const teamMembers = ref([])
 const relationDevices = ref([])
@@ -971,8 +975,11 @@ const saveColumnConfig = () => {
 }
 
 // ===== 加载数据 =====
-const loadAccounts = async () => {
-  loading.value = true
+const loadAccounts = async (options = {}) => {
+  if (disposed) return
+  const version = ++accountRequestVersion
+  pendingAccountRequests += 1
+  if (!options.silent) loading.value = true
   try {
     const params = {
       skip: (pagination.page - 1) * pagination.limit,
@@ -985,10 +992,18 @@ const loadAccounts = async () => {
     if (filters.purchase_channel) params.purchase_channel = filters.purchase_channel
     if (filters.sale_customer) params.sale_customer = filters.sale_customer
     const data = await listOpAccounts(params)
+    if (disposed || version !== accountRequestVersion) return
     accounts.value = data.items || data
     pagination.total = data.total ?? data.length
+    if (detailDialog.value.row) {
+      const refreshed = accounts.value.find(row => row.id === detailDialog.value.row.id)
+      if (refreshed) detailDialog.value = { ...detailDialog.value, row: refreshed }
+    }
   } catch (e) { console.error(e) }
-  finally { loading.value = false }
+  finally {
+    pendingAccountRequests -= 1
+    if (!disposed && version === accountRequestVersion) loading.value = false
+  }
 }
 const handleFilterChange = () => { pagination.page = 1; loadAccounts() }
 const handleSelectionChange = (rows) => {
@@ -1016,7 +1031,10 @@ const formatDate = (s) => {
 const platformTagType = (p) => ({ tiktok: '', youtube: 'danger', instagram: 'warning', facebook: 'success' }[p] || 'info')
 const statusTagType = (s) => ({ '正常': 'success', '自用': '', '封禁': 'danger', '已售': 'info' }[s] || 'info')
 const collectStatusType = (s) => ({ success: 'success', failed: 'danger', pending: 'info', unsupported: 'warning' }[s] || 'info')
-const collectStatusLabel = (s) => ({ success: '成功', failed: '失败', pending: '待采集', unsupported: '不支持' }[s] || s)
+const isCollecting = (id) => collectingIds.value.has(id)
+const collectStatusLabel = (s, collecting = false) => collecting ? '采集中' : ({ success: '成功', failed: '失败', pending: '待采集', unsupported: '不支持' }[s] || s)
+const collectStatusHint = (row) => isCollecting(row.id) ? '正在采集账号基础信息和视频' : (row.collect_error || '最近账号基础信息与视频采集结果')
+const videoComponentKey = (row) => `${row.id}:${row.video_source || 'op'}:${row.video_collected_at || ''}`
 const auditActionLabel = (action) => ({ create: '新增', update: '修改', delete: '删除' }[action] || action || '-')
 const fieldLabel = (field) => ({
   recovery_email: '辅助邮箱', account_created_at: '注册时间', account_created_year: '注册年份', account: '账号', platform: '平台', password: '密码', totp_secret: '双重验证码密钥', email: '绑定邮箱',
@@ -1073,7 +1091,7 @@ const handleSubmit = async () => {
       ElMessage.success('更新成功')
     } else {
       await createOpAccount(form.value)
-      ElMessage.success(form.value.platform === 'tiktok' ? '创建成功，已触发信息采集' : '创建成功')
+      ElMessage.success(form.value.platform === 'tiktok' ? '创建成功，已触发账号信息和视频采集' : '创建成功')
     }
     formDialog.visible = false
     loadAccounts()
@@ -1219,6 +1237,7 @@ const handleImport = async () => {
 const collectLoading = ref(false)
 const collectTask = reactive({ visible: false, total: 0, completed: 0, success: 0, failed: 0, percentage: 0, status: '', done: false })
 let collectPollTimer = null
+let watchedTaskId = null
 
 const startCollect = async (ids) => {
   ids = ids.filter(id => accounts.value.some(row => row.id === id && row.platform === 'tiktok'))
@@ -1227,28 +1246,39 @@ const startCollect = async (ids) => {
   try {
     const res = await triggerCollect(ids)
     const taskId = res.task_id
-    Object.assign(collectTask, { visible: true, total: ids.length, completed: 0, success: 0, failed: 0, percentage: 0, status: '', done: false })
     watchCollectTask(taskId, ids)
   } catch (e) { console.error(e) }
   finally { collectLoading.value = false }
 }
 const watchCollectTask = (taskId, ids) => {
+  if (disposed) return
+  watchedTaskId = taskId
+  collectingIds.value = new Set(ids)
   Object.assign(collectTask, { visible: true, total: ids.length, completed: 0, success: 0, failed: 0, percentage: 0, status: '', done: false })
   if (collectPollTimer) clearInterval(collectPollTimer)
   collectPollTimer = setInterval(async () => {
+    if (disposed || taskId !== watchedTaskId) return
     try {
       const t = await getCollectTask(taskId)
+      if (disposed || taskId !== watchedTaskId) return
       collectTask.completed = t.completed
       collectTask.success = t.success
       collectTask.failed = t.failed
       collectTask.percentage = t.total > 0 ? Math.round((t.completed / t.total) * 100) : 0
       if (t.status === 'completed' || t.status === 'failed') {
         clearInterval(collectPollTimer)
+        watchedTaskId = null
+        collectingIds.value = new Set([...collectingIds.value].filter(id => !ids.includes(id)))
         collectTask.done = true
         collectTask.status = t.failed > 0 ? 'warning' : 'success'
         await loadAccounts()
       }
-    } catch (e) { clearInterval(collectPollTimer) }
+    } catch (e) {
+      if (disposed || taskId !== watchedTaskId) return
+      clearInterval(collectPollTimer)
+      watchedTaskId = null
+      collectingIds.value = new Set([...collectingIds.value].filter(id => !ids.includes(id)))
+    }
   }, 2000)
 }
 const gmailCheckLoading = ref(false)
@@ -1287,11 +1317,16 @@ const showLogs = async (row) => {
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
 const handleResize = () => { windowWidth.value = window.innerWidth }
+let refreshTimer = null
 
 onMounted(async () => {
   window.addEventListener('resize', handleResize)
   if (route.query.account_id) filters.keyword = String(route.query.keyword || '')
   await loadAccounts()
+  if (disposed) return
+  refreshTimer = setInterval(() => {
+    if (!document.hidden && !loading.value && pendingAccountRequests === 0) loadAccounts({ silent: true })
+  }, 30000)
   const linkedAccount = accounts.value.find(account => account.id === Number(route.query.account_id))
   if (linkedAccount) detailDialog.value = { visible: true, row: linkedAccount }
   if (authStore.hasPermission('team:member:view')) {
@@ -1302,7 +1337,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
+  watchedTaskId = null
   window.removeEventListener('resize', handleResize)
+  if (refreshTimer) clearInterval(refreshTimer)
+  if (collectPollTimer) clearInterval(collectPollTimer)
 })
 </script>
 

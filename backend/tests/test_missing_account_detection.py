@@ -74,6 +74,21 @@ def test_existing_profile_wins_over_missing_text():
     assert result["success"] is True
 
 
+@pytest.mark.parametrize("method", ["_try_web_api", "_try_oembed_api"])
+def test_profile_without_follower_stats_does_not_fabricate_zero(method):
+    if method == "_try_web_api":
+        response = httpx.Response(200, json={"userInfo": {"user": {"id": "123"}, "stats": {}}})
+    else:
+        payload = {"__DEFAULT_SCOPE__": {"webapp.user-detail": {
+            "userInfo": {"user": {"id": "123"}, "stats": {}}
+        }}}
+        text = '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__">' + json.dumps(payload) + '</script>'
+        response = httpx.Response(200, text=text)
+    result = asyncio.run(getattr(ScraperService(), method)(client_for(response), "test"))
+    assert result["success"] is True
+    assert "follower_count" not in result["data"]
+
+
 def test_api_explicit_missing_message():
     response = httpx.Response(200, json={"statusMsg": "user not found"})
     result = asyncio.run(ScraperService()._try_web_api(client_for(response), "test"))

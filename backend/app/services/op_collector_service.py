@@ -52,14 +52,34 @@ async def collect_account(db: Session, account: OpAccount, proxy) -> bool:
         _collect_unsupported(db, account)
         return False
 
+    # A collection is complete only after both profile and video requests finish.
+    identity_snapshot = (account.platform, account.account)
+    cached_sec_uid = account.platform_sec_uid
+    account.collect_status = "pending"
+    account.collect_error = None
+    db.commit()
+
+    profile_error = None
+    data = None
     try:
         data = await _collect_tiktok(db, account, proxy)
+        current_identity = db.query(OpAccount.platform, OpAccount.account).filter(
+            OpAccount.id == account.id
+        ).one_or_none()
+        if current_identity != identity_snapshot:
+            db.rollback()
+            logger.info("Collection abandoned after identity change for account %s", account.id)
+            return False
         now = datetime.utcnow()
         account.platform_user_id = data.get("tiktok_id") or account.platform_user_id
         account.platform_sec_uid = data.get("sec_uid") or account.platform_sec_uid
         account.nickname = data.get("nickname") or account.nickname
         account.avatar_url = data.get("avatar_url") or account.avatar_url
-        account.follower_count = data.get("follower_count", account.follower_count)
+        if data.get("follower_count") is not None:
+            account.previous_follower_count = (
+                account.follower_count if account.last_collected_at is not None else None
+            )
+            account.follower_count = data["follower_count"]
         account.following_count = data.get("following_count", account.following_count)
         account.like_count = data.get("like_count", account.like_count)
         account.video_count = data.get("video_count", account.video_count)
@@ -70,37 +90,57 @@ async def collect_account(db: Session, account: OpAccount, proxy) -> bool:
     except Exception as e:
         db.rollback()
         logger.error(f"collect_account failed for account {account.id}: {e}")
-        account.collect_status = "failed"
-        account.collect_error = str(e)[:500]
-        account.updated_at = datetime.utcnow()
-        db.commit()
-        return False
+        profile_error = (str(e).strip() or type(e).__name__)[:500]
 
     try:
-        if data.get("video_count") == 0:
-            video_items = []
-        else:
-            if not account.platform_sec_uid:
-                raise RuntimeError("账号缺少 SEC_UID，无法采集视频")
-            settings = db.query(MonitorSettings).filter(MonitorSettings.id == 1).first()
-            result = await scraper_service.fetch_user_videos(
-                account.platform_sec_uid, proxy=proxy,
-                max_count=settings.default_video_count if settings else 20,
-            )
-            if not result.get("success") or not isinstance(result.get("data"), list):
-                raise RuntimeError(result.get("error") or "未获取到视频列表")
-            video_items = result["data"]
+        current_identity = db.query(OpAccount.platform, OpAccount.account).filter(
+            OpAccount.id == account.id
+        ).one_or_none()
+        if current_identity != identity_snapshot:
+            db.rollback()
+            logger.info("Collection abandoned after identity change for account %s", account.id)
+            return False
+        sec_uid = (data or {}).get("sec_uid") or cached_sec_uid
+        if not sec_uid:
+            raise RuntimeError("账号缺少 SEC_UID，无法采集视频")
+        settings = db.query(MonitorSettings).filter(MonitorSettings.id == 1).first()
+        result = await scraper_service.fetch_user_videos(
+            sec_uid, proxy=proxy,
+            max_count=settings.default_video_count if settings else 20,
+        )
+        if not result.get("success") or not isinstance(result.get("data"), list):
+            raise RuntimeError(result.get("error") or "未获取到视频列表")
+        video_items = result["data"]
+        expected_video_count = (data or {}).get("video_count")
+        if expected_video_count is None:
+            expected_video_count = account.video_count
+        if expected_video_count and not video_items:
+            raise RuntimeError("账号资料显示有视频，但视频接口返回空列表，请重试或核实账号可见性")
+        current_identity = db.query(OpAccount.platform, OpAccount.account).filter(
+            OpAccount.id == account.id
+        ).one_or_none()
+        if current_identity != identity_snapshot:
+            db.rollback()
+            logger.info("Collection abandoned after identity change for account %s", account.id)
+            return False
         save_video_items(db, account.id, video_items, model=OpAccountVideo)
         account.video_collected_at = datetime.utcnow()
-        account.collect_status = "success"
-        account.collect_error = None
+        account.collect_status = "failed" if profile_error else "success"
+        account.collect_error = profile_error
         db.commit()
-        return True
+        return not profile_error
     except Exception as e:
         db.rollback()
+        current_identity = db.query(OpAccount.platform, OpAccount.account).filter(
+            OpAccount.id == account.id
+        ).one_or_none()
+        if current_identity != identity_snapshot:
+            logger.info("Collection error ignored after identity change for account %s", account.id)
+            return False
         logger.error("Video collection failed for op account %s: %s", account.id, e)
         account.collect_status = "failed"
-        account.collect_error = f"VIDEO_COLLECTION_FAILED: {e}"[:500]
+        reason = f"VIDEO_COLLECTION_FAILED: {(str(e).strip() or type(e).__name__)}"
+        account.collect_error = f"{profile_error}; {reason}"[:500] if profile_error else reason[:500]
         account.updated_at = datetime.utcnow()
         db.commit()
         return False

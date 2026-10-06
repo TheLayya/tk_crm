@@ -65,6 +65,7 @@ class OpAccount(Base):
     nickname = Column(String(255), nullable=True)
     avatar_url = Column(String(1024), nullable=True)
     follower_count = Column(BigInteger, nullable=True)
+    previous_follower_count = Column(BigInteger, nullable=True)
     following_count = Column(BigInteger, nullable=True)
     like_count = Column(BigInteger, nullable=True)
     video_count = Column(BigInteger, nullable=True)

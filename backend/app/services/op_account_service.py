@@ -172,6 +172,10 @@ def update_op_account(db: Session, id: int, data: OpAccountUpdate, actor=None) -
     if not account:
         return None
     update_data = data.model_dump(exclude_unset=True)
+    identity_changed = any(
+        field in update_data and update_data[field] != getattr(account, field)
+        for field in ("account", "platform")
+    )
     validate_sale_information({**{field: getattr(account, field) for field in ("status", "sale_customer", "sale_price", "sale_date", "sellers")}, **update_data}, "已售", require_date=True)
     if {'device_id', 'node_id'} & update_data.keys():
         normalize_account_relation(db, update_data, account)
@@ -188,6 +192,16 @@ def update_op_account(db: Session, id: int, data: OpAccountUpdate, actor=None) -
                 operator=actor,
             )
             setattr(account, field, new_val)
+    if identity_changed:
+        # A SEC_UID belongs to the collected identity, not the row's new name.
+        account.platform_user_id = None
+        account.platform_sec_uid = None
+        account.follower_count = None
+        account.previous_follower_count = None
+        account.last_collected_at = None
+        account.video_collected_at = None
+        account.collect_status = "pending"
+        account.collect_error = None
     if {'device_id', 'node_id'} & update_data.keys():
         record_relation_snapshot(db, account, actor)
     db.commit()

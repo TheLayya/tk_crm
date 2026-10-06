@@ -22,27 +22,36 @@ def enrich_monitor_summaries(db, items, current_user):
     monitor_ids = [monitor.id for monitor in monitor_by_name.values()]
     yesterday_counts = video_service.get_yesterday_video_counts(db, monitor_ids)
     yesterday_plays = video_service.get_yesterday_video_plays(db, monitor_ids)
-    op_ids = [item.id for item in items if item.platform == "tiktok"]
+    own_collected_at = {
+        item.id: item.video_collected_at
+        for item in items
+        if item.platform == "tiktok" and item.video_collected_at is not None
+    }
+    op_ids = list(own_collected_at)
     op_counts = video_service.get_yesterday_video_counts(
         db, op_ids, model=OpAccountVideo,
-        collected_at={item.id: item.video_collected_at for item in items},
+        collected_at=own_collected_at,
     )
     op_plays = video_service.get_yesterday_video_plays(db, op_ids, model=OpAccountVideo)
     _, today_start = video_service._yesterday_beijing_bounds()
     for item in items:
         monitor = monitor_by_name.get(item.account.lstrip("@").lower()) if item.platform == "tiktok" else None
         item.monitor_account_id = monitor.id if monitor else None
-        item.followers_change = None
+        item.followers_change = (
+            item.follower_count - item.previous_follower_count
+            if item.follower_count is not None and item.previous_follower_count is not None
+            else None
+        )
         item.yesterday_video_count = yesterday_counts.get(monitor.id) if monitor else None
         item.yesterday_video_plays = yesterday_plays.get(monitor.id, []) if monitor and item.yesterday_video_count is not None else None
-        own_videos = item.id in op_counts or item.video_collected_at is not None
+        own_videos = item.id in own_collected_at
         item.video_source = "op" if own_videos or not monitor else "monitor"
         if own_videos:
             item.yesterday_video_count = op_counts.get(item.id)
             if item.id not in op_counts and item.video_collected_at >= today_start:
                 item.yesterday_video_count = 0
             item.yesterday_video_plays = op_plays.get(item.id, []) if item.yesterday_video_count is not None else None
-        if monitor:
+        if monitor and item.followers_change is None:
             history = db.query(MonitorHistory).filter(
                 MonitorHistory.account_id == monitor.id, MonitorHistory.check_status == "success"
             ).order_by(MonitorHistory.checked_at.desc(), MonitorHistory.id.desc()).limit(2).all()

@@ -155,11 +155,16 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.13'
+const APP_VERSION = '1.1.14'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
+    date: '2026-10-06',
+    items: ['导入与手动采集均采集账号资料和视频', '运营账号粉丝变化使用自身最近两次采集记录', '昨日视频和已展开详情在采集后自动刷新']
+  },
+  {
+    version: '1.1.13',
     date: '2026-10-06',
     items: ['运营账号自动采集视频并显示昨日更新与播放量', '邮箱列表可直接复制邮箱、密码和完整登录资料', '更新断连后恢复状态，避免重复提交更新']
   },

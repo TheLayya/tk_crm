@@ -116,6 +116,7 @@ npm run dev -- --host 127.0.0.1 --port 5174
 | 第 10 轮 | 2026-08-22 | **0 [P1] + 0 [P2]，APPROVE**（收敛确认：worktree 回退、Git Bash 范围、占位符处理、CODEX SAYS/GATE 校验均已明确一致） | 无需处置 | 同上 |
 | Windows 续接轮 | 2026-10-05 | 邮箱空白原因和旧请求覆盖新领取已修复，复审 GATE PASS；更新并发 P2 已登记；全量验证门禁 FAIL（325 passed、覆盖率 66.20% < 80%） | 本地包重建、发布审计及独立安装冒烟通过；未发布部署，不宣称全量验证通过 | [docs/handover/2026-10-05-windows-packaging-handoff.md](docs/handover/2026-10-05-windows-packaging-handoff.md) |
 | 运营视频与邮箱复制轮 | 2026-10-06 | 独立运营视频、邮箱复制、更新断连恢复复审 GATE PASS；全量 372 passed，覆盖率 69.51% < 80% 门禁 FAIL | 本地修复，未提交发布；mypy/最终序列构建 NOT RUN；浏览器关闭环境限制单独登记 | [docs/handover/2026-10-06-op-videos-email-copy.md](docs/handover/2026-10-06-op-videos-email-copy.md) |
+| 完整运营采集与刷新轮 | 2026-10-06 | 采集链路、粉丝自身基线、昨日统计刷新复审 GATE PASS；全量 403 passed，覆盖率 70.25% < 80% 门禁 FAIL | 专项 68 passed、Node 回归与独立构建通过；按已有发布授权准备 1.1.14，团队升级由用户点击 | [docs/handover/2026-10-06-op-collection-refresh.md](docs/handover/2026-10-06-op-collection-refresh.md) |
 
 ---
 
