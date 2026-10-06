@@ -1,12 +1,11 @@
 {
-  "version": "1.1.14",
+  "version": "1.1.15",
   "date": "2026-10-06",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.14/release-v1.1.14.tar.gz",
-  "sha256": "879a38746526e8df917d26bf79e041bd265a034efdc9d05d1eabb6bb9a2290b5",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.15/release-v1.1.15.tar.gz",
   "changes": [
-    "导入、创建、手动与定时采集均包含账号资料和视频",
-    "运营账号粉丝变化使用自身最近两次有效采集记录",
-    "昨日视频、采集中状态与已展开详情自动刷新",
-    "资料接口异常和视频空结果不再误报完整成功"
-  ]
+    "成员可查看本人终端绑定的运营账号和节点",
+    "列表、统计、导出和关联操作统一数据范围",
+    "修复越权关联校验，采集任务按发起成员隔离"
+  ],
+  "sha256": "c8235f66334c6b4d6143f0ef70a379183d1b8ef53ce6f375167cb46492e296a1"
 }
