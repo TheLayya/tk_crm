@@ -2,7 +2,7 @@
   "version": "1.1.13",
   "date": "2026-10-06",
   "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.13/release-v1.1.13.tar.gz",
-  "sha256": "PLACEHOLDER",
+  "sha256": "57a09b8ba85e1613cc5d668a5b3e05f661e74065f1494137aef7aa9fb0f6d544",
   "changes": [
     "邮箱导入支持三、四、六字段和手动格式选择",
     "辅助邮箱可留空或填写 null",
