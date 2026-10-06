@@ -29,13 +29,15 @@ def test_scheduled_collection_filters_due_accounts_and_uses_settings(monkeypatch
             ("retry", "tiktok", "正常", None, "failed", now - timedelta(hours=6)),
         ]:
             db.add(OpAccount(account=name, platform=platform, status=status,
-                             last_collected_at=collected, collect_status=collect_status, updated_at=updated))
+                             last_collected_at=collected, video_collected_at=now if name == "fresh" else None,
+                             collect_status=collect_status, updated_at=updated))
         db.commit()
     collected_names = []
 
     async def collect(db, account, proxy):
         collected_names.append(account.account)
         account.last_collected_at = now
+        account.video_collected_at = now
         account.collect_status = "success"
         db.commit()
         return True

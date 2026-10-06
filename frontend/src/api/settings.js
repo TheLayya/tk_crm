@@ -35,17 +35,21 @@ export function updateSettings(data) {
 }
 
 export function checkUpdate() {
-  return request({ url: '/updates/check', method: 'get' })
+  return request({ url: '/updates/check', method: 'get', silentNetworkError: true })
 }
 
 export function applyUpdate() {
-  return request({ url: '/updates/apply', method: 'post' })
+  return request({ url: '/updates/apply', method: 'post', timeout: 20000, silentNetworkError: true })
 }
 
 export function getUpdateStatus() {
-  return request({ url: '/updates/status', method: 'get' })
+  return request({ url: '/updates/status', method: 'get', timeout: 5000, silentNetworkError: true })
+}
+
+export function getUpdateVersion() {
+  return request({ url: '/updates/version', method: 'get', timeout: 5000, silentNetworkError: true })
 }
 
 export function getUpdateHistory() {
-  return request({ url: '/updates/history', method: 'get' })
+  return request({ url: '/updates/history', method: 'get', silentNetworkError: true })
 }

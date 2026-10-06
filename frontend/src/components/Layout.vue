@@ -112,10 +112,14 @@
             <template v-else>当前 v{{ updateInfo.current_version }}<template v-if="updateInfo.has_update">，发现 v{{ updateInfo.latest_version }}</template><template v-else>，已是最新版本</template></template>
           </span>
           <span v-else>检查服务器是否有新版本</span>
-          <el-button size="small" :loading="updateChecking" @click="handleCheckUpdate">检查更新</el-button>
-          <el-button v-if="updateInfo?.has_update && authStore.hasPermission('settings:edit')" type="primary" size="small" :disabled="!updateInfo.configured || (updateInfo.client_type === 'desktop' && updateInfo.desktop_supported === false) || updateInfo.updating" :loading="updateApplying" @click="handleApplyUpdate">立即更新</el-button>
+          <el-button size="small" :loading="updateChecking" :disabled="updateInfo?.updating || updateInfo?.update_waiting" @click="handleCheckUpdate">检查更新</el-button>
+          <el-button v-if="updateInfo?.update_waiting" size="small" :loading="updateChecking" @click="resumeUpdate(true)">查询更新状态</el-button>
+          <el-button v-if="updateInfo?.has_update && authStore.hasPermission('settings:edit')" type="primary" size="small" :disabled="!updateInfo.configured || (updateInfo.client_type === 'desktop' && updateInfo.desktop_supported === false) || updateInfo.updating || updateInfo.update_waiting" :loading="updateApplying" @click="handleApplyUpdate">立即更新</el-button>
         </div>
         <el-alert v-if="updateInfo?.has_update" type="info" :closable="false" title="有新版本可用" />
+        <el-alert v-if="updateInfo?.updating" type="info" :closable="false" :title="updateInfo.update_message || '正在更新，服务可能暂时重启，等待恢复后页面会自动刷新'" />
+        <el-alert v-if="updateInfo?.update_waiting" type="warning" :closable="false" :title="updateInfo.update_message" show-icon />
+        <el-alert v-if="updateInfo?.update_error" type="error" :closable="false" :title="updateInfo.update_error" show-icon />
         <el-alert v-if="updateInfo && !updateInfo.error && !updateInfo.configured" type="warning" :closable="false" title="本机尚未初始化更新器，暂不能自动更新" />
         <el-alert v-if="updateInfo?.has_update && updateInfo.client_type === 'desktop' && updateInfo.desktop_supported === false" type="warning" :closable="false" title="当前发布暂未提供 Windows 安装包，请联系管理员发布桌面安装包" />
         <el-alert v-if="updateInfo?.has_update && !authStore.hasPermission('settings:edit')" type="warning" :closable="false" title="当前账号只有查看权限，请联系管理员执行更新" />
@@ -141,7 +145,7 @@ import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Monitor, Setting, Briefcase, UserFilled, SwitchButton, Connection, Iphone, Message, Memo } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getPublicSettings, checkUpdate, applyUpdate, getUpdateStatus, getUpdateHistory } from '@/api/settings'
+import { getPublicSettings, checkUpdate, applyUpdate, getUpdateStatus, getUpdateVersion, getUpdateHistory } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import Breadcrumb from '@/components/Breadcrumb.vue'
 import MobileTabBar from '@/components/MobileTabBar.vue'
@@ -151,11 +155,16 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.12'
+const APP_VERSION = '1.1.13'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
+    date: '2026-10-06',
+    items: ['运营账号自动采集视频并显示昨日更新与播放量', '邮箱列表可直接复制邮箱、密码和完整登录资料', '更新断连后恢复状态，避免重复提交更新']
+  },
+  {
+    version: '1.1.12',
     date: '2026-10-05',
     items: ['邮箱导入支持三、四、六字段和手动格式选择', '辅助邮箱可留空或填写 null', '密码保留原值，兼容完整注册时间']
   },
@@ -181,6 +190,12 @@ const updateChecking = ref(false)
 const updateApplying = ref(false)
 let updateTimer = null
 let updateCheckTimer = null
+let updatePageTimer = null
+let updatePageController = null
+let updateJob = null
+let disposed = false
+const UPDATE_JOB_KEY = 'tk-crm:update-job'
+const UPDATE_WAIT_LIMIT = 10 * 60 * 1000
 const hasUpdate = computed(() => Boolean(updateInfo.value?.has_update))
 const displayReleases = computed(() => {
   const recorded = new Map(releaseHistory.value.map((release) => [release.version, release]))
@@ -197,9 +212,11 @@ const loadUpdateHistory = async () => {
 }
 
 const handleCheckUpdate = async () => {
+  if (updateChecking.value || updateJob) return
   updateChecking.value = true
   try {
     const result = await checkUpdate()
+    if (disposed || updateJob) return
     updateInfo.value = result
     await loadUpdateHistory()
     if (result.has_update) {
@@ -208,6 +225,7 @@ const handleCheckUpdate = async () => {
       ElMessage.success(`当前已是最新版本 v${result.current_version}`)
     }
   } catch (error) {
+    if (disposed || updateJob) return
     const message = error?.response?.data?.detail || error?.message || '检查更新失败'
     updateInfo.value = { error: message }
     ElMessage.error(message)
@@ -217,11 +235,17 @@ const handleCheckUpdate = async () => {
 }
 
 const checkUpdateSilently = async () => {
+  if (updateChecking.value || updateJob || !authStore.hasPermission('settings:view')) return
+  updateChecking.value = true
   try {
-    updateInfo.value = await checkUpdate()
+    const result = await checkUpdate()
+    if (disposed || updateJob) return
+    updateInfo.value = result
     await loadUpdateHistory()
   } catch (_) {
     // Background checks must not interrupt normal application use.
+  } finally {
+    updateChecking.value = false
   }
 }
 
@@ -230,7 +254,141 @@ const openVersionDrawer = () => {
   checkUpdateSilently()
 }
 
+const storeUpdateJob = (job) => {
+  try {
+    if (job) localStorage.setItem(UPDATE_JOB_KEY, JSON.stringify(job))
+    else localStorage.removeItem(UPDATE_JOB_KEY)
+  } catch (_) {}
+}
+
+const stopUpdatePolling = (clearSaved = true) => {
+  if (updateTimer) window.clearTimeout(updateTimer)
+  if (updatePageTimer) window.clearTimeout(updatePageTimer)
+  updatePageController?.abort()
+  updateTimer = null
+  updatePageTimer = null
+  updatePageController = null
+  updateJob = null
+  if (clearSaved) storeUpdateJob(null)
+}
+
+const finishUpdateWithError = (message, status) => {
+  stopUpdatePolling()
+  updateInfo.value = { ...(updateInfo.value || {}), updating: false, update_waiting: false, update_error: message, update_status: status }
+  versionDrawerVisible.value = true
+  ElMessage.error(message)
+}
+
+const finishUpdateWaiting = (message) => {
+  if (updateTimer) window.clearTimeout(updateTimer)
+  updateTimer = null
+  updateInfo.value = { ...(updateInfo.value || {}), updating: false, update_waiting: true, update_message: message }
+  versionDrawerVisible.value = true
+}
+
+const pollUpdate = async (manual = false) => {
+  const job = updateJob
+  if (!job || disposed) return
+  if (!manual && Date.now() - job.startedAt >= UPDATE_WAIT_LIMIT) {
+    finishUpdateWaiting('等待更新超过 10 分钟，尚未确认完成。请查询状态确认结束，确认前不要重复提交更新。')
+    return
+  }
+  try {
+    const status = await getUpdateStatus()
+    if (disposed || updateJob !== job) return
+    updateInfo.value = { ...(updateInfo.value || {}), updating: true, update_status: status }
+    // The agent retains its previous terminal state; it must match this job.
+    if (status.latest_version === job.targetVersion) {
+      if (status.status === 'running') {
+        job.confirmed = true
+        storeUpdateJob(job)
+        updateInfo.value.update_message = '正在更新，服务可能暂时重启，等待恢复后页面会自动刷新'
+      }
+      if (status.status === 'failed' && job.confirmed) {
+        finishUpdateWithError(`更新失败：${status.message || '请检查服务日志'}`, status)
+        return
+      }
+      if (status.status === 'completed') {
+        const version = await getUpdateVersion()
+        if (disposed || updateJob !== job) return
+        if (version.current_version === job.targetVersion) {
+          const controller = new AbortController()
+          updatePageController = controller
+          updatePageTimer = window.setTimeout(() => controller.abort(), 5000)
+          try {
+            const page = await fetch(window.location.href, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+            const html = page.ok && page.headers.get('content-type')?.includes('text/html') ? await page.text() : ''
+            if (disposed || updateJob !== job) return
+            if (/<div[^>]+id=["']app["']/.test(html)) {
+              stopUpdatePolling()
+              window.location.reload()
+              return
+            }
+          } finally {
+            if (updatePageTimer) window.clearTimeout(updatePageTimer)
+            updatePageTimer = null
+            updatePageController = null
+          }
+        }
+      }
+    }
+  } catch (error) {
+    if (disposed || updateJob !== job) return
+    if (error.response && ![502, 503, 504].includes(error.response.status)) {
+      finishUpdateWaiting(error.response.data?.detail || '无法读取更新状态，请检查权限或服务器更新记录。确认结束前不要重复提交更新。')
+      return
+    }
+    // A restart may close connections or temporarily return a gateway error.
+  }
+  if (!disposed && updateJob === job) {
+    if (Date.now() - job.startedAt >= UPDATE_WAIT_LIMIT) {
+      finishUpdateWaiting('更新仍未确认完成，请稍后再次查询状态。确认结束前不要重复提交更新。')
+    } else {
+      updateTimer = window.setTimeout(() => pollUpdate(), 3000)
+    }
+  }
+}
+
+const beginUpdatePolling = (job) => {
+  stopUpdatePolling(false)
+  updateJob = job
+  storeUpdateJob(job)
+  updateInfo.value = { ...(updateInfo.value || {}), current_version: updateInfo.value?.current_version || APP_VERSION, updating: true, update_waiting: false, update_error: '' }
+  versionDrawerVisible.value = true
+}
+
+const resumeUpdate = async (manual = false) => {
+  if (disposed || updateChecking.value || !authStore.hasPermission('settings:view')) return
+  updateChecking.value = true
+  try {
+    const saved = JSON.parse(localStorage.getItem(UPDATE_JOB_KEY) || 'null')
+    if (saved?.targetVersion && Number.isFinite(saved.startedAt)) {
+      if (!manual && Date.now() - saved.startedAt >= UPDATE_WAIT_LIMIT) {
+        updateJob = saved
+        updateInfo.value = { ...(updateInfo.value || {}), current_version: APP_VERSION, updating: false, update_waiting: true, update_message: '上次更新仍未确认完成，请查询状态确认结束，确认前不要重复提交更新。' }
+        versionDrawerVisible.value = true
+        return
+      }
+      beginUpdatePolling(saved)
+      await pollUpdate(manual)
+      return
+    }
+    const status = await getUpdateStatus()
+    if (disposed) return
+    if (status.status === 'running' && status.latest_version) {
+      beginUpdatePolling({ targetVersion: status.latest_version, startedAt: Date.now(), confirmed: true })
+      await pollUpdate()
+    }
+  } catch (_) {
+    // An unavailable agent alone does not imply that an update was submitted.
+  } finally {
+    updateChecking.value = false
+  }
+}
+
 const handleApplyUpdate = async () => {
+  if (updateApplying.value || updateJob || !updateInfo.value?.has_update) return
+  updateApplying.value = true
   try {
     await ElMessageBox.confirm(
       `确认更新到 v${updateInfo.value.latest_version}？更新期间服务会短暂重启。`,
@@ -238,33 +396,36 @@ const handleApplyUpdate = async () => {
       { type: 'warning', confirmButtonText: '开始更新', cancelButtonText: '取消' }
     )
   } catch (_) {
+    updateApplying.value = false
     return
   }
-  updateApplying.value = true
+  if (disposed) return
+  beginUpdatePolling({ targetVersion: updateInfo.value.latest_version, startedAt: Date.now(), confirmed: false })
   try {
-    await applyUpdate()
-    updateInfo.value = { ...(updateInfo.value || {}), updating: true }
-    updateTimer = window.setInterval(async () => {
-      try {
-        const status = await getUpdateStatus()
-        if (status.status === 'failed') {
-          window.clearInterval(updateTimer)
-          updateTimer = null
-          updateInfo.value = { ...(updateInfo.value || {}), updating: false, update_status: status }
-          ElMessage.error(`更新失败：${status.message || '请检查服务日志'}`)
-        } else if (status.status === 'completed') {
-          window.clearInterval(updateTimer)
-          updateTimer = null
-          await loadUpdateHistory()
-          window.location.reload()
-        }
-      } catch (_) {
-        // The backend may restart during a successful update.
-      }
-    }, 3000)
+    const status = await applyUpdate()
+    if (disposed || !updateJob) return
+    updateJob.confirmed = true
+    if (status.latest_version) {
+      updateJob.targetVersion = status.latest_version
+    }
+    storeUpdateJob(updateJob)
+  } catch (error) {
+    if (disposed) return
+    if (error.response && [400, 401, 403, 404, 422].includes(error.response.status)) {
+      finishUpdateWithError(error.response.data?.detail || '提交更新失败，请检查服务器更新记录。')
+      return
+    }
+    if (error.response && ![502, 503, 504].includes(error.response.status)) {
+      const message = error.response.data?.detail || '提交更新失败，请检查服务器更新记录。'
+      finishUpdateWaiting(`${message} 正在确认服务器状态，请勿重复提交更新。`)
+      return
+    }
+    updateInfo.value = { ...updateInfo.value, update_message: '提交响应中断，正在确认更新状态，请勿重复提交' }
   } finally {
     updateApplying.value = false
   }
+  // A lost POST response must be resolved through status, never by retrying it.
+  if (updateJob && !disposed) pollUpdate()
 }
 
 // 响应式断点状态
@@ -277,12 +438,16 @@ const sidebarCollapsed = computed(() => isTablet.value)
 const handleResize = () => {
   windowWidth.value = window.innerWidth
 }
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('resize', handleResize)
+  await resumeUpdate()
+  if (disposed) return
   checkUpdateSilently()
   updateCheckTimer = window.setInterval(checkUpdateSilently, 10 * 60 * 1000)
 })
 onUnmounted(() => {
+  disposed = true
+  stopUpdatePolling(false)
   window.removeEventListener('resize', handleResize)
   if (updateCheckTimer) window.clearInterval(updateCheckTimer)
 })
@@ -355,7 +520,6 @@ onMounted(() => {
 })
 onUnmounted(() => {
   window.removeEventListener('site-settings-updated', handleSiteSettingsUpdated)
-  if (updateTimer) window.clearInterval(updateTimer)
 })
 </script>
 

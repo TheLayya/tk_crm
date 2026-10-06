@@ -30,9 +30,9 @@
           <template #default="{ row }">
             <div class="email-expanded">
               <div class="detail-grid">
-                <span><b>邮箱密码</b><el-button link @click="row.showPassword = !row.showPassword">{{ row.showPassword ? row.password : mask(row.password) }}</el-button></span>
-                <span><b>辅助邮箱</b>{{ row.recovery_email || '—' }}</span>
-                <span><b>2FA</b><el-button link @click="row.showTotp = !row.showTotp">{{ row.showTotp ? row.totp_secret : mask(row.totp_secret) }}</el-button></span>
+                <span class="credential-field"><b>邮箱密码</b><span class="credential-value">{{ row.showPassword ? row.password : mask(row.password) }}</span><span v-if="row.password" class="credential-actions"><el-button link @click="row.showPassword = !row.showPassword">{{ row.showPassword ? '隐藏' : '显示' }}</el-button><el-button link type="primary" @click="copy(row.password, '邮箱密码')">复制密码</el-button></span></span>
+                <span class="credential-field"><b>辅助邮箱</b><span class="credential-value">{{ row.recovery_email || '—' }}</span><el-button v-if="row.recovery_email" link type="primary" @click="copy(row.recovery_email, '辅助邮箱')">复制辅助邮箱</el-button></span>
+                <span class="credential-field"><b>2FA 密钥</b><span class="credential-value">{{ row.showTotp ? row.totp_secret : mask(row.totp_secret) }}</span><span v-if="row.totp_secret" class="credential-actions"><el-button link @click="row.showTotp = !row.showTotp">{{ row.showTotp ? '隐藏' : '显示' }}</el-button><el-button link type="primary" @click="copy(row.totp_secret, '2FA 密钥')">复制 2FA 密钥</el-button></span></span>
                 <span><b>注册</b>{{ row.account_created_at || row.account_created_year || '—' }}</span>
                 <span><b>检测</b>{{ row.gmail_check_status || '未检测' }}</span>
                 <span><b>添加人</b>{{ row.registrant || '—' }}</span>
@@ -63,7 +63,14 @@
           </template>
         </el-table-column>
         <el-table-column label="邮箱" min-width="250">
-          <template #default="{ row }"><el-button class="email-name" link @click="tableRef.toggleRowExpansion(row)">{{ row.email }}</el-button></template>
+          <template #default="{ row }">
+            <el-button class="email-name" link @click="tableRef.toggleRowExpansion(row)">{{ row.email }}</el-button>
+            <div class="email-copy-actions">
+              <el-button link type="primary" @click="copy(row.email, '邮箱')">复制邮箱</el-button>
+              <el-button v-if="row.password" link type="primary" @click="copy(row.password, '邮箱密码')">复制密码</el-button>
+              <el-button link type="primary" @click="copyCredentials(row)">复制资料</el-button>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column prop="country" label="国家" width="110" />
         <el-table-column label="平台注册 / 领取" min-width="220"><template #default="{ row }"><el-tag v-for="tag in row.platform_tags" :key="tag" size="small" style="margin:2px">{{ tag }}<span v-if="row.platform_registrants?.[tag]"> · {{ row.platform_registrants[tag] }}</span></el-tag><span v-if="!row.platform_tags?.length">未标记</span><div v-if="row.claimed_by" class="remark">{{ row.claimed_by }} 正在注册 {{ row.claimed_platform }}</div></template></el-table-column>
@@ -153,6 +160,7 @@ import request from '@/api/request'
 import { getDevices } from '@/api/devices'
 import { getProxyNodes } from '@/api/proxy_nodes'
 import SellerSelector from '@/components/SellerSelector.vue'
+import { copyText } from '@/utils/clipboard'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('email:manage'))
@@ -182,6 +190,16 @@ const bindVisible = ref(false); const binding = ref(false); const bindEmail = re
 
 const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
 const mask = (value) => value ? '••••••' : '—'
+const copy = async (value, label) => {
+  try { await copyText(value); ElMessage.success(`已复制${label}`) }
+  catch { ElMessage.warning('复制失败，请展开详情后手动复制') }
+}
+const copyCredentials = (row) => copy([
+  `邮箱：${row.email}`,
+  `邮箱密码：${row.password || ''}`,
+  `辅助邮箱：${row.recovery_email || ''}`,
+  `2FA 密钥：${row.totp_secret || ''}`,
+].join('\n'), '登录资料')
 const statusTag = (value) => ({ '使用中': 'success', '已出售': 'warning', '锁定': 'warning', '废弃': 'danger' }[value] || 'info')
 const checkTag = (value) => ({ 正常: 'success', 封禁: 'danger', 验证: 'warning', 未注册: 'info' }[value] || 'info')
 const load = async () => { loading.value = true; try { const data = await listEmails({ ...filters, skip: (page.value - 1) * pageSize.value, limit: pageSize.value }); items.value = data.items; total.value = data.total } finally { loading.value = false } }
@@ -268,6 +286,12 @@ onMounted(async () => { platforms.value = await getEmailPlatforms(); await load(
 .filters .el-input { width:340px; } .filters .el-select { width:140px; }
 .count { color:#409eff; font-weight:700; }
 .email-name { font-weight:600; font-size:12px; }
+.email-copy-actions, .credential-actions { display:flex; flex-wrap:wrap; gap:4px 10px; }
+.email-copy-actions { margin-top:4px; }
+.email-copy-actions .el-button, .credential-actions .el-button { margin-left:0; }
+.email-copy-actions .el-button { font-size:12px; }
+.credential-field { display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+.credential-value { user-select:text; overflow-wrap:anywhere; }
 .email-table { container-type:inline-size; }
 .email-expanded { width:100cqw; box-sizing:border-box; position:sticky; left:0; padding:12px 22px 16px 52px; background:#f8fafc; overflow-wrap:anywhere; }
 .detail-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap:8px 26px; padding-bottom:12px; border-bottom:1px solid #ebeef5; }

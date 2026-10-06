@@ -12,47 +12,48 @@ from app.services.scraper_service import scraper_service
 logger = logging.getLogger(__name__)
 
 
-def get_videos(db: Session, account_id: int, skip: int = 0, limit: int = 100) -> List[Video]:
+def get_videos(db: Session, account_id: int, skip: int = 0, limit: int = 100, model=Video) -> List[Video]:
     """获取指定账号的视频列表"""
     return (
-        db.query(Video)
-        .filter(Video.account_id == account_id)
-        .order_by(Video.published_at.desc())
+        db.query(model)
+        .filter(model.account_id == account_id)
+        .order_by(model.published_at.desc(), model.id.desc())
         .offset(skip)
         .limit(limit)
         .all()
     )
 
 
-def get_yesterday_video_counts(db: Session, account_ids: List[int], now: Optional[datetime] = None) -> dict:
+def get_yesterday_video_counts(db: Session, account_ids: List[int], now: Optional[datetime] = None, model=Video, collected_at: Optional[dict] = None) -> dict:
     if not account_ids:
         return {}
     start, end = _yesterday_beijing_bounds(now)
     rows = (
         db.query(
-            Video.account_id,
-            func.count(Video.published_at),
-            func.sum(case(((Video.published_at >= start) & (Video.published_at < end), 1), else_=0)),
-            func.max(Video.updated_at),
+            model.account_id,
+            func.count(model.published_at),
+            func.sum(case(((model.published_at >= start) & (model.published_at < end), 1), else_=0)),
+            func.max(model.updated_at),
         )
-        .filter(Video.account_id.in_(account_ids))
-        .group_by(Video.account_id)
+        .filter(model.account_id.in_(account_ids))
+        .group_by(model.account_id)
         .all()
     )
-    return {
-        account_id: int(yesterday_count) if dated_count and (yesterday_count or updated_at >= end) else None
-        for account_id, dated_count, yesterday_count, updated_at in rows
-    }
+    counts = {}
+    for account_id, dated_count, yesterday_count, updated_at in rows:
+        refreshed = (collected_at or {}).get(account_id) or updated_at
+        counts[account_id] = int(yesterday_count) if dated_count and (yesterday_count or refreshed >= end) else None
+    return counts
 
 
-def get_yesterday_video_plays(db: Session, account_ids: List[int], now: Optional[datetime] = None) -> dict:
+def get_yesterday_video_plays(db: Session, account_ids: List[int], now: Optional[datetime] = None, model=Video) -> dict:
     if not account_ids:
         return {}
     start, end = _yesterday_beijing_bounds(now)
     rows = (
-        db.query(Video.account_id, Video.play_count)
-        .filter(Video.account_id.in_(account_ids), Video.published_at >= start, Video.published_at < end)
-        .order_by(Video.account_id, Video.published_at.desc(), Video.id.desc())
+        db.query(model.account_id, model.play_count)
+        .filter(model.account_id.in_(account_ids), model.published_at >= start, model.published_at < end)
+        .order_by(model.account_id, model.published_at.desc(), model.id.desc())
         .all()
     )
     plays = {}
@@ -106,6 +107,17 @@ async def fetch_and_save_videos(db: Session, account: MonitorAccount) -> int:
         return 0
 
     video_items = result.get('data') or []
+    new_count = save_video_items(db, account.id, video_items)
+    db.commit()
+    logger.info(
+        f"fetch_and_save_videos: account id={account.id}, "
+        f"fetched={len(video_items)}, new={new_count}"
+    )
+    return new_count
+
+
+def save_video_items(db: Session, account_id: int, video_items: list, model=Video) -> int:
+    """Persist a fetched list; the caller commits the collection transaction."""
     new_count = 0
     now = datetime.utcnow()
 
@@ -115,7 +127,10 @@ async def fetch_and_save_videos(db: Session, account: MonitorAccount) -> int:
             continue
 
         # upsert: 查找已有记录
-        video = db.query(Video).filter(Video.video_id == str(video_id_str)).first()
+        query = db.query(model).filter(model.video_id == str(video_id_str))
+        if model is not Video:
+            query = query.filter(model.account_id == account_id)
+        video = query.first()
 
         # 解析 published_at
         published_at: Optional[datetime] = None
@@ -128,8 +143,8 @@ async def fetch_and_save_videos(db: Session, account: MonitorAccount) -> int:
 
         if video is None:
             # 新视频
-            video = Video(
-                account_id=account.id,
+            video = model(
+                account_id=account_id,
                 video_id=str(video_id_str),
                 title=item.get('title', ''),
                 cover_url=item.get('cover_url', ''),
@@ -142,7 +157,7 @@ async def fetch_and_save_videos(db: Session, account: MonitorAccount) -> int:
             db.add(video)
             db.flush()  # 获取 video.id
             new_count += 1
-            logger.debug(f"New video video_id={video_id_str} for account id={account.id}")
+            logger.debug(f"New video video_id={video_id_str} for account id={account_id}")
         else:
             # 更新已有视频的统计字段
             video.play_count = item.get('play_count', video.play_count)
@@ -151,22 +166,18 @@ async def fetch_and_save_videos(db: Session, account: MonitorAccount) -> int:
             video.share_count = item.get('share_count', video.share_count)
             video.title = item.get('title') or video.title
             video.cover_url = item.get('cover_url') or video.cover_url
+            video.published_at = published_at or video.published_at
             video.updated_at = now
 
         # 新增 VideoStats 快照（每次采集都记录一条）
-        stats_snapshot = VideoStats(
-            video_id=video.id,
-            play_count=item.get('play_count', 0),
-            like_count=item.get('like_count', 0),
-            comment_count=item.get('comment_count', 0),
-            share_count=item.get('share_count', 0),
-            recorded_at=now,
-        )
-        db.add(stats_snapshot)
-
-    db.commit()
-    logger.info(
-        f"fetch_and_save_videos: account id={account.id}, "
-        f"fetched={len(video_items)}, new={new_count}"
-    )
+        if model is Video:
+            stats_snapshot = VideoStats(
+                video_id=video.id,
+                play_count=item.get('play_count', 0),
+                like_count=item.get('like_count', 0),
+                comment_count=item.get('comment_count', 0),
+                share_count=item.get('share_count', 0),
+                recorded_at=now,
+            )
+            db.add(stats_snapshot)
     return new_count

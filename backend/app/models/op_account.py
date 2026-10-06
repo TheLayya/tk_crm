@@ -71,6 +71,7 @@ class OpAccount(Base):
     account_created_at = Column(DateTime, nullable=True)
     account_created_year = Column(Integer, nullable=True)
     last_collected_at = Column(DateTime, nullable=True)
+    video_collected_at = Column(DateTime, nullable=True)
     collect_status = Column(
         SAEnum("pending", "success", "failed", "unsupported", name="op_collect_status_enum"),
         default="pending",
@@ -91,6 +92,7 @@ class OpAccount(Base):
     )
 
     project = relationship("Project", backref="op_accounts")
+    videos = relationship("OpAccountVideo", back_populates="account", cascade="all, delete-orphan")
 
 
 class OpCollectTask(Base):

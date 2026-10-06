@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.device import Device
 from app.models.proxy_node import ProxyNode
+from app.models.video import OpAccountVideo
 from app.schemas.op_account import (
     AuditLogResponse,
     BatchStatusUpdate,
@@ -334,6 +335,30 @@ def update_op_account(id: int, data: OpAccountUpdate, db: Session = Depends(get_
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
     return OpAccountResponse.model_validate(account)
+
+
+@router.get("/{id}/videos")
+def get_op_account_videos(
+    id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("op_account:view")),
+):
+    account = op_account_service.get_op_account(db, id)
+    if not account:
+        raise HTTPException(status_code=404, detail="运营账号不存在")
+    scope = get_user_data_scope(db, current_user)
+    allowed = {account.registrant, account.operator}
+    if ((scope == "self" and current_user.username not in allowed)
+            or (scope == "dept" and not allowed.intersection(get_dept_member_usernames(db, current_user)))):
+        raise HTTPException(status_code=403, detail="无权查看该运营账号")
+    return {
+        "items": video_service.get_videos(db, id, skip, limit, model=OpAccountVideo),
+        "total": db.query(OpAccountVideo).filter(OpAccountVideo.account_id == id).count(),
+        "skip": skip,
+        "limit": limit,
+    }
 
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)

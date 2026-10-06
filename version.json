@@ -1,11 +1,14 @@
 {
-  "version": "1.1.12",
-  "date": "2026-10-05",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.12/release-v1.1.12.tar.gz",
-  "sha256": "f16cdb10b79996321ecad10b1c680c43a8a7721f60c67b1df51e94e6d839b87c",
+  "version": "1.1.13",
+  "date": "2026-10-06",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.13/release-v1.1.13.tar.gz",
+  "sha256": "PLACEHOLDER",
   "changes": [
     "邮箱导入支持三、四、六字段和手动格式选择",
     "辅助邮箱可留空或填写 null",
-    "密码保留原值，兼容完整注册时间"
+    "密码保留原值，兼容完整注册时间",
+    "运营账号自动采集视频并支持独立视频展示",
+    "邮箱列表可直接复制邮箱、密码和完整登录资料",
+    "更新断连后恢复状态并避免重复提交"
   ]
 }

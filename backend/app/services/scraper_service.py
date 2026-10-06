@@ -244,6 +244,7 @@ class ScraperService:
                 # Step 2: 分页拉取，cursor 从当前时间戳开始（newest-to-oldest）
                 all_videos = []
                 seen_ids = set()
+                empty_result = False
                 cursor = int(time.time() * 1000)
 
                 while len(all_videos) < max_count:
@@ -301,8 +302,9 @@ class ScraperService:
                     item_list = data.get('itemList', [])
 
                     if not item_list:
-                        status_code = data.get('statusCode', data.get('status_code', 0))
+                        status_code = data.get('statusCode', data.get('status_code'))
                         logger.warning(f"Web API empty itemList, statusCode={status_code}")
+                        empty_result = status_code in (0, "0") and isinstance(data.get('itemList'), list)
                         break
 
                     # 去重后加入结果
@@ -333,6 +335,8 @@ class ScraperService:
                     logger.info(f"Total fetched: {len(result)} videos")
                     return {'success': True, 'data': result, 'error': None}
 
+                if empty_result:
+                    return {'success': True, 'data': [], 'error': None}
                 return {'success': False, 'data': None, 'error': 'No videos returned'}
 
         except Exception as e:

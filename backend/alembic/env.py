@@ -20,7 +20,7 @@ from app.models.monitor import (  # noqa: F401
     MonitorHistory,
     MonitorSettings,
 )
-from app.models.video import Video, VideoStats  # noqa: F401
+from app.models.video import Video, VideoStats, OpAccountVideo  # noqa: F401
 from app.models.op_account import OpAccount, OpCollectTask, OpAuditLog, EmailAccount, EmailAccountRelation, EmailAssetRelation  # noqa: F401
 from app.models.team import User, Department, Role, RolePermission, UserRole, RefreshToken, OperationToken, LoginLog, OperationLog  # noqa: F401
 from app.models.work_item import WorkItem, WorkItemCategorySettings  # noqa: F401

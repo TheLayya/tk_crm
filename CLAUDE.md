@@ -115,6 +115,7 @@ npm run dev -- --host 127.0.0.1 --port 5174
 | 第 9 轮 | 2026-08-22 | 1 [P1] + 3 [P2]（worktree 检测不足、mkdir 为 Git Bash 语法、`<轮次>` 占位符、CODEX SAYS 与格式校验不一致） | 全部修复（运行时强制回退基线、命令注明 Git Bash、占位符替换说明、完整性检查补 CODEX SAYS 块） | 同上 |
 | 第 10 轮 | 2026-08-22 | **0 [P1] + 0 [P2]，APPROVE**（收敛确认：worktree 回退、Git Bash 范围、占位符处理、CODEX SAYS/GATE 校验均已明确一致） | 无需处置 | 同上 |
 | Windows 续接轮 | 2026-10-05 | 邮箱空白原因和旧请求覆盖新领取已修复，复审 GATE PASS；更新并发 P2 已登记；全量验证门禁 FAIL（325 passed、覆盖率 66.20% < 80%） | 本地包重建、发布审计及独立安装冒烟通过；未发布部署，不宣称全量验证通过 | [docs/handover/2026-10-05-windows-packaging-handoff.md](docs/handover/2026-10-05-windows-packaging-handoff.md) |
+| 运营视频与邮箱复制轮 | 2026-10-06 | 独立运营视频、邮箱复制、更新断连恢复复审 GATE PASS；全量 372 passed，覆盖率 69.51% < 80% 门禁 FAIL | 本地修复，未提交发布；mypy/最终序列构建 NOT RUN；浏览器关闭环境限制单独登记 | [docs/handover/2026-10-06-op-videos-email-copy.md](docs/handover/2026-10-06-op-videos-email-copy.md) |
 
 ---
 

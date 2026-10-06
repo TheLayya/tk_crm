@@ -751,7 +751,8 @@ async def run_scheduled_collections(db_factory: Callable) -> None:
         due_accounts = []
         for account in accounts:
             last_attempt = account.updated_at if account.collect_status == "failed" else account.last_collected_at
-            if last_attempt is None or now >= last_attempt + timedelta(seconds=interval):
+            if (last_attempt is None or now >= last_attempt + timedelta(seconds=interval)
+                    or (account.video_collected_at is None and account.collect_status != "failed")):
                 due_accounts.append(account)
         if not due_accounts:
             return

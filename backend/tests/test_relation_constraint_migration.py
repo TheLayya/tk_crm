@@ -4,9 +4,6 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import Session
-
-from app.models.op_account import OpAccount
 
 
 @pytest.fixture
@@ -26,10 +23,9 @@ def legacy_database(tmp_path):
 
 def test_relation_constraint_upgrade_and_downgrade_preserve_account(legacy_database):
     configuration, engine = legacy_database
-    with Session(engine) as session:
-        account = OpAccount(platform="tiktok", account="migration-account", password="secret")
-        session.add(account)
-        session.commit()
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO op_accounts (platform, account, password, status, collect_status, created_at, updated_at) "
+                                "VALUES ('tiktok', 'migration-account', 'legacy-secret', '正常', 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
     with engine.connect() as connection:
         original = connection.execute(text("SELECT id, password FROM op_accounts")).one()
     command.upgrade(configuration, "head")
@@ -50,9 +46,9 @@ def test_relation_constraint_upgrade_and_downgrade_preserve_account(legacy_datab
 
 def test_duplicate_accounts_stop_upgrade_without_deleting_records(legacy_database):
     configuration, engine = legacy_database
-    with Session(engine) as session:
-        session.add_all([OpAccount(platform="tiktok", account="duplicate") for _ in range(2)])
-        session.commit()
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO op_accounts (platform, account, status, collect_status, created_at, updated_at) "
+                                "VALUES ('tiktok', 'duplicate', '正常', 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"), [{}, {}])
     with pytest.raises(RuntimeError, match="不会自动删除账号"):
         command.upgrade(configuration, "head")
     with engine.connect() as connection:

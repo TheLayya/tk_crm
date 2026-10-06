@@ -159,6 +159,8 @@ class OpAccountResponse(BaseModel):
     account_created_at: Optional[datetime] = None
     account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
     last_collected_at: Optional[datetime] = None
+    video_collected_at: Optional[datetime] = None
+    video_source: str = "op"
     collect_status: str
     collect_error: Optional[str] = None
     gmail_check_status: Optional[str] = None

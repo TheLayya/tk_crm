@@ -69,7 +69,7 @@
         <el-table-column type="expand" width="36" fixed="left">
           <template #default="{ row }">
             <div class="op-inline-details">
-              <el-alert v-if="row.collect_status === 'failed'" :title="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号已不可访问：TikTok 提示找不到此账号' : '采集未完成，当前账号状态尚未确认'" description="下方粉丝和视频仅为历史记录，不代表当前数据；请打开 TikTok 主页核实。" :type="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'error' : 'warning'" :closable="false" show-icon />
+              <el-alert v-if="row.collect_status === 'failed'" :title="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号已不可访问：TikTok 提示找不到此账号' : row.collect_error?.startsWith('VIDEO_COLLECTION_FAILED:') ? '账号基础数据已更新，视频采集未完成' : '采集未完成，当前账号状态尚未确认'" :description="row.collect_error?.startsWith('VIDEO_COLLECTION_FAILED:') ? '视频保留上次采集记录，请稍后重新采集。' : '下方粉丝和视频仅为历史记录，不代表当前数据；请打开 TikTok 主页核实。'" :type="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'error' : 'warning'" :closable="false" show-icon />
               <div class="inline-summary">
                 <strong>{{ row.account }}</strong>
                 <span v-if="row.nickname && row.nickname !== row.account">{{ row.nickname }}</span>
@@ -84,7 +84,7 @@
               </div>
               <AssociationOverview kind="account" :resource-id="row.id" />
               <AccountEmailRelations v-if="authStore.hasPermission('email:view')" :account-id="row.id" />
-              <InlineAccountVideos v-if="row.monitor_account_id" :account-id="row.monitor_account_id" />
+              <InlineAccountVideos v-if="row.platform === 'tiktok'" :account-id="row.video_source === 'monitor' ? row.monitor_account_id : row.id" :source="row.video_source || 'op'" />
 
         <!-- 账号凭证 -->
         <div class="section-group">
@@ -193,7 +193,7 @@
         </el-table-column>
         <el-table-column v-if="filters.platform !== 'gmail'" label="粉丝数" width="100" align="right"><template #default="{ row }">{{ formatNum(row.follower_count) }}</template></el-table-column>
         <el-table-column v-if="filters.platform !== 'gmail'" label="粉丝变化" width="110" align="right"><template #default="{ row }"><el-tooltip content="关联监控账号最近两次成功检查的粉丝变化"><span :class="row.followers_change > 0 ? 'op-delta-up' : row.followers_change < 0 ? 'op-delta-down' : 'op-delta-neutral'">{{ row.followers_change == null ? '暂无对比' : (row.followers_change > 0 ? '+' : '') + row.followers_change }}</span></el-tooltip></template></el-table-column>
-        <el-table-column v-if="filters.platform !== 'gmail'" label="昨日更新（北京时间）" width="170"><template #default="{ row }">{{ !row.monitor_account_id ? '未关联监控' : row.yesterday_video_count == null ? '视频数据待刷新' : row.yesterday_video_count > 0 ? '已更新 ' + row.yesterday_video_count + ' 条' : '未发现更新' }}</template></el-table-column>
+        <el-table-column v-if="filters.platform !== 'gmail'" label="昨日更新（北京时间）" width="170"><template #default="{ row }">{{ row.yesterday_video_count == null ? '视频数据待采集' : row.yesterday_video_count > 0 ? '已更新 ' + row.yesterday_video_count + ' 条' : '未发现更新' }}</template></el-table-column>
         <el-table-column v-if="filters.platform !== 'gmail'" label="昨日视频流量" min-width="170"><template #default="{ row }"><el-tooltip content="昨日发布视频的最新累计播放量，不是昨日新增播放；按发布时间从新到旧排列。"><span>{{ row.yesterday_video_plays == null ? '暂无可靠数据' : row.yesterday_video_plays.join(' / ') || '—' }}</span></el-tooltip></template></el-table-column>
         <el-table-column v-if="filters.platform === 'gmail'" label="辅助邮箱" min-width="180"><template #default="{ row }">{{ row.recovery_email || '—' }}</template></el-table-column>
         <el-table-column label="绑定终端" width="140">
@@ -738,6 +738,8 @@
             <div class="stat-item"><div class="stat-item__value">{{ formatNum(detailDialog.row.video_count) }}</div><div class="stat-item__label">视频数</div></div>
           </div>
         </div>
+
+        <InlineAccountVideos v-if="detailDialog.row.platform === 'tiktok' && detailDialog.visible" :account-id="detailDialog.row.video_source === 'monitor' ? detailDialog.row.monitor_account_id : detailDialog.row.id" :source="detailDialog.row.video_source || 'op'" />
 
         <!-- 账号凭证 -->
         <div class="section-group">

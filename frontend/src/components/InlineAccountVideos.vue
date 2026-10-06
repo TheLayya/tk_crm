@@ -23,7 +23,7 @@
           </div>
         </article>
       </div>
-      <div v-else class="video-empty">暂无已采集视频；请启用视频监控后检查账号。</div>
+      <div v-else class="video-empty">{{ source === 'op' ? '暂无已采集视频；自动采集完成后可刷新查看，也可在账号列表点击采集。' : '暂无已采集视频；请启用视频监控后检查账号。' }}</div>
       <el-pagination v-if="total > pageSize" v-model:current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next" small @current-change="loadVideos" />
     </template>
   </section>
@@ -31,9 +31,9 @@
 
 <script setup>
 import { ref, watch } from 'vue'
-import { getAccountVideos } from '@/api/videos'
+import { getAccountVideos, getOpAccountVideos } from '@/api/videos'
 
-const props = defineProps({ accountId: { type: Number, required: true } })
+const props = defineProps({ accountId: { type: Number, required: true }, source: { type: String, default: 'monitor' } })
 const videos = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -59,7 +59,8 @@ const loadVideos = async () => {
   loading.value = true
   error.value = ''
   try {
-    const response = await getAccountVideos(props.accountId, { skip: (page.value - 1) * pageSize, limit: pageSize })
+    const fetchVideos = props.source === 'op' ? getOpAccountVideos : getAccountVideos
+    const response = await fetchVideos(props.accountId, { skip: (page.value - 1) * pageSize, limit: pageSize })
     if (version !== requestVersion) return
     videos.value = response.items || []
     total.value = response.total ?? 0
@@ -70,7 +71,7 @@ const loadVideos = async () => {
     if (version === requestVersion) loading.value = false
   }
 }
-watch(() => props.accountId, () => {
+watch(() => [props.accountId, props.source], () => {
   page.value = 1
   videos.value = []
   total.value = 0

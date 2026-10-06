@@ -23,6 +23,16 @@ const isAuthRequest = (config) => {
   return url.includes('/auth/login') || url.includes('/auth/refresh')
 }
 
+const isExpectedUpdateDowntime = () => {
+  try {
+    const job = JSON.parse(localStorage.getItem('tk-crm:update-job') || 'null')
+    const elapsed = Date.now() - Number(job?.startedAt)
+    return Boolean(job?.targetVersion && elapsed >= 0 && elapsed < 10 * 60 * 1000)
+  } catch (_) {
+    return false
+  }
+}
+
 const redirectToLogin = () => {
   if (redirectPromise) return redirectPromise
 
@@ -62,12 +72,18 @@ request.interceptors.response.use(
   async (error) => {
     // 处理网络错误
     if (!error.response) {
-      ElMessage.error('网络连接失败，请检查网络设置')
+      if (!error.config?.silentNetworkError && !isExpectedUpdateDowntime()) {
+        ElMessage.error('网络连接失败，请检查网络设置')
+      }
       return Promise.reject(error)
     }
 
     const { status, data } = error.response
     const originalRequest = error.config
+
+    if ([502, 503, 504].includes(status) && (originalRequest?.silentNetworkError || isExpectedUpdateDowntime())) {
+      return Promise.reject(error)
+    }
 
     const authRequest = isAuthRequest(originalRequest)
 
@@ -92,6 +108,9 @@ request.interceptors.response.use(
         originalRequest.headers['Authorization'] = `Bearer ${token}`
         return request(originalRequest)
       } catch (refreshError) {
+        if (isExpectedUpdateDowntime() && (!refreshError.response || [502, 503, 504].includes(refreshError.response.status))) {
+          return Promise.reject(refreshError)
+        }
         await redirectToLogin()
         return Promise.reject(refreshError)
       }

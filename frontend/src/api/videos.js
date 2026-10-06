@@ -14,6 +14,10 @@ export function getAccountVideos(accountId, params) {
   })
 }
 
+export function getOpAccountVideos(accountId, params) {
+  return request({ url: `/op-accounts/${accountId}/videos`, method: 'get', params })
+}
+
 /**
  * Get video stats history
  */
