@@ -1,7 +1,7 @@
 # Windows 本地打包指引
 
 > 目的：每个阶段性功能完成后，在本机生成可安装的 Windows x64 包，并用可重复的验收流程确认能启动、数据不混入、UI 不变形、更新器可用。
-> 更新日期：2026-10-05
+> 更新日期：2026-10-06
 
 ## 1. 固定流程
 
@@ -18,7 +18,7 @@
 - Windows x64。
 - Python 3.12 和 backend/.venv312。
 - Node.js/npm，frontend 依赖已安装。
-- .NET 10 SDK；默认使用 %LOCALAPPDATA%/TkCRM-Dev/dotnet/dotnet.exe。
+- .NET 10 SDK；优先选择 PATH 中具备 .NET 10 SDK 的 dotnet，否则使用 %LOCALAPPDATA%/TkCRM-Dev/dotnet/dotnet.exe。只有运行时的 dotnet 不可用于构建。
 - Inno Setup 6；默认使用 %LOCALAPPDATA%/Programs/Inno Setup 6/ISCC.exe。
 - WebView2 Bootstrapper 下载需要网络。
 
@@ -81,7 +81,7 @@ PyInstaller 不在 backend/requirements.txt 中，必须额外安装。UI 审计
 
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\desktop\build-installer.ps1
 
-脚本会验证 Microsoft WebView2 Bootstrapper 签名、读取 APP_VERSION、编译 desktop/installer.iss，并自动调用发布审计。输出文件：
+脚本会验证 Microsoft WebView2 Bootstrapper 签名、读取 APP_VERSION、编译 desktop/installer.iss，生成同版本 Windows 候选清单并自动调用发布审计。输出文件：
 
     desktop/build/installer/TkCRM-<版本>-win-x64-setup.exe
 

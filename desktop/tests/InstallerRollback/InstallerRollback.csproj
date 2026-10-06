@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../TkCrm.Updater/DirectorySnapshot.cs" Link="DirectorySnapshot.cs" />
+    <Compile Include="../../TkCrm.Updater/UpdateTransaction.cs" Link="UpdateTransaction.cs" />
+    <Compile Include="../../TkCrm.Updater/UpdateProcess.cs" Link="UpdateProcess.cs" />
+    <Compile Include="../../TkCrm.Updater/UpdateReadiness.cs" Link="UpdateReadiness.cs" />
+  </ItemGroup>
+</Project>

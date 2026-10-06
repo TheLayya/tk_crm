@@ -54,7 +54,7 @@ npm run dev -- --host 0.0.0.0 --port 5174
 
 ## Windows 桌面版
 
-Windows 用户无需安装 Python、Node.js 或 Docker，使用 desktop/build/installer/TkCRM-1.1.10-win-x64-setup.exe 安装即可。安装器会检测并引导安装 Microsoft Edge WebView2 Runtime；用户数据保存在本地应用数据目录，不随卸载删除。
+Windows 用户无需安装 Python、Node.js 或 Docker。当前本地候选安装器为 `desktop/build/installer/TkCRM-1.1.15-win-x64-setup.exe`，完整发布审计与隔离安装/卸载已通过，尚未上传 Release。安装器会检测并引导安装 Microsoft Edge WebView2 Runtime；用户数据保存在本地应用数据目录，不随卸载删除。
 
 发布前在项目根目录执行以下单入口审计命令：
 

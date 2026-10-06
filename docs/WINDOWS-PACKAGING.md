@@ -783,3 +783,12 @@ docker compose -p tk-crm-local -f docker-compose.local.yml down
 - C# 更新器下载校验新增最终重定向主机白名单：仅允许 `github.com`、`release-assets.githubusercontent.com`、`objects.githubusercontent.com`，同时继续要求 HTTPS；初始 URL 白名单和 SHA-256 校验保持不变。
 - `desktop/build/publish-redirect-host-fix.log`：本地运行包重建成功；`desktop/build/installer-redirect-host-fix-rerun.log`：完整发布审计通过，首次更新进程夹具偶发未停止后单独重跑 6/6 通过。
 - 最新安装器 SHA-256：`bfe5ba5f519f184c4c4dc6e69e554e5a1b378111a31dbd6ef5290c66d18da8a1`；独立安装/卸载冒烟通过，日志 `desktop/build/installer-smoke-redirect-host-fix.log`。
+
+### 2026-10-06：Windows 1.1.15 与冒烟修复
+
+- 用户选择优先处理 SM/冒烟和 Windows 1.1.15；运行包已按当前业务源码重新构建。安装器 `desktop/build/installer/TkCRM-1.1.15-win-x64-setup.exe`，99,468,430 字节，SHA-256 `24c791f67103ca59c42be73b02a3892366f9a618d4424cd93ce009ac2b6e631a`。
+- 修复系统 dotnet 只有运行时仍被选中的问题；发布前先验证 .NET 10 SDK，候选清单按当前版本生成并校验基准服务器版本。
+- 原生冒烟改为启动 PID 限定的正常窗口退出，回执解析重试、finally 环境恢复与托管服务清理；三项原生冒烟使用独立 WebView2 配置目录，避免共用真实用户浏览器数据。
+- 安全测试独立设置 PYTHONPATH；布局夹具模拟更新状态接口；完整审计缺少安全/UI/候选清单时立即失败。
+- 独立安装/卸载、桌面退出、无工具链冒烟及全部最终脚本完整审计均实际 exit 0；1955 载荷文件匹配，独立浏览器目录已验证，卸载保留合成数据库/配置。完整审计包括 84 组 UI 布局；证据见 [本轮交接](handover/2026-10-06-windows-1.1.15-smoke.md)。
+- 失败日志保留；没有降低覆盖率门槛、删除断言或以批量杀进程制造通过。Windows EXE 未上传，根清单没有 Windows 字段；当前仅本地候选，团队升级仍由用户点击。全仓 71.63% 覆盖率和严格 mypy 924 错误仍未解决。
