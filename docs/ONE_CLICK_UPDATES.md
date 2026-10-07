@@ -95,6 +95,8 @@ python start.py
 
 ## 发布新版本
 
+维护者使用项目内 [tk-crm-release skill](../.agents/skills/tk-crm-release/SKILL.md) 和 `python tools/release.py --help`。普通版本一起准备服务器 / Docker 源码包与 Windows 安装器；步骤、来源验证、验收和 GitHub 清单顺序分别在技能引用中维护，避免另写临时打包命令。
+
 发布包必须是 GitHub Release 资产，不能使用分支源码压缩包。发布时同步更新：
 
 - `backend/app/version.py` 的 `APP_VERSION`；
@@ -103,7 +105,7 @@ python start.py
 
 发布包只应包含代码和配置模板，不包含 `.env`、数据库、日志、备份、`node_modules` 或 Python 虚拟环境。服务器更新器会拒绝非 GitHub Release 地址、错误校验值和缺少必要文件的归档。
 
-Windows 安装包发布流程：先执行 `powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build-installer.ps1 -Iscc <ISCC.exe>`，再执行 `desktop/generate-windows-manifest.ps1` 生成候选清单，并用 `desktop/tests/windows-manifest-audit.ps1` 校验版本、GitHub Release URL 和真实安装器 SHA-256。确认安装器已经上传到对应 GitHub Release 后，才把候选清单中的 `windows_package_url` 和 `windows_sha256` 合并到仓库根目录的 `version.json`；未上传前不要修改线上清单。
+Windows 构建先运行 `desktop/publish.ps1`，再把本次服务器候选清单传给 `desktop/build-installer.ps1 -BaseManifestPath ...`。安装器脚本会生成 Windows 候选清单并运行完整审计；随后还需隔离安装验收和构建前后来源审计。使用发布工具合成双端候选，上传两个资产并校验实际公开下载后，才更新根目录 `version.json`。具体命令和证据格式以技能的 [Windows 引用](../.agents/skills/tk-crm-release/references/windows.md) 为准。
 
 ## 失败处理
 

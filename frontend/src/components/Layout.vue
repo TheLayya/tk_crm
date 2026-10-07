@@ -155,11 +155,16 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.17'
+const APP_VERSION = '1.1.18'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
+    date: '2026-10-07',
+    items: ['修复邮箱展开详情在统一表格中的宽度', 'Windows安装验收改为等待实际就绪状态', '增加项目内发布技能和双端发布校验工具']
+  },
+  {
+    version: '1.1.17',
     date: '2026-10-07',
     items: ['全站表格支持排序、筛选、列显示和自定义顺序', '采集增加有限重试、代理切换、任务互斥和中断恢复', '视频部分结果和失败状态更准确，保留已采资料']
   },

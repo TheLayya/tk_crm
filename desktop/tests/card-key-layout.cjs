@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
+const { launchUiBrowser } = require('./ui-browser.cjs')
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || path.join(process.env.LOCALAPPDATA, 'TkCRM-Dev/ui-qa/node_modules/playwright'))
 
 const project = {
@@ -16,7 +17,8 @@ const key = {
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true })
+  const fixture = await launchUiBrowser(chromium)
+  const browser = fixture.browser
   const artifactDir = process.env.TKCRM_UI_ARTIFACT_DIR
   if (artifactDir) require('node:fs').mkdirSync(artifactDir, { recursive: true })
   try {
@@ -102,10 +104,9 @@ async function main() {
         }
       }
       assert.deepEqual(errors, [], 'Runtime errors')
-      await context.close()
     }
   } finally {
-    await browser.close()
+    await fixture.close()
   }
 }
 

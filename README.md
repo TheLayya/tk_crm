@@ -54,7 +54,7 @@ npm run dev -- --host 0.0.0.0 --port 5174
 
 ## Windows 桌面版
 
-Windows 用户无需安装 Python、Node.js 或 Docker。当前本地候选安装器为 `desktop/build/installer/TkCRM-1.1.15-win-x64-setup.exe`，完整发布审计与隔离安装/卸载已通过，尚未上传 Release。安装器会检测并引导安装 Microsoft Edge WebView2 Runtime；用户数据保存在本地应用数据目录，不随卸载删除。
+Windows 用户无需安装 Python、Node.js 或 Docker。可用安装包以 GitHub Release 和根目录 `version.json` 为准；安装器会检测并引导安装 Microsoft Edge WebView2 Runtime，用户数据保存在本地应用数据目录，不随卸载删除。
 
 发布前在项目根目录执行以下单入口审计命令：
 
@@ -63,6 +63,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File desktop/tests/release-audit.
 ```
 
 阶段性本地打包按 [Windows 本地打包指引](docs/WINDOWS-LOCAL-PACKAGING.md) 执行；实际推进、测试证据及未验证边界见 [Windows 打包记录](docs/WINDOWS-PACKAGING.md)。
+
+## 发布维护
+
+发布模块由项目内 [tk-crm-release skill](.agents/skills/tk-crm-release/SKILL.md)、[发布工具](tools/release.py) 和既有 `desktop/` 构建验收脚本组成。以后可直接要求“使用 `$tk-crm-release` 发布双端更新”；普通发布同步准备服务器 / Docker 归档和 Windows 安装器，各自验收、公开下载校验通过后才更新统一清单。
+
+技能和脚本随仓库维护。新会话会通过项目 `AGENTS.md` 读取该流程，避免依赖之前的聊天记忆；固定提交来源、真实哈希、迁移、回滚和团队网页点击升级等边界均记录在技能中。
 
 ## 登录账号与初始密码
 

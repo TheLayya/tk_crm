@@ -1,10 +1,12 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const fs = require('node:fs')
+const { launchUiBrowser } = require('./ui-browser.cjs')
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || path.join(process.env.LOCALAPPDATA, 'TkCRM-Dev/ui-qa/node_modules/playwright'))
 
 async function main() {
-  const browser = await chromium.launch({ headless: true })
+  const fixture = await launchUiBrowser(chromium)
+  const browser = fixture.browser
   try {
     for (const deviceScaleFactor of [1, 1.25, 1.5, 2]) {
       const context = await browser.newContext({ deviceScaleFactor })
@@ -101,8 +103,7 @@ async function main() {
         console.log(JSON.stringify({ width, height, deviceScaleFactor, emailLayout: 'passed' }))
       }
       assert.deepEqual(errors, [], 'Email runtime errors')
-      await context.close()
     }
-  } finally { await browser.close() }
+  } finally { await fixture.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

@@ -19,6 +19,8 @@ foreach ($path in @($OldInstaller, $NewUpdater, $python)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing online update input: $path" }
 }
 if ((Get-FileHash -LiteralPath $OldInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -ne '24c791f67103ca59c42be73b02a3892366f9a618d4424cd93ce009ac2b6e631a') { throw 'Historical 1.1.15 installer fingerprint differs' }
+# The fingerprint above pins the historical app and its migration head, not this checkout's head.
+$oldRevision = '20261006_0023'
 $appKey = '9D5C6B35-5C74-4C21-A2E1-3CB4FBE9DA10'
 foreach ($registryRoot in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
   if (Get-ChildItem -LiteralPath $registryRoot -ErrorAction SilentlyContinue | Where-Object PSChildName -like "*$appKey*") { throw 'Existing TkCRM installation found; refusing isolated online update' }
@@ -48,8 +50,8 @@ function Read-Json([string]$Path) {
   if (Test-Path -LiteralPath $Path -PathType Leaf) { try { return Get-Content -LiteralPath $Path -Raw -Encoding utf8 | ConvertFrom-Json } catch { } }
   return $null
 }
-function Verify-Data {
-  & $python -X utf8 (Join-Path $PSScriptRoot 'online-update-smoke.py') verify $data
+function Verify-Data([string]$ExpectedRevision) {
+  & $python -X utf8 (Join-Path $PSScriptRoot 'online-update-smoke.py') verify $data $ExpectedRevision
   if ($LASTEXITCODE -ne 0) { throw 'Isolated database/data verification failed' }
 }
 function Register-Server([System.Diagnostics.Process]$Desktop) {
@@ -102,8 +104,8 @@ try {
   $oldHealth = Invoke-RestMethod ("http://127.0.0.1:{0}/health" -f $oldReceipt.port) -TimeoutSec 5
   if ($oldHealth.status -ne 'ok' -or $oldHealth.version -ne '1.1.15') { throw 'Old desktop health mismatch' }
   if (-not (Test-Path -LiteralPath (Join-Path $env:WEBVIEW2_USER_DATA_FOLDER 'EBWebView') -PathType Container)) { throw 'WebView2 fixture is not isolated' }
-  Verify-Data
-  Write-Output 'PASS old 1.1.15 started and migrated 0004 fixture to the existing head'
+  Verify-Data $oldRevision
+  Write-Output "PASS old 1.1.15 started and migrated 0004 fixture to pinned head $oldRevision"
 
   $payloadBefore = @{}
   foreach ($file in @(Get-ChildItem -LiteralPath $installation -Recurse -File)) { $payloadBefore[$file.FullName] = (Get-FileHash -LiteralPath $file.FullName).Hash }
@@ -119,7 +121,7 @@ try {
   foreach ($path in $payloadBefore.Keys) { if ((Get-FileHash -LiteralPath $path).Hash -ne $payloadBefore[$path]) { throw 'Checksum failure modified installation files' } }
   $oldHealth = Invoke-RestMethod ("http://127.0.0.1:{0}/health" -f $oldReceipt.port) -TimeoutSec 5
   if ($oldHealth.status -ne 'ok' -or $oldHealth.version -ne '1.1.15') { throw 'Checksum failure damaged the old server' }
-  Verify-Data
+  Verify-Data $oldRevision
   Write-Output 'PASS real GitHub download with bad SHA: old app/files/data preserved before shutdown'
 
   $positive = Start-Updater 'valid-update' $release
@@ -151,7 +153,7 @@ try {
   if ($newHealth.status -ne 'ok' -or $newHealth.version -ne $version) { throw 'Updated desktop health/version mismatch' }
   $history = @(Get-Content -LiteralPath (Join-Path $data 'update-history.json') -Raw -Encoding utf8 | ConvertFrom-Json)
   if ([string]$history[0].version -ne $version -or ($history[0].changes | ConvertTo-Json -Compress) -cne ($release.changes | ConvertTo-Json -Compress)) { throw 'Version/changelog update history differs from manifest' }
-  Verify-Data
+  Verify-Data 'head'
   Write-Output "PASS production online entry: GitHub HTTPS/SHA, real install, new desktop receipt/health $version, original data and history"
   & (Join-Path $PSScriptRoot 'close-fixture-desktop.ps1') -DesktopProcess $newDesktop
   Wait-OwnedServersExit
@@ -180,5 +182,5 @@ try {
 if (-not $finished) { throw 'Online update did not finish' }
 if (Test-Path -LiteralPath (Join-Path $installation 'TkCrm.Desktop.exe')) { throw 'Updated application remained after uninstall' }
 if ((Get-FileHash -LiteralPath (Join-Path $data 'monitor.db')).Hash -ne $databaseHash -or (Get-FileHash -LiteralPath (Join-Path $data 'update-history.json')).Hash -ne $historyHash) { throw 'Uninstall changed retained database/history' }
-Verify-Data
+Verify-Data 'head'
 Write-Output "PASS isolated online update/uninstall fixture=$fixture"

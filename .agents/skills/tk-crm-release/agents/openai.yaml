@@ -1,0 +1,4 @@
+interface:
+  display_name: "TkCRM Release"
+  short_description: "Package and publish server and Windows releases"
+  default_prompt: "Use $tk-crm-release to prepare, validate, and publish the next TkCRM server and Windows release."

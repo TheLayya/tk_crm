@@ -136,7 +136,7 @@ export default defineComponent({
 </script>
 
 <style>
-.crm-table-wrapper { width: 100%; min-width: 0; }
+.crm-table-wrapper { width: 100%; min-width: 0; container-type: inline-size; }
 .crm-table-toolbar { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .crm-table-active-filters { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .crm-table-header { display: inline-flex; align-items: center; gap: 4px; max-width: calc(100% - 24px); vertical-align: middle; }

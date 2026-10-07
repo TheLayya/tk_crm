@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
+const { launchUiBrowser } = require('./ui-browser.cjs')
 const moduleCandidates = [
   process.env.PLAYWRIGHT_MODULE,
   'playwright',
@@ -13,7 +14,8 @@ if (!playwright) throw new Error('找不到 Playwright；请安装依赖或设�
 const { chromium } = playwright
 
 async function main() {
-  const browser = await chromium.launch({ headless: true })
+  const fixture = await launchUiBrowser(chromium)
+  const browser = fixture.browser
   const artifactDir = process.env.TKCRM_UI_ARTIFACT_DIR
   if (artifactDir) require('node:fs').mkdirSync(artifactDir, { recursive: true })
   try {
@@ -96,10 +98,9 @@ async function main() {
       }
     }
     assert.deepEqual(failures, [], 'Browser runtime errors')
-    await context.close()
     }
   } finally {
-    await browser.close()
+    await fixture.close()
   }
 }
 

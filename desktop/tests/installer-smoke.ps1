@@ -45,22 +45,28 @@ try {
   $env:TKCRM_UPDATE_READY_FILE = $readyFile
   $expectedVersion = $version
   $desktopProcess = Start-Process -FilePath (Join-Path $installation "TkCrm.Desktop.exe") -WindowStyle Hidden -PassThru
-  Start-Sleep -Seconds 12
-  $serverProcess = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "TkCrm.Server.exe" -and $_.ParentProcessId -eq $desktopProcess.Id }
   $port = $null
   $health = ""
-  if ($serverProcess) {
-    $connection = Get-NetTCPConnection -OwningProcess $serverProcess.ProcessId -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($connection) {
-      $port = $connection.LocalPort
-      try { $health = Invoke-RestMethod ("http://127.0.0.1:{0}/health" -f $port) -TimeoutSec 2 | ConvertTo-Json -Compress } catch { }
+  $startupDeadline = (Get-Date).AddSeconds(60)
+  do {
+    if ($desktopProcess.HasExited) { throw "Installed desktop exited before becoming ready; fixture=$fixture" }
+    $serverProcess = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "TkCrm.Server.exe" -and $_.ParentProcessId -eq $desktopProcess.Id }
+    if ($serverProcess) {
+      $connection = Get-NetTCPConnection -OwningProcess $serverProcess.ProcessId -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($connection) {
+        $port = $connection.LocalPort
+        try { $health = Invoke-RestMethod ("http://127.0.0.1:{0}/health" -f $port) -TimeoutSec 2 | ConvertTo-Json -Compress } catch { }
+      }
     }
-  }
+    if ($health -like '*"status":"ok"*' -and $health -like ('*"version":"' + $expectedVersion + '"*')) { break }
+    Start-Sleep -Milliseconds 250
+  } while ((Get-Date) -lt $startupDeadline)
   if (-not $serverProcess -or $health -notlike ('*"status":"ok"*') -or $health -notlike ('*"version":"' + $expectedVersion + '"*')) { throw "Installed desktop startup failed: port=$port health=$health; fixture=$fixture" }
   Write-Output "PASS installed desktop startup: port=$port health=$health"
-  $readyDeadline = (Get-Date).AddSeconds(15)
+  $readyDeadline = (Get-Date).AddSeconds(60)
   $ready = $null
   while ($null -eq $ready -and (Get-Date) -lt $readyDeadline) {
+    if ($desktopProcess.HasExited) { throw "Installed desktop exited before WebView2 receipt; fixture=$fixture" }
     if (Test-Path -LiteralPath $readyFile) {
       try { $ready = Get-Content -LiteralPath $readyFile -Raw | ConvertFrom-Json } catch { }
     }

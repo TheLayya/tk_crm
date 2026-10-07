@@ -51,18 +51,25 @@ if mode == "seed":
     snapshot_path.write_text(json.dumps({"password": password, "totp": totp, "env": configuration_text}), encoding="utf-8")
     print("PASS synthetic 0004 schema and encrypted fixture seeded")
 elif mode == "verify":
+    assert len(sys.argv) == 4, "Verification requires an explicit expected revision or head"
+    expected_revision = sys.argv[3]
+    scripts = ScriptDirectory.from_config(configuration)
+    expected_heads = set(scripts.get_heads()) if expected_revision == "head" else {expected_revision}
+    if expected_revision != "head":
+        assert scripts.get_revision(expected_revision) is not None, "Unknown expected revision"
     original = json.loads(snapshot_path.read_text(encoding="utf-8"))
     assert (data / ".env").read_bytes() == original["env"].encode("utf-8"), "Original configuration changed"
     assert (data / "fixture-only.txt").read_text(encoding="utf-8") == "online update marker", "Marker changed"
     with sqlite3.connect((data / "monitor.db").as_uri() + "?mode=ro", uri=True) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
-        assert {row[0] for row in connection.execute("SELECT version_num FROM alembic_version")} == set(ScriptDirectory.from_config(configuration).get_heads())
+        actual_heads = {row[0] for row in connection.execute("SELECT version_num FROM alembic_version")}
+        assert actual_heads == expected_heads, f"Schema revision differs: {actual_heads} != {expected_heads}"
         row = connection.execute(
             "SELECT password,totp_secret,remark FROM email_accounts WHERE email=?", ("fixture@example.invalid",)
         ).fetchone()
         assert row == (original["password"], original["totp"], "preserved-note"), "Encrypted record changed"
         assert encryption.decrypt(row[0]) == "preserved-mail-password"
         assert encryption.decrypt(row[1]) == "JBSWY3DPEHPK3PXP"
-    print("PASS current schema, SQLite integrity, original ciphertext/config/marker preserved")
+    print(f"PASS expected schema {','.join(sorted(expected_heads))}, SQLite integrity, original ciphertext/config/marker preserved")
 else:
     raise ValueError("Expected seed or verify")
