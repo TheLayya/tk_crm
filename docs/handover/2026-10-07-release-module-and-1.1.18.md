@@ -43,6 +43,8 @@ SQLite 在线备份 `backups/release-1.1.18-local-20261007-220107/monitor.db`，
 - 首次在线夹具由于隔离用户不能访问用户安装的 Python 而失败；给测试用户临时 read/execute 权限后重跑通过，未修改安装包、降低断言或绕过 AppId 保护。首轮并行安装因其他验收 Server 进程被 guard 拒绝，等待其退出后通过。失败日志保留。
 - 统一线上清单从已验证的候选复制，包含两个平台的实际 URL、哈希和来源提交；在资产上传、公开下载与在线升级通过前始终保留 1.1.17。
 
+线上清单提交 `98c4914cf1e5a6de75df558ad10c7614a2513ad8` 已推送。GitHub contents API、固定提交 Raw 和普通 main Raw 均实际返回 1.1.18，两个哈希一致。临时 QA 用户及其 DPAPI 凭据已删除，Python 临时权限恢复原描述符；Windows 保留已加载的合成测试 profile 目录作为证据，没有活动 QA 进程。用户原 Windows 安装未卸载或覆盖。
+
 实际门禁证据为 `desktop/build/publish-1.1.18.exitcode`、`installer-audit-1.1.18.exitcode`，以及 `.orchestration/release-1.1.18` 下 `installer-smoke.exitcode`、`online-update-smoke.exitcode`、`public-download.exitcode`，均为 0。独立发布审查 `[P1] none; [P2] none; GATE PASS; APPROVE`。
 
 物理双屏混合 DPI、缺少 WebView2 的新机器与安装器代码签名不由本次浏览器矩阵证明。
