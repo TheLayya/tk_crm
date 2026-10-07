@@ -1,11 +1,16 @@
 {
-  "version": "1.1.17",
+  "version": "1.1.18",
   "date": "2026-10-07",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.17/release-v1.1.17.tar.gz",
-  "sha256": "0f67bb882e0ccb557db5ad291842512f1530b83be595d805e9e36fb4fba095dd",
   "changes": [
-    "全站表格支持排序、筛选、列显示和自定义顺序",
-    "采集增加有限重试、代理切换、任务互斥和中断恢复",
-    "视频部分结果和失败状态更准确，保留已采资料"
-  ]
+    "修复邮箱展开详情在统一表格中的宽度",
+    "Windows安装验收改为等待实际就绪状态",
+    "增加项目内发布技能和双端发布校验工具"
+  ],
+  "source_commit": "ffacc61a5eccbdb3a9ca36ae17e466668f2d3974",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.18/release-v1.1.18.tar.gz",
+  "sha256": "281c75ef003e29c500e2df3d087803d1b3d0a64f1dffa0969bd9cf6e328bd647",
+  "server_source_commit": "ffacc61a5eccbdb3a9ca36ae17e466668f2d3974",
+  "windows_source_commit": "ffacc61a5eccbdb3a9ca36ae17e466668f2d3974",
+  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.18/TkCRM-1.1.18-win-x64-setup.exe",
+  "windows_sha256": "dc10de3105b78da321bbeb07110ceaffa578e9b1685c4a103b80793400c76750"
 }

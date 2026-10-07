@@ -4,6 +4,8 @@
 
 From the repository root:
 
+Use Python 3.11+; the project environment is `backend/.venv312/Scripts/python.exe`. The skill's PowerShell wrapper selects that environment automatically.
+
 ```powershell
 python tools/release.py prepare-server --repo . --ref SOURCE_COMMIT --version X.Y.Z --date YYYY-MM-DD --changes-json .orchestration/release-X.Y.Z/base.json --output-dir .orchestration/release-X.Y.Z
 python tools/release.py validate-server --repo . --ref SOURCE_COMMIT --archive .orchestration/release-X.Y.Z/release-vX.Y.Z.tar.gz --manifest .orchestration/release-X.Y.Z/server-candidate.json
