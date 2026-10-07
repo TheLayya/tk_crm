@@ -65,6 +65,7 @@ function Start-Updater([string]$Name, [object]$Manifest) {
   [IO.File]::WriteAllText($manifestFile, ($Manifest | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
   $arguments = @('--parent-pid',[string]$oldDesktop.Id,'--install-dir',('"' + $installation + '"'),'--data-dir',('"' + $data + '"'),'--expected-version',$version,'--manifest-file',('"' + $manifestFile + '"'),'--installer-url',$packageUrl,'--sha256',[string]$Manifest.windows_sha256,'--status-file',('"' + $statusFile + '"'))
   $process = Start-Process -FilePath (Join-Path $updates 'TkCrm.Updater.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $updates ($Name + '.stdout.log')) -RedirectStandardError (Join-Path $updates ($Name + '.stderr.log'))
+  $null = $process.Handle
   $owned.Add($process)
   return @{ Process=$process; Status=$statusFile }
 }
@@ -72,6 +73,7 @@ function Wait-UpdaterExit([System.Diagnostics.Process]$Process, [datetime]$Deadl
   while (-not $Process.HasExited -and (Get-Date) -lt $Deadline) { Start-Sleep -Milliseconds 500 }
   if (-not $Process.HasExited) { throw 'Online updater timeout; fixture preserved for inspection' }
   $Process.WaitForExit()
+  if ($Process.ExitCode -isnot [int]) { throw "Updater exit code unavailable: pid=$($Process.Id)" }
 }
 function Wait-OwnedServersExit {
   $deadline = (Get-Date).AddSeconds(10)
@@ -112,7 +114,7 @@ try {
   $updater = $negative.Process
   Wait-UpdaterExit $updater ((Get-Date).AddMinutes(12))
   $state = Read-Json $negative.Status
-  if ($updater.ExitCode -eq 0 -or $null -eq $state -or $state.status -ne 'failed' -or $state.message -notmatch 'SHA-256') { throw 'Checksum mismatch was not rejected by production downloader' }
+  if ($updater.ExitCode -ne 1 -or $null -eq $state -or $state.status -ne 'failed' -or $state.message -notmatch 'SHA-256') { throw 'Checksum mismatch was not rejected by production downloader' }
   if ($oldDesktop.HasExited) { throw 'Checksum failure closed the old desktop' }
   foreach ($path in $payloadBefore.Keys) { if ((Get-FileHash -LiteralPath $path).Hash -ne $payloadBefore[$path]) { throw 'Checksum failure modified installation files' } }
   $oldHealth = Invoke-RestMethod ("http://127.0.0.1:{0}/health" -f $oldReceipt.port) -TimeoutSec 5
