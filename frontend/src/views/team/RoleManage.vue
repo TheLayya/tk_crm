@@ -11,26 +11,26 @@
       </template>
 
       <!-- 桌面端表格 -->
-      <el-table v-if="!isMobile" :data="roles" v-loading="loading" stripe>
-        <el-table-column prop="name" label="角色名称" />
-        <el-table-column prop="description" label="描述" />
-        <el-table-column label="权限数量">
+      <crm-table table-id="team-roles" v-if="!isMobile" :data="tableRoles" v-loading="loading" stripe>
+        <el-table-column column-key="name" filter-type="text" prop="name" label="角色名称" />
+        <el-table-column column-key="description" filter-type="text" prop="description" label="描述" />
+        <el-table-column column-key="permissions_count" prop="permissions_count" filter-type="number" label="权限数量">
           <template #default="{ row }">{{ row.permissions?.length || 0 }} 项</template>
         </el-table-column>
-        <el-table-column label="数据范围" width="120">
+        <el-table-column column-key="data_scope" prop="data_scope" filter-type="enum" :filter-options="[{ label: '全部数据', value: 'all' }, { label: '本部门数据', value: 'dept' }, { label: '本人数据', value: 'self' }]" label="数据范围" width="120">
           <template #default="{ row }">
             <el-tag :type="row.data_scope === 'all' ? 'success' : row.data_scope === 'dept' ? 'primary' : 'warning'" size="small">
               {{ row.data_scope === 'all' ? '全部数据' : row.data_scope === 'dept' ? '本部门数据' : '本人数据' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160">
+        <el-table-column column-key="actions" table-tools-disabled fixed="right" label="操作" width="160">
           <template #default="{ row }">
             <el-button v-permission="'team:role:edit'" link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button v-permission="'team:role:delete'" link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
 
       <!-- 移动端卡片列表 -->
       <div v-if="isMobile" class="ios-card-list" v-loading="loading">
@@ -112,6 +112,7 @@ const isMobile = computed(() => windowWidth.value <= 768)
 const onResize = () => { windowWidth.value = window.innerWidth }
 
 const roles = ref([])
+const tableRoles = computed(() => roles.value.map(role => ({ ...role, permissions_count: role.permissions?.length || 0 })))
 const loading = ref(false)
 const dialogVisible = ref(false)
 const editId = ref(null)

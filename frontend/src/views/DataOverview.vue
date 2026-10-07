@@ -88,8 +88,8 @@
         </el-card>
         <el-card v-for="distribution in distributions" :key="distribution.label" class="finance-card">
           <template #header><strong>{{ distribution.label }}</strong></template>
-          <el-table :data="distribution.pageRows" size="small" empty-text="暂无记录"><el-table-column prop="name" :label="distribution.column" /><el-table-column prop="count" label="记录数" width="80" /><el-table-column label="已录入金额"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column></el-table>
-          <el-pagination v-if="distribution.rows.length > distribution.pageSize" v-model:current-page="distribution.page" :page-size="distribution.pageSize" :total="distribution.rows.length" layout="prev, pager, next" small class="distribution-pagination" />
+          <crm-table :table-id="`overview-distribution-${distribution.key}`" :page="distribution.page" :page-size="distribution.pageSize" @total-change="distributionTotals[distribution.key] = $event" @query-change="distributionPages[distribution.key] = 1" :data="distribution.rows" size="small" empty-text="暂无记录"><el-table-column column-key="name" filter-type="text" prop="name" :label="distribution.column" /><el-table-column column-key="count" filter-type="number" prop="count" label="记录数" width="80" /><el-table-column column-key="amount" prop="amount" filter-type="number" label="已录入金额"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column></crm-table>
+          <el-pagination v-if="(distributionTotals[distribution.key] || 0) > distribution.pageSize" :current-page="distribution.page" @current-change="distributionPages[distribution.key] = $event" :page-size="distribution.pageSize" :total="distributionTotals[distribution.key] || 0" layout="prev, pager, next" small class="distribution-pagination" />
         </el-card>
       </div>
       <p class="muted finance-note">采购按采购日期，出售按出售日期，范围包含起止日。缺少日期：采购 {{ overview.finance.missing_cost_dates }} 笔 / 出售 {{ overview.finance.missing_revenue_dates }} 笔（仅“全部”纳入）；节点尚无出售日期。不使用创建时间或修改时间代替业务日期。</p>
@@ -101,8 +101,8 @@
         </el-card>
         <el-card class="orphan-card">
           <template #header><div class="card-header"><strong>未关联可见终端或账号的节点（{{ overview.unbound_nodes.length }}）</strong><span class="muted">每页 {{ orphanPageSize }} 条</span></div></template>
-          <el-table :data="pagedUnboundNodes" size="small" empty-text="暂无未关联节点"><el-table-column label="节点" min-width="130"><template #default="{ row }"><el-button link type="primary" @click="openNode(row)">{{ row.name }}</el-button></template></el-table-column><el-table-column label="状态" width="80"><template #default="{ row }">{{ nodeStatus(row.status) }}</template></el-table-column><el-table-column prop="expire_date" label="到期日期" width="110" /></el-table>
-          <el-pagination v-if="overview.unbound_nodes.length > orphanPageSize" v-model:current-page="orphanPages.nodes" :page-size="orphanPageSize" :total="overview.unbound_nodes.length" layout="prev, pager, next" small class="orphan-pagination" />
+          <crm-table table-id="overview-unbound-nodes" :page="orphanPages.nodes" :page-size="orphanPageSize" @total-change="unboundNodeTotal = $event" @query-change="orphanPages.nodes = 1" :data="overview.unbound_nodes" size="small" empty-text="暂无未关联节点"><el-table-column column-key="name" prop="name" filter-type="text" label="节点" min-width="130"><template #default="{ row }"><el-button link type="primary" @click="openNode(row)">{{ row.name }}</el-button></template></el-table-column><el-table-column column-key="status" prop="status" filter-type="enum" :filter-options="[{ label: '闲置', value: 'idle' }, { label: '自用', value: 'active' }, { label: '已出售', value: 'sold' }, { label: '停用', value: 'disabled' }]" label="状态" width="80"><template #default="{ row }">{{ nodeStatus(row.status) }}</template></el-table-column><el-table-column column-key="expire_date" filter-type="date" prop="expire_date" label="到期日期" width="110" /></crm-table>
+          <el-pagination v-if="unboundNodeTotal > orphanPageSize" v-model:current-page="orphanPages.nodes" :page-size="orphanPageSize" :total="unboundNodeTotal" layout="prev, pager, next" small class="orphan-pagination" />
         </el-card>
       </div>
     </template>
@@ -214,12 +214,13 @@ const statusSections = computed(() => {
 })
 const orphanPageSize = 5
 const orphanPages = reactive({ accounts: 1, nodes: 1 })
+const unboundNodeTotal = ref(0)
 const pagedUnboundAccounts = computed(() => overview.value?.unbound_accounts.slice((orphanPages.accounts - 1) * orphanPageSize, orphanPages.accounts * orphanPageSize) || [])
-const pagedUnboundNodes = computed(() => overview.value?.unbound_nodes.slice((orphanPages.nodes - 1) * orphanPageSize, orphanPages.nodes * orphanPageSize) || [])
 const openAccount = (account) => router.push({ path: '/op-accounts', query: { account_id: account.id, keyword: account.account } })
 const openNode = (node) => router.push({ path: '/proxy-nodes', query: { node_id: node.id } })
 const distributionPageSize = 5
 const distributionPages = reactive({ cost: 1, revenue: 1 })
+const distributionTotals = reactive({ cost: 0, revenue: 0 })
 const distributions = computed(() => {
   const items = [
     { key: 'cost', label: '采购渠道分布', column: '渠道', rows: overview.value?.finance.cost_by_channel || [] },
@@ -228,8 +229,7 @@ const distributions = computed(() => {
   return items.map(item => ({
     ...item,
     page: distributionPages[item.key],
-    pageSize: distributionPageSize,
-    pageRows: item.rows.slice((distributionPages[item.key] - 1) * distributionPageSize, distributionPages[item.key] * distributionPageSize)
+    pageSize: distributionPageSize
   }))
 })
 const issues = computed(() => {

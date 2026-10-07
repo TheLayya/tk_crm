@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.models.work_item import WorkItem, WorkItemCategorySettings
 from app.models.team import User
 from app.services.auth_service import require_permission
+from app.services.table_query_service import apply_table_rows, field_kind, parse_table_filters
 
 router = APIRouter(prefix="/work-items", tags=["Work items"])
 WORK_ITEM_CATEGORIES = ("采购渠道", "VPS续费", "未结款项", "团队任务", "账号/节点", "其他")
@@ -115,6 +116,9 @@ def list_work_items(
     status: str = Query("pending"),
     category: Optional[str] = Query(None),
     mine: bool = Query(False),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Literal["asc", "desc"] = Query("asc"),
+    table_filters: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("work_item:view")),
 ) -> dict[str, object]:
@@ -134,7 +138,16 @@ def list_work_items(
     if keyword:
         needle = keyword.casefold()
         items = [item for item in items if needle in item.title.casefold() or needle in (item.content or "").casefold()]
-    return {"items": [_serialize(item) for item in items], "total": len(items)}
+    rows = [_serialize(item) for item in items]
+    fields = {name: field_kind(getattr(WorkItem, name)) for name in (
+        "id", "title", "category", "content", "remind_at", "is_done", "created_by", "created_at", "updated_at"
+    )}
+    fields["reminder_users"] = "text"
+    parsed = parse_table_filters(table_filters, fields)
+    parse_table_filters({name: condition for name, condition in parsed.items() if name != "reminder_users"},
+                        {name: getattr(WorkItem, name) for name in fields if name != "reminder_users"})
+    rows = apply_table_rows(rows, fields, sort_by, sort_order, parsed)
+    return {"items": rows, "total": len(rows)}
 
 
 @router.get("/summary", response_model=None)

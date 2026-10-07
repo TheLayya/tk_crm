@@ -43,23 +43,23 @@
       </el-form>
 
       <!-- 桌面端表格 -->
-      <el-table v-if="!isMobile" :data="members" v-loading="loading" stripe>
-        <el-table-column prop="username" label="用户名" />
-        <el-table-column prop="real_name" label="姓名" />
-        <el-table-column label="部门">
+      <crm-table table-id="team-members" remote :query="tableQuery" @query-change="handleTableQuery" v-if="!isMobile" :data="members" v-loading="loading" stripe>
+        <el-table-column column-key="username" filter-type="text" prop="username" label="用户名" />
+        <el-table-column column-key="real_name" filter-type="text" prop="real_name" label="姓名" />
+        <el-table-column column-key="department_name" prop="department_name" filter-type="text" label="部门">
           <template #default="{ row }">{{ row.department_name || '未分配' }}</template>
         </el-table-column>
-        <el-table-column label="角色">
+        <el-table-column column-key="roles" prop="roles" filter-type="text" label="角色">
           <template #default="{ row }">
             <el-tag v-for="r in row.roles" :key="r.id" size="small" style="margin-right:4px">{{ r.name }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态">
+        <el-table-column column-key="is_active" prop="is_active" filter-type="enum" :filter-options="[{ label: '启用', value: true }, { label: '禁用', value: false }]" label="状态">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'danger'">{{ row.is_active ? '启用' : '禁用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="350" fixed="right">
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="350" fixed="right">
           <template #default="{ row }">
             <el-button v-permission="'team:member:edit'" link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button v-permission="'team:log:view'" link type="primary" size="small" @click="emit('view-logs', row.username)">操作记录</el-button>
@@ -77,7 +77,7 @@
             </el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
 
       <!-- 移动端卡片列表 -->
       <div v-if="isMobile" class="ios-card-list" v-loading="loading">
@@ -172,6 +172,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Lock, Unlock, Delete } from '@element-plus/icons-vue'
@@ -186,6 +187,9 @@ const authStore = useAuthStore()
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
 const onResize = () => { windowWidth.value = window.innerWidth }
+
+const { tableQuery, queryParams } = useTableQuery('team-members')
+const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; page.value = 1; loadMembers() }
 
 const members = ref([])
 const loading = ref(false)
@@ -230,7 +234,7 @@ const flattenDepts = (nodes, result = []) => {
 const loadMembers = async () => {
   loading.value = true
   try {
-    const params = { page: page.value, size: pageSize.value }
+    const params = { ...queryParams.value, page: page.value, size: pageSize.value }
     if (filters.value.dept_id) params.dept_id = filters.value.dept_id
     if (filters.value.username) params.username = filters.value.username
     if (filters.value.is_active !== null && filters.value.is_active !== undefined) params.is_active = filters.value.is_active

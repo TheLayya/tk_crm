@@ -8,11 +8,12 @@ import logging
 import json
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
 from fastapi import status as http_status
 from sqlalchemy.orm import Session
+from sqlalchemy import Integer, String, and_, case, cast as sql_cast, func, or_, select
 from pydantic import BaseModel
 
 from app.core.database import get_db
@@ -36,6 +37,7 @@ from app.services.auth_service import get_current_user_from_header, require_perm
 from app.services.asset_scope_service import get_scope_user_ids, get_scope_usernames, get_visible_node_ids, scoped_op_accounts
 from app.models.team import User, OperationLog
 from app.models.proxy_node import ProxyNode
+from app.services.table_query_service import apply_table_query, model_table_fields
 import threading
 
 _relation_lock = threading.RLock()
@@ -111,6 +113,9 @@ def list_nodes(
     sale_customer: Optional[str] = Query(None),
     expire_date_from: Optional[date] = Query(None),
     expire_date_to: Optional[date] = Query(None),
+    sort_by: str | None = None,
+    sort_order: Literal["asc", "desc"] = "asc",
+    table_filters: str | None = None,
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_permission("proxy_node:view")),
 ) -> dict[str, object]:
@@ -125,11 +130,33 @@ def list_nodes(
             expire_date_to=expire_date_to,
         )
         visible_ids = _allowed_node_ids(db, _current_user)
-        nodes, total = proxy_node_service.get_nodes(
-            db, filter=f, skip=skip, limit=limit, allowed_node_ids=visible_ids
-        )
         allowed_owner_ids = get_scope_user_ids(db, _current_user)
-        all_devices = db.query(Device).filter(Device.is_deleted == False).all()
+        linked_ids = func.json_each(Device.node_ids).table_valued("value").alias("linked_node")
+        linked_devices_query = db.query(Device).filter(Device.is_deleted.is_(False), or_(
+            and_(func.coalesce(func.json_array_length(Device.node_ids), 0) == 0,
+                 Device.node_id == ProxyNode.id),
+            select(linked_ids.c.value).where(sql_cast(linked_ids.c.value, Integer) == ProxyNode.id)
+                .correlate(Device, ProxyNode).exists(),
+        ))
+        if allowed_owner_ids is not None:
+            linked_devices_query = linked_devices_query.filter(Device.owner_id.in_(allowed_owner_ids))
+        linked_accounts_query = scoped_op_accounts(db, _current_user).filter(OpAccount.node_id == ProxyNode.id)
+        extra_fields = {
+            "device_name": linked_devices_query.with_entities(Device.name).order_by(Device.id).limit(1)
+                .correlate(ProxyNode).scalar_subquery(),
+            "devices": linked_devices_query.with_entities(sql_cast(func.group_concat(Device.name, " "), String))
+                .correlate(ProxyNode).scalar_subquery(),
+            "account_count": linked_accounts_query.with_entities(func.count(OpAccount.id))
+                .correlate(ProxyNode).scalar_subquery(),
+            "accounts": linked_accounts_query.with_entities(sql_cast(func.group_concat(
+                OpAccount.account + " " + func.coalesce(OpAccount.nickname, ""), " "), String))
+                .correlate(ProxyNode).scalar_subquery(),
+        }
+        nodes, total = proxy_node_service.get_nodes(
+            db, filter=f, skip=skip, limit=limit, allowed_node_ids=visible_ids,
+            sort_by=sort_by, sort_order=sort_order, table_filters=table_filters, extra_fields=extra_fields,
+        )
+        all_devices = db.query(Device).filter(Device.is_deleted == False).order_by(Device.id).all()
         for n in nodes:
             linked_devices = [d for d in all_devices if n.id in ((d.node_ids or []) or ([d.node_id] if d.node_id else []))]
             if allowed_owner_ids is not None:
@@ -158,6 +185,8 @@ def list_nodes(
             } for a in accounts])
         items = [ProxyNodeResponse.model_validate(n) for n in nodes]
         return {"items": items, "total": total}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"list_nodes failed: {e}")
         raise HTTPException(
@@ -498,6 +527,9 @@ def get_node_logs(
     node_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
+    sort_by: str | None = None,
+    sort_order: Literal["asc", "desc"] = "asc",
+    table_filters: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("proxy_node:view")),
 ) -> dict[str, object]:
@@ -512,13 +544,22 @@ def get_node_logs(
     query = db.query(OperationLog).filter(
         OperationLog.module.in_(["节点管理", "节点关联"]), OperationLog.summary.in_(paths),
     )
+    fields = model_table_fields(OperationLog)
+    fields["summary"] = case(
+        (OperationLog.summary.endswith("/relation"), "调整关联"),
+        (OperationLog.action == "UPDATE", "修改节点资料"),
+        (OperationLog.action == "DELETE", "删除节点"),
+        (OperationLog.action == "VIEW_SECRET", "查看节点连接凭据"), else_=OperationLog.action,
+    )
+    query = apply_table_query(query, fields, sort_by, sort_order, table_filters,
+                              stable_column=OperationLog.id, default_sort=(OperationLog.created_at, "desc"))
     return {
         "total": query.count(),
         "items": [{"id": log.id, "username": log.username, "action": log.action,
                    "result": log.result, "summary": "调整关联" if cast(str, log.summary).endswith("/relation") else
                    {"UPDATE": "修改节点资料", "DELETE": "删除节点", "VIEW_SECRET": "查看节点连接凭据"}.get(log.action, log.action),
                    "created_at": log.created_at}
-                  for log in query.order_by(OperationLog.created_at.desc(), OperationLog.id.desc()).offset(skip).limit(limit).all()],
+                  for log in query.offset(skip).limit(limit).all()],
     }
 
 

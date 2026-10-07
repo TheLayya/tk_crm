@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 
 import openpyxl
 import pytest
+from fastapi import HTTPException
 
 from app.models.monitor import (
     MonitorAccount, MonitorHistory, MonitorProxy, MonitorSettings, Project, ProjectMember,
@@ -84,7 +85,7 @@ def test_first_check_runs_with_its_own_isolated_session(db, session_factory, mon
     assert account.follower_count == 12
     assert db.query(MonitorHistory).one().check_status == "success"
     assert db.query(Video).one().play_count == 31
-    videos.assert_awaited_once_with("first-sec", proxy=None, max_count=20)
+    videos.assert_awaited_once_with("first-sec", proxy=None, max_count=20, timeout=30)
 
 
 @pytest.mark.parametrize("proxy_mode", ["disabled", "assigned", "random", "empty"])
@@ -115,8 +116,8 @@ def test_collection_updates_profile_and_existing_videos(db, monkeypatch, proxy_m
     monkeypatch.setattr(monitor_service.scraper_service, "fetch_user_info", profile)
     monkeypatch.setattr(monitor_service.scraper_service, "fetch_user_videos", fetch)
     history = asyncio.run(monitor_service.check_account(db, account))
-    profile.assert_awaited_once_with("collector", proxy=proxy)
-    fetch.assert_awaited_once_with("sec-new", proxy=proxy, max_count=7)
+    profile.assert_awaited_once_with("collector", proxy=proxy, timeout=30)
+    fetch.assert_awaited_once_with("sec-new", proxy=proxy, max_count=7, timeout=30)
     assert (account.nickname, account.tiktok_id, account.region) == ("Collected", "user-id", "US")
     assert (history.follower_count, history.following_count, history.like_count, history.video_count) == (23, 4, 54, 2)
     assert history.check_status == "success" and history.error_message is None
@@ -172,7 +173,9 @@ def test_video_collection_snapshots_each_refresh_and_handles_absent_id(db, monke
         {"title": "No video id"},
     ]})
     monkeypatch.setattr(video_service.scraper_service, "fetch_user_videos", fetch)
-    assert asyncio.run(video_service.fetch_and_save_videos(db, account)) == 0
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(video_service.fetch_and_save_videos(db, account))
+    assert exc.value.status_code == 422
     fetch.assert_not_awaited()
     account.sec_uid = "sec"
     db.commit()
@@ -184,7 +187,9 @@ def test_video_collection_snapshots_each_refresh_and_handles_absent_id(db, monke
     assert db.query(Video).one().play_count == 50
     assert [row.play_count for row in video_service.get_video_stats(db, saved.id)] == [5, 50]
     fetch.return_value = {"success": False, "error": "offline"}
-    assert asyncio.run(video_service.fetch_and_save_videos(db, account)) == 0
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(video_service.fetch_and_save_videos(db, account))
+    assert exc.value.status_code == 502
     assert db.query(VideoStats).count() == 2
 
 

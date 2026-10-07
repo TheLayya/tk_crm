@@ -35,7 +35,6 @@
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-            <el-button plain @click="showColumnConfig = true"><el-icon><Setting /></el-icon>列配置</el-button>
           </template>
         </div>
       </div>
@@ -64,9 +63,9 @@
 
     <!-- 表格 -->
     <el-card>
-      <el-table ref="opAccountTable" row-key="id" v-if="!isMobile" :data="accounts" v-loading="loading" @selection-change="handleSelectionChange" @row-dblclick="handleRowDblClick" border size="small">
-        <el-table-column type="selection" width="40" fixed="left" />
-        <el-table-column type="expand" width="36" fixed="left">
+      <crm-table table-id="op-accounts" legacy-column-config="op_accounts_column_config_compact" remote :query="tableQuery" @query-change="handleTableQuery" ref="opAccountTable" row-key="id" v-if="!isMobile" :data="accounts" v-loading="loading" @selection-change="handleSelectionChange" @row-dblclick="handleRowDblClick" border size="small">
+        <el-table-column column-key="selection" table-tools-disabled type="selection" width="40" fixed="left" />
+        <el-table-column column-key="expand" table-tools-disabled type="expand" width="36" fixed="left">
           <template #default="{ row }">
             <div class="op-inline-details">
               <el-alert v-if="row.collect_status === 'failed' && !isCollecting(row.id)" :title="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号已不可访问：TikTok 提示找不到此账号' : row.collect_error?.startsWith('VIDEO_COLLECTION_FAILED:') ? '账号基础数据已更新，视频采集未完成' : '采集未完成，当前账号状态尚未确认'" :description="row.collect_error?.startsWith('VIDEO_COLLECTION_FAILED:') ? '视频保留上次采集记录，请稍后重新采集。' : '下方粉丝和视频仅为历史记录，不代表当前数据；请打开 TikTok 主页核实。'" :type="row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'error' : 'warning'" :closable="false" show-icon />
@@ -159,12 +158,12 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="平台" width="100" fixed="left">
+        <el-table-column column-key="platform" prop="platform" filter-type="enum" :filter-options="[{ label: 'TikTok', value: 'tiktok' }, { label: 'YouTube', value: 'youtube' }, { label: 'Instagram', value: 'instagram' }, { label: 'Facebook', value: 'facebook' }, { label: 'Gmail', value: 'gmail' }]" label="平台" width="100" fixed="left">
           <template #default="{ row }">
             <span :class="['op-platform-badge', `op-platform-badge--${row.platform}`]">{{ row.platform?.toUpperCase() }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="filters.platform === 'gmail' ? '邮箱' : '账号'" min-width="200" fixed="left">
+        <el-table-column column-key="account" prop="account" filter-type="text" :table-fields="[{ prop: 'account', label: '账号', type: 'text' }, { prop: 'nickname', label: '昵称', type: 'text' }]" :label="filters.platform === 'gmail' ? '邮箱' : '账号'" min-width="200" fixed="left">
           <template #default="{ row }">
             <div
               class="account-cell"
@@ -191,23 +190,23 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="filters.platform !== 'gmail'" label="粉丝数" width="100" align="right"><template #default="{ row }">{{ formatNum(row.follower_count) }}</template></el-table-column>
-        <el-table-column v-if="filters.platform !== 'gmail'" label="粉丝变化" width="110" align="right"><template #default="{ row }"><el-tooltip :content="row.followers_change == null ? '首次采集后，需再成功采集一次才能对比粉丝变化' : '最近两次成功采集的粉丝变化'"><span :class="row.followers_change > 0 ? 'op-delta-up' : row.followers_change < 0 ? 'op-delta-down' : 'op-delta-neutral'">{{ row.followers_change == null ? '暂无对比' : (row.followers_change > 0 ? '+' : '') + row.followers_change }}</span></el-tooltip></template></el-table-column>
-        <el-table-column v-if="filters.platform !== 'gmail'" label="昨日更新（北京时间）" width="170"><template #default="{ row }">{{ row.yesterday_video_count == null ? '视频数据待采集' : row.yesterday_video_count > 0 ? '已更新 ' + row.yesterday_video_count + ' 条' : '未发现更新' }}</template></el-table-column>
-        <el-table-column v-if="filters.platform !== 'gmail'" label="昨日视频流量" min-width="170"><template #default="{ row }"><el-tooltip content="昨日发布视频的最新累计播放量，不是昨日新增播放；按发布时间从新到旧排列。"><span>{{ row.yesterday_video_plays == null ? '暂无可靠数据' : row.yesterday_video_plays.join(' / ') || '—' }}</span></el-tooltip></template></el-table-column>
-        <el-table-column v-if="filters.platform === 'gmail'" label="辅助邮箱" min-width="180"><template #default="{ row }">{{ row.recovery_email || '—' }}</template></el-table-column>
-        <el-table-column label="绑定终端" width="140">
+        <el-table-column column-key="follower_count" prop="follower_count" filter-type="number" v-if="filters.platform !== 'gmail'" label="粉丝数" width="100" align="right"><template #default="{ row }">{{ formatNum(row.follower_count) }}</template></el-table-column>
+        <el-table-column column-key="followers_change" prop="followers_change" filter-type="number" v-if="filters.platform !== 'gmail'" label="粉丝变化" width="110" align="right"><template #default="{ row }"><el-tooltip :content="row.followers_change == null ? '首次采集后，需再成功采集一次才能对比粉丝变化' : '最近两次成功采集的粉丝变化'"><span :class="row.followers_change > 0 ? 'op-delta-up' : row.followers_change < 0 ? 'op-delta-down' : 'op-delta-neutral'">{{ row.followers_change == null ? '暂无对比' : (row.followers_change > 0 ? '+' : '') + row.followers_change }}</span></el-tooltip></template></el-table-column>
+        <el-table-column column-key="yesterday_video_count" prop="yesterday_video_count" filter-type="number" v-if="filters.platform !== 'gmail'" label="昨日更新（北京时间）" width="170"><template #default="{ row }">{{ row.yesterday_video_count == null ? '视频数据待采集' : row.yesterday_video_count > 0 ? '已更新 ' + row.yesterday_video_count + ' 条' : '未发现更新' }}</template></el-table-column>
+        <el-table-column column-key="yesterday_video_plays" prop="yesterday_video_plays" filter-type="number" v-if="filters.platform !== 'gmail'" label="昨日视频流量" min-width="170"><template #default="{ row }"><el-tooltip content="昨日发布视频的最新累计播放量，不是昨日新增播放；按发布时间从新到旧排列。排序和筛选按这些播放量合计。"><span>{{ row.yesterday_video_plays == null ? '暂无可靠数据' : row.yesterday_video_plays.join(' / ') || '—' }}</span></el-tooltip></template></el-table-column>
+        <el-table-column column-key="recovery_email" prop="recovery_email" filter-type="text" v-if="filters.platform === 'gmail'" label="辅助邮箱" min-width="180"><template #default="{ row }">{{ row.recovery_email || '—' }}</template></el-table-column>
+        <el-table-column column-key="device_name" prop="device_name" filter-type="text" label="绑定终端" width="140">
           <template #default="{ row }">{{ row.device_name || '未绑定' }}</template>
         </el-table-column>
-        <el-table-column label="绑定节点" width="140">
+        <el-table-column column-key="node_ip" prop="node_ip" filter-type="text" label="绑定节点" width="140">
           <template #default="{ row }">{{ row.node_ip || '未绑定' }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="80">
+        <el-table-column column-key="status" prop="status" filter-type="enum" :filter-options="[{ label: '正常', value: '正常' }, { label: '自用', value: '自用' }, { label: '封禁', value: '封禁' }, { label: '已售', value: '已售' }]" label="状态" width="80">
           <template #default="{ row }">
             <span :class="['op-status-badge', `op-status-badge--${statusKey(row.status)}`]">{{ row.status }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('password')" :label="filters.platform === 'gmail' ? '邮箱密码' : '密码'" width="120">
+        <el-table-column column-key="password" table-tools-disabled legacy-column-group="password" prop="password" filter-type="text" default-hidden  :label="filters.platform === 'gmail' ? '邮箱密码' : '密码'" width="120">
           <template #default="{ row }">
             <div class="secret-cell">
               <span>{{ visibleFields[row.id]?.password ? row.password : '••••••' }}</span>
@@ -217,7 +216,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('totp_secret')" label="2FA" width="120">
+        <el-table-column column-key="totp_secret" table-tools-disabled legacy-column-group="totp_secret" prop="totp_secret" filter-type="text" default-hidden  label="2FA" width="120">
           <template #default="{ row }">
             <div class="secret-cell">
               <span>{{ visibleFields[row.id]?.totp_secret ? row.totp_secret : (row.totp_secret ? '••••••' : '-') }}</span>
@@ -227,10 +226,10 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('email')" label="绑定邮箱" min-width="160">
+        <el-table-column column-key="email" legacy-column-group="email" prop="email" filter-type="text" default-hidden  label="绑定邮箱" min-width="160">
           <template #default="{ row }">{{ row.email || '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="colVisible('email_password')" label="邮箱密码" width="120">
+        <el-table-column column-key="email_password" table-tools-disabled legacy-column-group="email_password" prop="email_password" filter-type="text" default-hidden  label="邮箱密码" width="120">
           <template #default="{ row }">
             <div class="secret-cell">
               <span>{{ visibleFields[row.id]?.email_password ? row.email_password : (row.email_password ? '••••••' : '-') }}</span>
@@ -240,39 +239,39 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('phone')" label="手机号" width="130">
+        <el-table-column column-key="phone" legacy-column-group="phone" prop="phone" filter-type="text" default-hidden  label="手机号" width="130">
           <template #default="{ row }">{{ row.phone || '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="colVisible('country')" label="国家" width="80">
+        <el-table-column column-key="country" legacy-column-group="country" prop="country" filter-type="text"  label="国家" width="80">
           <template #default="{ row }">{{ row.country || '-' }}</template>
         </el-table-column>
         <!-- TikTok 专属 -->
-        <el-table-column v-if="colVisible('tiktok_perms') && (!filters.platform || filters.platform === 'tiktok')" label="中视频" width="70" align="center">
+        <el-table-column column-key="tiktok_mid_video" legacy-column-group="tiktok_perms" prop="tiktok_mid_video" filter-type="enum" :filter-options="[{ label: '是', value: true }, { label: '否', value: false }]" default-hidden v-if="(!filters.platform || filters.platform === 'tiktok')" label="中视频" width="70" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.platform==='tiktok'" :type="row.tiktok_mid_video ? 'success' : 'info'" size="small">{{ row.tiktok_mid_video ? '是' : '否' }}</el-tag>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('tiktok_perms') && (!filters.platform || filters.platform === 'tiktok')" label="橱窗" width="70" align="center">
+        <el-table-column column-key="tiktok_showcase" legacy-column-group="tiktok_perms" prop="tiktok_showcase" filter-type="enum" :filter-options="[{ label: '是', value: true }, { label: '否', value: false }]" default-hidden v-if="(!filters.platform || filters.platform === 'tiktok')" label="橱窗" width="70" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.platform==='tiktok'" :type="row.tiktok_showcase ? 'success' : 'info'" size="small">{{ row.tiktok_showcase ? '是' : '否' }}</el-tag>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('tiktok_perms') && (!filters.platform || filters.platform === 'tiktok')" label="手机直播" width="80" align="center">
+        <el-table-column column-key="tiktok_phone_live" legacy-column-group="tiktok_perms" prop="tiktok_phone_live" filter-type="enum" :filter-options="[{ label: '是', value: true }, { label: '否', value: false }]" default-hidden v-if="(!filters.platform || filters.platform === 'tiktok')" label="手机直播" width="80" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.platform==='tiktok'" :type="row.tiktok_phone_live ? 'success' : 'info'" size="small">{{ row.tiktok_phone_live ? '是' : '否' }}</el-tag>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('tiktok_perms') && (!filters.platform || filters.platform === 'tiktok')" label="伴侣直播" width="80" align="center">
+        <el-table-column column-key="tiktok_partner_live" legacy-column-group="tiktok_perms" prop="tiktok_partner_live" filter-type="enum" :filter-options="[{ label: '是', value: true }, { label: '否', value: false }]" default-hidden v-if="(!filters.platform || filters.platform === 'tiktok')" label="伴侣直播" width="80" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.platform==='tiktok'" :type="row.tiktok_partner_live ? 'success' : 'info'" size="small">{{ row.tiktok_partner_live ? '是' : '否' }}</el-tag>
             <span v-else>-</span>
           </template>
         </el-table-column>
         <!-- 采集字段 -->
-        <el-table-column v-if="colVisible('collected_ids')" label="平台UID" width="160">
+        <el-table-column column-key="platform_user_id" legacy-column-group="collected_ids" prop="platform_user_id" filter-type="text" :table-fields="[{ prop: 'platform_user_id', label: '平台ID', type: 'text' }, { prop: 'platform_sec_uid', label: 'SEC UID', type: 'text' }]" default-hidden  label="平台UID" width="160">
           <template #default="{ row }">
             <div style="font-size:11px;line-height:1.6">
               <div v-if="row.platform_user_id"><span style="color:#909399">ID:</span> {{ row.platform_user_id }}</div>
@@ -286,55 +285,55 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="filters.platform === 'gmail' || colVisible('account_created_at')" label="注册时间" width="150">
+        <el-table-column column-key="account_created_at" legacy-column-group="account_created_at" prop="account_created_at" filter-type="date" :table-fields="[{ prop: 'account_created_at', label: '注册日期', type: 'date' }, { prop: 'account_created_year', label: '注册年份', type: 'number' }]" :default-hidden="filters.platform !== 'gmail'" label="注册时间" width="150">
           <template #default="{ row }">
             <span style="font-size:12px">{{ row.account_created_at ? formatDate(row.account_created_at) : row.account_created_year || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="colVisible('last_collected_at')" label="最后采集" width="100">
+        <el-table-column column-key="last_collected_at" legacy-column-group="last_collected_at" prop="last_collected_at" filter-type="date" default-hidden  label="最后采集" width="100">
           <template #default="{ row }">
             <span style="font-size:12px">{{ row.last_collected_at ? formatDate(row.last_collected_at) : '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="filters.platform !== 'gmail' && colVisible('collect_status')" label="采集状态" width="90">
+        <el-table-column column-key="collect_status" legacy-column-group="collect_status" prop="collect_status" filter-type="enum" :filter-options="[{ label: '待采集', value: 'pending' }, { label: '不支持', value: 'unsupported' }, { label: '成功', value: 'success' }, { label: '失败', value: 'failed' }]" v-if="filters.platform !== 'gmail'" label="采集状态" width="90">
           <template #default="{ row }">
 <el-tooltip :content="collectStatusHint(row)"><el-tag :type="isCollecting(row.id) ? 'info' : row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? 'danger' : collectStatusType(row.collect_status)" size="small">{{ !isCollecting(row.id) && row.collect_error?.startsWith('ACCOUNT_NOT_FOUND:') ? '账号不存在' : collectStatusLabel(row.collect_status, isCollecting(row.id)) }}</el-tag></el-tooltip>
           </template>
         </el-table-column>
         <!-- 采购 -->
-        <el-table-column v-if="colVisible('purchase')" label="采购渠道" width="110">
+        <el-table-column column-key="purchase_channel" legacy-column-group="purchase" prop="purchase_channel" filter-type="text" default-hidden  label="采购渠道" width="110">
           <template #default="{ row }">{{ row.purchase_channel || '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="colVisible('purchase')" label="采购金额" width="90" align="right">
+        <el-table-column column-key="purchase_price" legacy-column-group="purchase" prop="purchase_price" filter-type="number" default-hidden  label="采购金额" width="90" align="right">
           <template #default="{ row }">{{ row.purchase_price != null ? '¥'+row.purchase_price : '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="colVisible('purchase')" label="采购日期" width="100">
+        <el-table-column column-key="purchase_date" legacy-column-group="purchase" prop="purchase_date" filter-type="date" default-hidden  label="采购日期" width="100">
           <template #default="{ row }">{{ row.purchase_date || '-' }}</template>
         </el-table-column>
         <!-- 出售 -->
-        <el-table-column v-if="colVisible('sale')" label="出售客户" width="110">
+        <el-table-column column-key="sale_customer" legacy-column-group="sale" prop="sale_customer" filter-type="text" default-hidden  label="出售客户" width="110">
           <template #default="{ row }">{{ row.sale_customer || '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="colVisible('sale')" label="出售金额" width="90" align="right">
+        <el-table-column column-key="sale_price" legacy-column-group="sale" prop="sale_price" filter-type="number" default-hidden  label="出售金额" width="90" align="right">
           <template #default="{ row }">{{ row.sale_price != null ? '¥'+row.sale_price : '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="colVisible('sale')" label="出售日期" width="100">
+        <el-table-column column-key="sale_date" legacy-column-group="sale" prop="sale_date" filter-type="date" default-hidden  label="出售日期" width="100">
           <template #default="{ row }">{{ row.sale_date || '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="colVisible('sale')" label="出售人" width="120">
+        <el-table-column column-key="sellers" legacy-column-group="sale" prop="sellers" filter-type="text" default-hidden  label="出售人" width="120">
           <template #default="{ row }">
             <span v-if="row.sellers && row.sellers.length">{{ row.sellers.join('、') }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
         <!-- 人员 -->
-        <el-table-column v-if="colVisible('people')" label="注册人" width="90">
+        <el-table-column column-key="registrant" legacy-column-group="people" prop="registrant" filter-type="text"  label="注册人" width="90">
           <template #default="{ row }">{{ row.registrant || '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="colVisible('people')" label="使用人" width="90">
+        <el-table-column column-key="operator" legacy-column-group="people" prop="operator" filter-type="text"  label="使用人" width="90">
           <template #default="{ row }">{{ row.operator || '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="colVisible('remark')" label="备注" min-width="120">
+        <el-table-column column-key="remark" legacy-column-group="remark" prop="remark" filter-type="text" default-hidden  label="备注" min-width="120">
           <template #default="{ row }">
             <el-tooltip v-if="row.remark && row.remark.length > 20" :content="row.remark" placement="top">
               <span>{{ row.remark.substring(0, 20) }}...</span>
@@ -342,12 +341,12 @@
             <span v-else>{{ row.remark || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="filters.platform === 'gmail'" label="添加时间" width="150"><template #default="{ row }">{{ formatDate(row.created_at) }}</template></el-table-column>
-        <el-table-column v-if="accounts.some(row => row.platform === 'gmail')" label="Gmail 检测" width="110">
+        <el-table-column column-key="created_at" prop="created_at" filter-type="date" v-if="filters.platform === 'gmail'" label="添加时间" width="150"><template #default="{ row }">{{ formatDate(row.created_at) }}</template></el-table-column>
+        <el-table-column column-key="gmail_check_status" prop="gmail_check_status" filter-type="text" v-if="accounts.some(row => row.platform === 'gmail')" label="Gmail 检测" width="110">
           <template #default="{ row }"><el-tooltip v-if="row.platform === 'gmail'" :content="gmailCheckHint(row)"><el-tag :type="gmailCheckTagType(row.gmail_check_status)" size="small">{{ row.gmail_check_status || '未检测' }}</el-tag></el-tooltip><span v-else>—</span></template>
         </el-table-column>
-        <el-table-column v-if="filters.platform === 'gmail'" label="最后检测" width="150"><template #default="{ row }">{{ row.gmail_checked_at ? formatDate(row.gmail_checked_at) : '—' }}</template></el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column column-key="gmail_checked_at" prop="gmail_checked_at" filter-type="date" v-if="filters.platform === 'gmail'" label="最后检测" width="150"><template #default="{ row }">{{ row.gmail_checked_at ? formatDate(row.gmail_checked_at) : '—' }}</template></el-table-column>
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="success" size="small" @click="openRelation(row)">关联</el-button>
             <el-tooltip content="编辑"><el-button link type="primary" size="small" @click="handleEdit(row)"><el-icon><Edit /></el-icon></el-button></el-tooltip>
@@ -357,7 +356,7 @@
             <el-tooltip content="删除"><el-button link type="danger" size="small" @click="handleDelete(row)"><el-icon><Delete /></el-icon></el-button></el-tooltip>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
 
       <!-- 移动端卡片列表 -->
       <div v-if="isMobile" v-loading="loading" class="ios-card-list">
@@ -673,23 +672,23 @@
           <el-descriptions-item label="重复"><span style="color:#E6A23C">{{ importResult.duplicates }}</span></el-descriptions-item>
           <el-descriptions-item label="失败"><span style="color:#F56C6C">{{ importResult.failed }}</span></el-descriptions-item>
         </el-descriptions>
-        <el-table
+        <crm-table table-id="op-account-import-failures"
           v-if="importResult.rows?.some(row => row._result === 'failed')"
           :data="importResult.rows.filter(row => row._result === 'failed')"
           size="small"
           border
           style="margin-top:12px; max-height:240px; overflow:auto"
         >
-          <el-table-column label="账号" min-width="160">
+          <el-table-column column-key="account" prop="account" filter-type="text" label="账号" min-width="160">
             <template #default="scope">{{ scope.row.account || '-' }}</template>
           </el-table-column>
-          <el-table-column label="平台" width="110">
+          <el-table-column column-key="platform" prop="platform" filter-type="enum" :filter-options="[{ label: 'TikTok', value: 'tiktok' }, { label: 'YouTube', value: 'youtube' }, { label: 'Instagram', value: 'instagram' }, { label: 'Facebook', value: 'facebook' }, { label: 'Gmail', value: 'gmail' }]" label="平台" width="110">
             <template #default="scope">{{ scope.row.platform || '-' }}</template>
           </el-table-column>
-          <el-table-column label="失败原因" min-width="280">
+          <el-table-column column-key="_reason" prop="_reason" filter-type="text" label="失败原因" min-width="280">
             <template #default="scope">{{ scope.row._reason || '数据校验失败' }}</template>
           </el-table-column>
-        </el-table>
+        </crm-table>
       </div>
       <template #footer>
         <el-button @click="showImportDialog = false; importResult = null">关闭</el-button>
@@ -697,18 +696,6 @@
       </template>
     </el-dialog>
 
-    <!-- 列配置对话框 -->
-    <el-dialog v-model="showColumnConfig" title="列显示配置" width="400px">
-      <el-checkbox-group v-model="visibleColumns">
-        <div v-for="col in columnOptions" :key="col.key" style="margin-bottom:8px">
-          <el-checkbox :label="col.key">{{ col.label }}</el-checkbox>
-        </div>
-      </el-checkbox-group>
-      <template #footer>
-        <el-button @click="showColumnConfig = false">关闭</el-button>
-        <el-button type="primary" @click="saveColumnConfig">保存</el-button>
-      </template>
-    </el-dialog>
 
     <!-- 账号详情对话框 -->
     <el-dialog v-model="detailDialog.visible" width="680px" top="5vh" class="op-detail-dialog" :show-close="true">
@@ -831,6 +818,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter, useRoute } from 'vue-router'
@@ -937,42 +925,15 @@ const tiktokPerms = [
   { key: 'tiktok_partner_live', label: '伴侣直播' },
 ]
 
+const { tableQuery, queryParams } = useTableQuery('op-accounts')
+const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; pagination.page = 1; loadAccounts() }
+
 const filters = reactive({
   platform: null, status: null,
   keyword: '', purchase_channel: '', sale_customer: ''
 })
 const pagination = reactive({ page: 1, limit: 50, total: 0 })
 
-// ===== 列配置 =====
-const COLUMN_CONFIG_KEY = 'op_accounts_column_config_compact'
-const columnOptions = [
-  { key: 'password', label: '密码' },
-  { key: 'totp_secret', label: '2FA密钥' },
-  { key: 'email', label: '绑定邮箱' },
-  { key: 'email_password', label: '邮箱密码' },
-  { key: 'phone', label: '手机号' },
-  { key: 'country', label: '国家/地区' },
-  { key: 'tiktok_perms', label: 'TikTok权限' },
-  { key: 'collected_ids', label: '平台UID/SEC' },
-  { key: 'account_created_at', label: '账号注册时间' },
-  { key: 'last_collected_at', label: '最后采集时间' },
-  { key: 'collect_status', label: '采集状态' },
-  { key: 'purchase', label: '采购信息' },
-  { key: 'sale', label: '出售信息' },
-  { key: 'people', label: '注册人/使用人' },
-  { key: 'remark', label: '备注' },
-]
-const defaultColumns = ['country', 'collect_status', 'people']
-const visibleColumns = ref(
-  JSON.parse(localStorage.getItem(COLUMN_CONFIG_KEY) || 'null') || defaultColumns
-)
-const showColumnConfig = ref(false)
-const colVisible = (key) => visibleColumns.value.includes(key)
-const saveColumnConfig = () => {
-  localStorage.setItem(COLUMN_CONFIG_KEY, JSON.stringify(visibleColumns.value))
-  showColumnConfig.value = false
-  ElMessage.success('列配置已保存')
-}
 
 // ===== 加载数据 =====
 const loadAccounts = async (options = {}) => {
@@ -982,6 +943,7 @@ const loadAccounts = async (options = {}) => {
   if (!options.silent) loading.value = true
   try {
     const params = {
+      ...queryParams.value,
       skip: (pagination.page - 1) * pagination.limit,
       limit: pagination.limit,
       exclude_gmail: true,
@@ -1033,7 +995,7 @@ const statusTagType = (s) => ({ '正常': 'success', '自用': '', '封禁': 'da
 const collectStatusType = (s) => ({ success: 'success', failed: 'danger', pending: 'info', unsupported: 'warning' }[s] || 'info')
 const isCollecting = (id) => collectingIds.value.has(id)
 const collectStatusLabel = (s, collecting = false) => collecting ? '采集中' : ({ success: '成功', failed: '失败', pending: '待采集', unsupported: '不支持' }[s] || s)
-const collectStatusHint = (row) => isCollecting(row.id) ? '正在采集账号基础信息和视频' : (row.collect_error || '最近账号基础信息与视频采集结果')
+const collectStatusHint = (row) => isCollecting(row.id) ? '正在采集账号基础信息和视频' : [(row.collect_error || '最近账号基础信息与视频采集结果'), row.collect_status === 'failed' && row.next_attempt_at ? '下次尝试：' + formatDate(row.next_attempt_at) + '（短重试 ' + (row.collect_retry_count || 0) + '/3）' : ''].filter(Boolean).join('；')
 const videoComponentKey = (row) => `${row.id}:${row.video_source || 'op'}:${row.video_collected_at || ''}`
 const auditActionLabel = (action) => ({ create: '新增', update: '修改', delete: '删除' }[action] || action || '-')
 const fieldLabel = (field) => ({

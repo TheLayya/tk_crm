@@ -100,6 +100,8 @@ def latest_check_summary(history: MonitorHistory | None) -> dict[str, str | None
         state = "not_found"
     elif error and "VERIFICATION_REQUIRED:" in error:
         state = "verification_required"
+    elif error and "VIDEO_COLLECTION_FAILED:" in error and state == "success":
+        state = "partial"
     return {"latest_check_status": state, "latest_check_error": error}
 
 

@@ -10,7 +10,7 @@ import threading
 from collections.abc import Mapping
 from typing import List, Optional, Tuple, TypedDict, cast
 
-from sqlalchemy import or_
+from sqlalchemy import Integer, String, case, cast as sql_cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from app.models.proxy_node import ProxyNode
 from app.models.team import User
 from app.services.auth_service import get_user_data_scope, get_dept_member_usernames
 from app.services.asset_scope_service import get_visible_node_ids
+from app.services.table_query_service import apply_table_query, apply_table_rows, field_kind, model_table_fields, parse_table_filters
 
 logger = logging.getLogger(__name__)
 _device_mutation_lock = threading.RLock()
@@ -162,6 +163,9 @@ def list_devices(
     current_user_id: Optional[int] = None,
     is_super_admin: bool = False,
     owner_ids: Optional[set[int]] = None,
+    sort_by: str | None = None,
+    sort_order: str = "asc",
+    table_filters: str | None = None,
 ) -> Tuple[List[Device], int]:
     """设备列表：非超管强制仅见自己所属；已删除设备不返回。
 
@@ -185,9 +189,27 @@ def list_devices(
     elif not is_super_admin and current_user_id is not None:
         query = query.filter(Device.owner_id == current_user_id)
 
+    first_node_id = func.coalesce(func.json_extract(Device.node_ids, "$[0]"), Device.node_id)
+    fields = model_table_fields(Device, exclude=("is_deleted", "node_ids"))
+    fields.update({
+        "owner_name": select(func.coalesce(func.nullif(User.real_name, ""), User.username)).where(
+            User.id == Device.owner_id).scalar_subquery(),
+        "node_ip": select(ProxyNode.ip + ":" + sql_cast(ProxyNode.port, String)).where(
+            ProxyNode.id == first_node_id).scalar_subquery(),
+        "node_count": sql_cast(case(
+            (func.json_array_length(Device.node_ids) > 0, func.json_array_length(Device.node_ids)),
+            (Device.node_id.isnot(None), 1), else_=0), Integer),
+        "account_name": select(OpAccount.account).where(OpAccount.device_id == Device.id).order_by(
+            OpAccount.id).limit(1).scalar_subquery(),
+        "accounts": select(sql_cast(func.group_concat(
+            OpAccount.account + " " + func.coalesce(OpAccount.nickname, ""), " "), String)).where(
+            OpAccount.device_id == Device.id).scalar_subquery(),
+    })
+    query = apply_table_query(query, fields, sort_by, sort_order, table_filters,
+                              stable_column=Device.id, default_sort=(Device.created_at, "desc"))
     total = query.count()
     devices = (
-        query.order_by(Device.created_at.desc())
+        query
         .offset(skip)
         .limit(limit)
         .all()
@@ -373,7 +395,8 @@ def soft_delete_device(db: Session, device: Device, user: User) -> None:
 
 
 def get_device_logs(
-    db: Session, device_id: int, user: User, skip: int = 0, limit: int = 100
+    db: Session, device_id: int, user: User, skip: int = 0, limit: int = 100,
+    sort_by: str | None = None, sort_order: str = "asc", table_filters: str | None = None,
 ) -> Tuple[List[DeviceLog], int]:
     """设备历史轨迹：非超管仅自己所属且未删除；超管可查已删除设备（历史可追溯）。
 
@@ -391,8 +414,21 @@ def get_device_logs(
             raise DeviceServiceError(404, "设备不存在")
 
     query = db.query(DeviceLog).filter(DeviceLog.device_id == device_id)
+    fields = model_table_fields(DeviceLog)
+    row_fields = {name: field_kind(column) for name, column in fields.items()}
+    row_fields.update({"summary": "text", "details": "text"})
+    filters = parse_table_filters(table_filters, row_fields)
+    if sort_by in {"summary", "details"} or {"summary", "details"}.intersection(filters):
+        # ponytail: readable history resolves references in Python; use SQL projections if histories become large.
+        logs = query.order_by(DeviceLog.created_at.desc(), DeviceLog.id.desc()).all()
+        rows = [{**{name: getattr(log, name) for name in fields}, **readable_device_log(db, log)} for log in logs]
+        rows = apply_table_rows(rows, row_fields, sort_by, sort_order, filters)
+        log_map = {log.id: log for log in logs}
+        return [log_map[row["id"]] for row in rows[skip:skip + limit]], len(rows)
+    query = apply_table_query(query, fields, sort_by, sort_order, filters,
+                              stable_column=DeviceLog.id, default_sort=(DeviceLog.created_at, "desc"))
     total = query.count()
-    logs = query.order_by(DeviceLog.created_at.desc()).offset(skip).limit(limit).all()
+    logs = query.offset(skip).limit(limit).all()
     return logs, total
 
 

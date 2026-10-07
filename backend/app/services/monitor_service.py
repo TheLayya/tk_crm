@@ -1,17 +1,24 @@
 import asyncio
 import logging
-from typing import Any
+import threading
+from typing import Any, cast
 from datetime import datetime, timedelta
 from typing import Optional, List, Callable
 
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
+from app.services.table_query_service import apply_table_query, model_table_fields
 
 from app.models.monitor import MonitorAccount, MonitorHistory, MonitorSettings
 from app.schemas.account import AccountCreate, AccountUpdate
 from app.schemas.settings import SettingsUpdate
-from app.services.scraper_service import scraper_service
+from app.services.scraper_service import is_retryable_result, scraper_service
 
 logger = logging.getLogger(__name__)
+
+MONITOR_TABLE_FIELDS = model_table_fields(MonitorAccount, exclude=("avatar_url", "sec_uid", "tiktok_id"))
+_checking_accounts: set[int] = set()
+_check_guard = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -24,8 +31,11 @@ def get_accounts(
     keyword: Optional[str] = None,
     is_active: Optional[bool] = None,
     skip: int = 0,
-    limit: int = 50,
+    limit: Optional[int] = 50,
     allowed_project_ids: Optional[List[int]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
+    table_filters: object = None,
 ) -> List[MonitorAccount]:
     query = db.query(MonitorAccount)
     if allowed_project_ids is not None:
@@ -40,7 +50,9 @@ def get_accounts(
         )
     if is_active is not None:
         query = query.filter(MonitorAccount.is_active == is_active)
-    return query.offset(skip).limit(limit).all()
+    return cast(List[MonitorAccount], apply_table_query(query, MONITOR_TABLE_FIELDS, sort_by, sort_order, table_filters,
+                             stable_column=MonitorAccount.id,
+                             default_sort=(MonitorAccount.id, "asc")).offset(skip).limit(limit).all())
 
 
 def count_accounts(
@@ -49,6 +61,9 @@ def count_accounts(
     keyword: Optional[str] = None,
     is_active: Optional[bool] = None,
     allowed_project_ids: Optional[List[int]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
+    table_filters: object = None,
 ) -> int:
     query = db.query(MonitorAccount)
     if allowed_project_ids is not None:
@@ -63,7 +78,9 @@ def count_accounts(
         )
     if is_active is not None:
         query = query.filter(MonitorAccount.is_active == is_active)
-    return query.count()
+    return int(apply_table_query(query, MONITOR_TABLE_FIELDS, sort_by, sort_order, table_filters,
+                             stable_column=MonitorAccount.id,
+                             default_sort=(MonitorAccount.id, "asc")).count())
 
 
 def get_account(db: Session, account_id: int) -> Optional[MonitorAccount]:
@@ -137,9 +154,23 @@ def create_account(db: Session, data: AccountCreate) -> MonitorAccount:
 
 
 async def check_account(db: Session, account: MonitorAccount) -> MonitorHistory:
+    # ponytail: single-process ownership; use a database lease before multiple workers.
+    account_id = account.id
+    with _check_guard:
+        if account_id in _checking_accounts:
+            raise HTTPException(409, "该账号已有采集进行中，请等待完成")
+        _checking_accounts.add(account_id)
+    try:
+        return await _check_account(db, account)
+    finally:
+        with _check_guard:
+            _checking_accounts.discard(account_id)
+
+
+async def _check_account(db: Session, account: MonitorAccount) -> MonitorHistory:
     """调用 scraper_service 抓取用户信息，更新账号字段，写入历史记录。"""
     proxy = None
-    
+
     if account.use_proxy:
         if account.proxy_id:
             # 用户指定了代理，使用指定的代理
@@ -148,11 +179,11 @@ async def check_account(db: Session, account: MonitorAccount) -> MonitorHistory:
             # 用户开启了代理但没有指定，从代理列表中随机选择一个启用的代理
             from app.models.monitor import MonitorProxy
             import random
-            
+
             active_proxies = db.query(MonitorProxy).filter(
                 MonitorProxy.is_active == True
             ).all()
-            
+
             if active_proxies:
                 # 随机选择一个代理
                 proxy = random.choice(active_proxies)
@@ -161,10 +192,25 @@ async def check_account(db: Session, account: MonitorAccount) -> MonitorHistory:
                 # 代理列表为空，使用本地IP
                 logger.info(f"Account {account.username}: no active proxies available, using local IP")
                 proxy = None
-    
-    result = await scraper_service.fetch_user_info(account.username, proxy=proxy)
+
+    settings = get_settings(db)
+    timeout = settings.request_timeout
+    identity = (account.project_id, account.username)
+    tried_proxy_ids = {proxy.id} if proxy else set()
+    result = await scraper_service.fetch_user_info(account.username, proxy=proxy, timeout=timeout)
+    if is_retryable_result(result) and proxy is not None and account.use_proxy and not account.proxy_id:
+        from app.models.monitor import MonitorProxy
+        alternatives = db.query(MonitorProxy).filter(MonitorProxy.is_active.is_(True), MonitorProxy.id != proxy.id).all()
+        if alternatives:
+            proxy = random.choice(alternatives)
+            tried_proxy_ids.add(proxy.id)
+            result = await scraper_service.fetch_user_info(account.username, proxy=proxy, timeout=timeout)
 
     now = datetime.utcnow()
+    current_identity = db.query(MonitorAccount.project_id, MonitorAccount.username).filter(MonitorAccount.id == account.id).one_or_none()
+    if current_identity != identity:
+        db.rollback()
+        raise HTTPException(409, "采集期间账号已修改，本次结果已丢弃，请重新采集")
 
     if result["success"] and result.get("data"):
         data = result["data"]
@@ -190,80 +236,72 @@ async def check_account(db: Session, account: MonitorAccount) -> MonitorHistory:
             error_message=None,
             checked_at=now,
         )
-        
+        db.add(history)
+        db.commit()  # Video failures must never undo an already collected profile.
+        db.refresh(history)
+
         # 如果启用了视频监控且有 sec_uid，抓取视频列表
         if account.enable_video_monitoring and account.sec_uid:
             try:
-                from app.models.video import Video
-                
                 # 获取设置中的默认视频数量
                 settings = get_settings(db)
                 max_video_count = settings.default_video_count
-                
+
                 video_result = await scraper_service.fetch_user_videos(
-                    account.sec_uid, 
+                    account.sec_uid,
                     proxy=proxy,
-                    max_count=max_video_count
+                    max_count=max_video_count,
+                    timeout=timeout,
                 )
-                if video_result["success"] and video_result.get("data"):
+                current_identity = db.query(MonitorAccount.project_id, MonitorAccount.username).filter(MonitorAccount.id == account.id).one_or_none()
+                if current_identity != identity:
+                    db.rollback()
+                    return history
+                if is_retryable_result(video_result) and proxy is not None and account.use_proxy and not account.proxy_id and len(tried_proxy_ids) < 2:
+                    from app.models.monitor import MonitorProxy
+                    alternatives = db.query(MonitorProxy).filter(MonitorProxy.is_active.is_(True), MonitorProxy.id.notin_(tried_proxy_ids)).all()
+                    if alternatives:
+                        proxy = random.choice(alternatives)
+                        tried_proxy_ids.add(proxy.id)
+                        video_result = await scraper_service.fetch_user_videos(account.sec_uid, proxy=proxy, max_count=max_video_count, timeout=timeout)
+                current_identity = db.query(MonitorAccount.project_id, MonitorAccount.username).filter(MonitorAccount.id == account.id).one_or_none()
+                if current_identity != identity:
+                    db.rollback()
+                    return history
+                if video_result["success"] and isinstance(video_result.get("data"), list):
                     videos_data = video_result["data"]
+                    if account.video_count and not videos_data:
+                        history.error_message = "VIDEO_COLLECTION_FAILED: 账号资料显示有视频，但接口返回空列表，原视频已保留"
                     logger.info(f"Account {account.username}: fetched {len(videos_data)} videos")
 
-                    # 保存或更新视频记录
+                    # Each savepoint owns only its video; history was already committed.
+                    save_error = False
                     for video_info in videos_data:
                         try:
-                            existing_video = db.query(Video).filter(
-                                Video.account_id == account.id,
-                                Video.video_id == video_info["video_id"]
-                            ).first()
-
-                            if existing_video:
-                                existing_video.title = video_info.get("title", existing_video.title)
-                                existing_video.cover_url = video_info.get("cover_url", existing_video.cover_url)
-                                existing_video.play_count = video_info.get("play_count", existing_video.play_count)
-                                existing_video.like_count = video_info.get("like_count", existing_video.like_count)
-                                existing_video.comment_count = video_info.get("comment_count", existing_video.comment_count)
-                                existing_video.share_count = video_info.get("share_count", existing_video.share_count)
-                                existing_video.updated_at = now
-                                if video_info.get("published_at"):
-                                    existing_video.published_at = datetime.utcfromtimestamp(video_info["published_at"])
-                            else:
-                                new_video = Video(
-                                    account_id=account.id,
-                                    video_id=video_info["video_id"],
-                                    title=video_info.get("title", ""),
-                                    cover_url=video_info.get("cover_url", ""),
-                                    play_count=video_info.get("play_count", 0),
-                                    like_count=video_info.get("like_count", 0),
-                                    comment_count=video_info.get("comment_count", 0),
-                                    share_count=video_info.get("share_count", 0),
-                                    published_at=datetime.utcfromtimestamp(video_info["published_at"]) if video_info.get("published_at") else None
-                                )
-                                db.add(new_video)
-                                db.flush()  # 立即写入，提前暴露冲突
+                            with db.begin_nested():
+                                _save_monitor_video(db, account.id, video_info, now)
                         except Exception as ve:
-                            logger.warning(f"Account {account.username}: skip video {video_info.get('video_id')} - {ve}")
-                            db.rollback()
-                            # rollback 后重新查一次，改为 update
-                            try:
-                                existing_video = db.query(Video).filter(
-                                    Video.account_id == account.id,
-                                    Video.video_id == video_info["video_id"]
-                                ).first()
-                                if existing_video:
-                                    existing_video.play_count = video_info.get("play_count", existing_video.play_count)
-                                    existing_video.like_count = video_info.get("like_count", existing_video.like_count)
-                                    existing_video.comment_count = video_info.get("comment_count", existing_video.comment_count)
-                                    existing_video.share_count = video_info.get("share_count", existing_video.share_count)
-                            except Exception:
-                                pass
+                            logger.warning("Account id=%s: video write skipped (%s)", account.id, type(ve).__name__)
+                            save_error = True
+                    if save_error:
+                        history.error_message = "VIDEO_COLLECTION_FAILED: 部分视频记录保存失败，资料已保留"
+                    elif video_result.get("partial"):
+                        history.error_message = "VIDEO_COLLECTION_FAILED: 视频分页未完整返回，资料和已取得的视频已保留"
+                    db.commit()
                 else:
-                    logger.warning(f"Account {account.username}: failed to fetch videos - {video_result.get('error')}")
+                    history.error_message = ("VIDEO_COLLECTION_FAILED: " + str(video_result.get("error") or "未获取到视频列表"))[:500]
+                    logger.warning("Account id=%s: video request failed (%s)", account.id, video_result.get("error_code", "unknown"))
             except Exception as e:
-                logger.error(f"Account {account.username}: error processing videos - {e}")
+                db.rollback()
+                history.error_message = "VIDEO_COLLECTION_FAILED: 视频处理异常，资料已保留"
+                logger.error("Account id=%s: video processing failed (%s)", account.id, type(e).__name__)
+        elif account.enable_video_monitoring and not account.sec_uid:
+            history.error_message = "VIDEO_COLLECTION_FAILED: 资料未返回 SEC_UID，无法采集视频，资料已保留"
+        db.commit()
+        return history
     else:
         account.last_checked_at = now
-        error_msg = result.get("error", "Unknown error")[:500] if result else "No result"
+        error_msg = str(result.get("error") or "Unknown error")[:500] if result else "No result"
         history = MonitorHistory(
             account_id=account.id,
             follower_count=account.follower_count,
@@ -279,6 +317,29 @@ async def check_account(db: Session, account: MonitorAccount) -> MonitorHistory:
     db.commit()
     db.refresh(history)
     return history
+
+
+def _save_monitor_video(db: Session, account_id: int, video_info: dict[str, Any], now: datetime) -> None:
+    from app.models.video import Video
+    video_id = video_info.get("video_id")
+    if not video_id:
+        raise ValueError("Video ID is missing")
+    existing_video = db.query(Video).filter(Video.account_id == account_id, Video.video_id == video_id).first()
+    published_at = datetime.utcfromtimestamp(video_info["published_at"]) if video_info.get("published_at") else None
+    if existing_video:
+        for field in ("title", "cover_url", "play_count", "like_count", "comment_count", "share_count"):
+            if field in video_info:
+                setattr(existing_video, field, video_info[field])
+        existing_video.updated_at = now
+        if published_at:
+            existing_video.published_at = published_at
+    else:
+        db.add(Video(account_id=account_id, video_id=video_id, title=video_info.get("title", ""),
+                     cover_url=video_info.get("cover_url", ""), play_count=video_info.get("play_count", 0),
+                     like_count=video_info.get("like_count", 0), comment_count=video_info.get("comment_count", 0),
+                     share_count=video_info.get("share_count", 0), published_at=published_at))
+    db.flush()
+
 
 
 def update_account(
@@ -346,14 +407,25 @@ async def run_scheduled_checks(db_factory: Callable[[], Session]) -> None:
         # 分批并发执行，受 max_concurrent_checks 限制
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def _bounded_check(acc: MonitorAccount) -> None:
-            async with semaphore:
-                try:
-                    await check_account(db, acc)
-                except Exception as e:
-                    logger.error(f"Error checking account {acc.username}: {e}")
+        due_ids = [account.id for account in due_accounts]
 
-        tasks = [_bounded_check(acc) for acc in due_accounts]
+        async def _bounded_check(account_id: int) -> None:
+            async with semaphore:
+                worker_db = db_factory()
+                try:
+                    account = worker_db.get(MonitorAccount, account_id)
+                    if account and account.is_active:
+                        await check_account(worker_db, account)
+                except HTTPException as e:
+                    if e.status_code != 409:
+                        logger.error("Scheduled account id=%s failed (HTTP %s)", account_id, e.status_code)
+                except Exception as e:
+                    worker_db.rollback()
+                    logger.error("Scheduled account id=%s failed (%s)", account_id, type(e).__name__)
+                finally:
+                    worker_db.close()
+
+        tasks = [_bounded_check(account_id) for account_id in due_ids]
         await asyncio.gather(*tasks)
 
     finally:

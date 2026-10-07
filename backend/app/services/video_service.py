@@ -4,20 +4,29 @@ from typing import Any, List, Optional, cast
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
 
 from app.models.monitor import MonitorAccount
 from app.models.video import OpAccountVideo, Video, VideoStats
 from app.services.scraper_service import scraper_service
+from app.services.table_query_service import apply_table_query, model_table_fields
 
 logger = logging.getLogger(__name__)
 
 
-def get_videos(db: Session, account_id: int, skip: int = 0, limit: int = 100, model: type[Video] | type[OpAccountVideo] = Video) -> list[Video] | list[OpAccountVideo]:
+def table_videos_query(db: Session, account_id: int, model: type[Video] | type[OpAccountVideo] = Video,
+                       sort_by: str | None = None, sort_order: str = "asc", table_filters: object = None) -> Any:
+    fields = model_table_fields(model, exclude=("cover_url",))
+    return apply_table_query(db.query(model).filter(model.account_id == account_id), fields,
+                             sort_by, sort_order, table_filters, stable_column=model.id,
+                             default_sort=(model.published_at, "desc"))
+
+
+def get_videos(db: Session, account_id: int, skip: int = 0, limit: int = 100, model: type[Video] | type[OpAccountVideo] = Video,
+               sort_by: str | None = None, sort_order: str = "asc", table_filters: object = None) -> list[Video] | list[OpAccountVideo]:
     """获取指定账号的视频列表"""
     return cast(list[Video] | list[OpAccountVideo], (
-        db.query(model)
-        .filter(model.account_id == account_id)
-        .order_by(model.published_at.desc(), model.id.desc())
+        table_videos_query(db, account_id, model, sort_by, sort_order, table_filters)
         .offset(skip)
         .limit(limit)
         .all()
@@ -83,6 +92,20 @@ def get_video_stats(db: Session, video_id: int) -> List[VideoStats]:
 
 
 async def fetch_and_save_videos(db: Session, account: MonitorAccount) -> int:
+    from app.services.monitor_service import _check_guard, _checking_accounts
+    account_id = account.id
+    with _check_guard:
+        if account_id in _checking_accounts:
+            raise HTTPException(409, "该账号已有采集进行中，请等待完成")
+        _checking_accounts.add(account_id)
+    try:
+        return await _fetch_and_save_videos(db, account)
+    finally:
+        with _check_guard:
+            _checking_accounts.discard(account_id)
+
+
+async def _fetch_and_save_videos(db: Session, account: MonitorAccount) -> int:
     """
     抓取账号的视频列表并持久化。
     - 对每个视频执行 upsert（根据 video_id 去重）
@@ -93,18 +116,26 @@ async def fetch_and_save_videos(db: Session, account: MonitorAccount) -> int:
         logger.warning(
             f"Account id={account.id} username={account.username} has no sec_uid, skipping video fetch"
         )
-        return 0
+        raise HTTPException(422, "账号缺少 SEC_UID，请先采集账号资料")
 
     # 获取该账号绑定的代理（如启用）
     proxy = account.proxy if account.use_proxy else None
+    from app.services.monitor_service import get_settings
+    settings = get_settings(db)
+    identity = (account.project_id, account.username)
+    result = await scraper_service.fetch_user_videos(account.sec_uid, proxy=proxy,
+                                                     max_count=settings.default_video_count,
+                                                     timeout=settings.request_timeout)
+    current_identity = db.query(MonitorAccount.project_id, MonitorAccount.username).filter(MonitorAccount.id == account.id).one_or_none()
+    if current_identity != identity:
+        db.rollback()
+        raise HTTPException(409, "采集期间账号已修改，本次视频结果已丢弃")
 
-    result = await scraper_service.fetch_user_videos(account.sec_uid, proxy=proxy)
-
-    if not result['success']:
+    if not result['success'] or result.get('partial'):
         logger.error(
             f"Failed to fetch videos for account id={account.id}: {result.get('error')}"
         )
-        return 0
+        raise HTTPException(502, str(result.get('error') or '视频采集未完成，原视频数据已保留'))
 
     video_items = result.get('data') or []
     new_count = save_video_items(db, account.id, video_items)
@@ -127,9 +158,9 @@ def save_video_items(db: Session, account_id: int, video_items: list[dict[str, A
             continue
 
         # upsert: 查找已有记录
-        query = db.query(model).filter(model.video_id == str(video_id_str))
-        if model is not Video:
-            query = query.filter(model.account_id == account_id)
+        query = db.query(model).filter(model.video_id == str(video_id_str), model.account_id == account_id)
+        if model is Video and query.first() is None and db.query(Video.id).filter(Video.video_id == str(video_id_str)).first():
+            raise ValueError("视频已属于另一个监控账号，未覆盖其记录")
         video = cast(Video | OpAccountVideo | None, query.first())
 
         # 解析 published_at

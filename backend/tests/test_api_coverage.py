@@ -215,7 +215,7 @@ def test_manual_account_check_records_profile_history(client, db, monkeypatch):
     assert history.follower_count == 27 and history.check_status == "success"
     db.refresh(account)
     assert account.nickname == "Manual result"
-    fetch.assert_awaited_once_with("manual", proxy=None)
+    fetch.assert_awaited_once_with("manual", proxy=None, timeout=30)
 
 
 def test_history_date_window_pagination_and_trend_deltas(client, db):
@@ -295,7 +295,7 @@ def test_video_api_paginates_snapshots_and_manual_collection(client, db, monkeyp
     assert collected.status_code == 202 and collected.json()["new_videos"] == 1
     assert db.query(Video).filter(Video.video_id == "manual-new").one().play_count == 30
     assert db.query(VideoStats).count() == 3
-    fetch.assert_awaited_once_with("sec", proxy=None)
+    fetch.assert_awaited_once_with("sec", proxy=None, max_count=20, timeout=30)
     assert client.get("/api/accounts/99999/videos").status_code == 404
     assert client.post("/api/accounts/99999/videos/collect").status_code == 404
     assert client.get("/api/videos/99999/stats").status_code == 404

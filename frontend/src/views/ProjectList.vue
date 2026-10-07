@@ -11,17 +11,17 @@
         </div>
       </template>
 
-      <el-table :data="projects" v-loading="loading">
-        <el-table-column prop="name" label="项目名称" />
-        <el-table-column prop="description" label="描述" />
-        <el-table-column prop="created_by" label="创建人" width="120">
+      <crm-table table-id="legacy-monitor-projects" :data="projects" v-loading="loading">
+        <el-table-column column-key="name" filter-type="text" prop="name" label="项目名称" />
+        <el-table-column column-key="description" filter-type="text" prop="description" label="描述" />
+        <el-table-column column-key="created_by" filter-type="text" prop="created_by" label="创建人" width="120">
           <template #default="{ row }">{{ row.created_by || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="account_count" label="账号数量" width="100" />
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column column-key="account_count" filter-type="number" prop="account_count" label="账号数量" width="100" />
+        <el-table-column column-key="created_at" filter-type="date" prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
             <el-button link type="primary" @click="viewAccounts(row)">查看账号</el-button>
@@ -29,7 +29,7 @@
             <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
     </el-card>
 
     <!-- Create/Edit Dialog -->

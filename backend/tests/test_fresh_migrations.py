@@ -41,6 +41,7 @@ def test_fresh_database_upgrade_has_card_key_safety_constraints(tmp_path):
         with engine.connect() as connection:
             op_account_columns = {column["name"] for column in inspector.get_columns("op_accounts")}
             assert "previous_follower_count" in op_account_columns
+            assert {"last_attempt_at", "next_attempt_at", "collect_retry_count"} <= op_account_columns
             task_owner = next(column for column in inspector.get_columns("op_collect_tasks") if column["name"] == "created_by")
             assert task_owner["nullable"] is True
             assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == ScriptDirectory.from_config(configuration).get_current_head()

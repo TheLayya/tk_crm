@@ -26,36 +26,36 @@
         <span class="remind-soon" v-if="summary.due_soon">7天内到期 {{ summary.due_soon }}</span>
       </div>
 
-      <el-table ref="tableRef" v-loading="loading" :data="items" row-key="id" size="small" empty-text="暂无备忘">
-        <el-table-column type="expand" width="42">
+      <crm-table table-id="work-items" remote :query="tableQuery" @query-change="handleTableQuery" ref="tableRef" v-loading="loading" :data="items" row-key="id" size="small" empty-text="暂无备忘">
+        <el-table-column column-key="expand" table-tools-disabled type="expand" width="42">
           <template #default="{ row }">
             <div class="item-content">{{ row.content || '没有填写内容' }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="大类" width="110"><template #default="{ row }"><el-tag size="small" effect="plain">{{ row.category }}</el-tag></template></el-table-column>
-        <el-table-column label="备忘" min-width="300">
+        <el-table-column column-key="category" prop="category" filter-type="text" label="大类" width="110"><template #default="{ row }"><el-tag size="small" effect="plain">{{ row.category }}</el-tag></template></el-table-column>
+        <el-table-column column-key="title" prop="title" filter-type="text" :table-fields="[{ prop: 'title', label: '标题', type: 'text' }, { prop: 'content', label: '正文', type: 'text' }]" label="备忘" min-width="300">
           <template #default="{ row }">
             <button class="item-title" :class="{ done: row.is_done }" @click="tableRef.toggleRowExpansion(row)">{{ row.title }}</button>
             <div class="item-preview">{{ row.content || '无内容' }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="提醒成员" min-width="160">
+        <el-table-column column-key="reminder_users" prop="reminder_users" filter-type="text" label="提醒成员" min-width="160">
           <template #default="{ row }">{{ row.reminder_users?.includes('__all__') ? '全员' : row.reminder_users?.join('、') || '—' }}</template>
         </el-table-column>
-        <el-table-column label="提醒时间" width="180">
+        <el-table-column column-key="remind_at" prop="remind_at" filter-type="date" label="提醒时间" width="180">
           <template #default="{ row }"><span :class="remindClass(row)">{{ formatDate(row.remind_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column column-key="is_done" prop="is_done" filter-type="enum" :filter-options="[{ label: '已完成', value: true }, { label: '待完成', value: false }]" label="状态" width="90">
           <template #default="{ row }"><el-tag :type="row.is_done ? 'info' : remindType(row)" size="small">{{ row.is_done ? '已完成' : remindLabel(row) }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="170" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canManage" link type="primary" @click="toggleDone(row)">{{ row.is_done ? '恢复' : '完成' }}</el-button>
             <el-button v-if="canManage" link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="canManage" link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
     </el-card>
 
     <el-dialog v-model="categoryVisible" title="大类设置" width="min(440px, 94vw)">
@@ -80,6 +80,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createWorkItem, deleteWorkItem, getReminderMembers, getWorkItemCategories, getWorkItemSummary, getWorkItems, updateWorkItem, updateWorkItemCategories } from '@/api/work_items'
@@ -110,13 +111,16 @@ const saveCategories = async () => {
   } finally { categorySaving.value = false }
 }
 const summary = reactive({ overdue: 0, due_soon: 0, pending: 0 })
+const { tableQuery, queryParams } = useTableQuery('work-items')
+const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; load() }
+
 const filters = reactive({ keyword: '', category: '', status: 'pending', mine: false })
 const form = reactive({ id: null, title: '', category: '其他', content: '', reminder_users: [], remind_at: null, is_done: false })
 
 const load = async () => {
   loading.value = true
   try {
-    const [result, stats] = await Promise.all([getWorkItems(filters), getWorkItemSummary()])
+    const [result, stats] = await Promise.all([getWorkItems({ ...filters, ...queryParams.value }), getWorkItemSummary()])
     items.value = result.items || []
     Object.assign(summary, stats)
   } finally { loading.value = false }

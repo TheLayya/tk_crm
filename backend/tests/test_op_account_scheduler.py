@@ -34,7 +34,8 @@ def test_scheduled_collection_filters_due_accounts_and_uses_settings(monkeypatch
         db.commit()
     collected_names = []
 
-    async def collect(db, account, proxy):
+    async def collect(db, account, proxy, *, scheduled=False):
+        assert scheduled
         collected_names.append(account.account)
         account.last_collected_at = now
         account.video_collected_at = now

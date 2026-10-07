@@ -23,17 +23,17 @@
             </div>
           </template>
           <!-- 桌面端表格 -->
-          <el-table v-if="!isMobile" :data="projects" v-loading="projectLoading">
-            <el-table-column prop="name" label="项目名称" />
-            <el-table-column prop="description" label="描述" />
-            <el-table-column prop="created_by" label="创建人" width="120">
+          <crm-table table-id="monitor-projects" v-if="!isMobile" :data="projects" v-loading="projectLoading">
+            <el-table-column column-key="name" filter-type="text" prop="name" label="项目名称" />
+            <el-table-column column-key="description" filter-type="text" prop="description" label="描述" />
+            <el-table-column column-key="created_by" filter-type="text" prop="created_by" label="创建人" width="120">
               <template #default="{ row }">{{ row.created_by || '-' }}</template>
             </el-table-column>
-            <el-table-column prop="account_count" label="账号数量" width="120" />
-            <el-table-column prop="created_at" label="创建时间" width="180">
+            <el-table-column column-key="account_count" filter-type="number" prop="account_count" label="账号数量" width="120" />
+            <el-table-column column-key="created_at" filter-type="date" prop="created_at" label="创建时间" width="180">
               <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="300" fixed="right">
+            <el-table-column column-key="actions" table-tools-disabled label="操作" width="300" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="handleEditProject(row)">编辑</el-button>
                 <el-button link type="primary" @click="viewProjectAccounts(row)">查看账号</el-button>
@@ -41,7 +41,7 @@
                 <el-button link type="danger" @click="handleDeleteProject(row)">删除</el-button>
               </template>
             </el-table-column>
-          </el-table>
+          </crm-table>
           <!-- 移动端 iOS 卡片列表 -->
           <div v-else class="ios-card-list" v-loading="projectLoading">
             <div v-for="row in projects" :key="row.id" class="ios-card">
@@ -130,12 +130,12 @@
             <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
           </div>
 
-          <el-table ref="accountTable" class="compact-account-table" v-if="!isMobile" :data="accounts" row-key="id" size="small" v-loading="accountLoading" @selection-change="handleSelectionChange" @expand-change="handleAccountExpansion">
-            <el-table-column type="selection" width="42" />
-            <el-table-column type="expand" width="36">
+          <crm-table table-id="monitor-accounts" remote :query="tableQuery" @query-change="handleTableQuery" ref="accountTable" class="compact-account-table" v-if="!isMobile" :data="accounts" row-key="id" size="small" v-loading="accountLoading" @selection-change="handleSelectionChange" @expand-change="handleAccountExpansion">
+            <el-table-column column-key="selection" table-tools-disabled type="selection" width="42" />
+            <el-table-column column-key="expand" table-tools-disabled type="expand" width="36">
               <template #default="{ row }">
                 <div class="account-expanded" :style="{ width: accountTable?.$el?.clientWidth ? accountTable.$el.clientWidth + 'px' : '100%' }">
-                  <el-alert v-if="['not_found', 'failed', 'verification_required'].includes(row.latest_check_status)" :title="accountCheckNotice(row).title" :description="accountCheckNotice(row).description" :type="row.latest_check_status === 'not_found' ? 'error' : 'warning'" :closable="false" show-icon />
+                  <el-alert v-if="['not_found', 'failed', 'verification_required', 'partial'].includes(row.latest_check_status)" :title="accountCheckNotice(row).title" :description="accountCheckNotice(row).description" :type="row.latest_check_status === 'not_found' ? 'error' : 'warning'" :closable="false" show-icon />
                   <details v-if="row.latest_check_error"><summary>查看技术原因</summary>{{ row.latest_check_error }}</details>
                   <InlineAccountVideos :account-id="row.id" />
                   <div class="account-detail-grid">
@@ -156,35 +156,35 @@
                   </section>
                   <section class="account-history-panel">
                   <div class="detail-panel-heading">最近检查 <span>粉丝变化对比上次检查，非日增量</span></div>
-                  <el-table class="check-history-table" :data="recentTrend(row.id)" size="small" height="190" empty-text="暂无历史记录">
-                    <el-table-column label="检查时间" min-width="150"><template #default="{ row: point }"><time>{{ formatDate(point.checked_at) }}</time></template></el-table-column>
-                    <el-table-column label="粉丝" min-width="64" align="right"><template #default="{ row: point }">{{ formatNumber(point.follower_count) }}</template></el-table-column>
-                    <el-table-column label="粉丝变化" min-width="76" align="right"><template #default="{ row: point }"><span :class="deltaClass(point.followers_change)">{{ formatDelta(point.followers_change) }}</span></template></el-table-column>
-                    <el-table-column label="点赞" min-width="68" align="right"><template #default="{ row: point }">{{ formatNumber(point.like_count) }}</template></el-table-column>
-                    <el-table-column prop="video_count" label="视频" min-width="52" align="right" />
-                  </el-table>
+                  <crm-table table-id="monitor-recent-history" class="check-history-table" :data="recentTrend(row.id)" size="small" height="190" empty-text="暂无历史记录">
+                    <el-table-column column-key="checked_at" prop="checked_at" filter-type="date" label="检查时间" min-width="150"><template #default="{ row: point }"><time>{{ formatDate(point.checked_at) }}</time></template></el-table-column>
+                    <el-table-column column-key="follower_count" prop="follower_count" filter-type="number" label="粉丝" min-width="64" align="right"><template #default="{ row: point }">{{ formatNumber(point.follower_count) }}</template></el-table-column>
+                    <el-table-column column-key="followers_change" prop="followers_change" filter-type="number" label="粉丝变化" min-width="76" align="right"><template #default="{ row: point }"><span :class="deltaClass(point.followers_change)">{{ formatDelta(point.followers_change) }}</span></template></el-table-column>
+                    <el-table-column column-key="like_count" prop="like_count" filter-type="number" label="点赞" min-width="68" align="right"><template #default="{ row: point }">{{ formatNumber(point.like_count) }}</template></el-table-column>
+                    <el-table-column column-key="video_count" filter-type="number" prop="video_count" label="视频" min-width="52" align="right" />
+                  </crm-table>
                   </section>
                   </div>
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="账号" min-width="250">
+            <el-table-column column-key="username" prop="username" filter-type="text" :table-fields="[{ prop: 'username', label: '用户名', type: 'text' }, { prop: 'nickname', label: '昵称', type: 'text' }]" label="账号" min-width="250">
               <template #default="{ row }"><div class="compact-account" role="button" tabindex="0" :aria-expanded="expandedAccountIds.includes(row.id)" :aria-label="(expandedAccountIds.includes(row.id) ? '收起' : '展开') + '账号 ' + row.username + '详情'" :title="expandedAccountIds.includes(row.id) ? '点击收起账号详情' : '点击展开账号详情'" @click="toggleAccountExpansion(row)" @keydown.enter.prevent="toggleAccountExpansion(row)" @keydown.space.prevent="toggleAccountExpansion(row)"><el-avatar :src="row.avatar_url" :size="32"><el-icon><User /></el-icon></el-avatar><div><strong>@{{ row.username }}</strong><span>{{ row.nickname || row.username }}</span><div class="account-metrics" aria-label="账号数据"><span title="粉丝数">粉丝 {{ formatNumber(row.follower_count) }}</span><span title="关注数">关注 {{ formatNumber(row.following_count) }}</span><span title="点赞数">赞 {{ formatNumber(row.like_count) }}</span><span title="视频数">视频 {{ formatNumber(row.video_count) }}</span></div></div></div></template>
             </el-table-column>
-            <el-table-column label="粉丝数" min-width="110" align="right"><template #default="{ row }"><strong>{{ formatNumber(row.follower_count) }}</strong></template></el-table-column>
-            <el-table-column label="较上次变化" min-width="130" align="right"><template #default="{ row }"><span :class="deltaClass(followerDelta(row.id))">{{ formatDelta(followerDelta(row.id)) }}</span></template></el-table-column>
-            <el-table-column label="粉丝趋势" width="150"><template #default="{ row }"><div :ref="el => setChartRef('follower_count_' + row.id, el)" class="mini-chart"></div></template></el-table-column>
-            <el-table-column label="视频数量" width="95" align="right"><template #default="{ row }">{{ formatNumber(row.video_count) }}</template></el-table-column>
-            <el-table-column label="昨日更新（北京时间）" width="175" align="center"><template #default="{ row }"><el-tooltip content="依据已采集视频的发布时间判断，北京时间昨日 00:00–24:00；未发现不等于确认未发布。" placement="top"><el-tag :type="row.yesterday_video_count > 0 ? 'success' : 'info'" size="small">{{ yesterdayVideoLabel(row) }}</el-tag></el-tooltip></template></el-table-column>
-            <el-table-column label="昨日视频流量" min-width="190">
-              <template #default="{ row }"><el-tooltip content="北京时间昨日发布视频的最新累计播放量，按发布时间从新到旧逐条展示；不是昨日新增播放量。" placement="top"><span class="yesterday-video-plays">{{ yesterdayVideoPlaysLabel(row) }}</span></el-tooltip></template>
+            <el-table-column column-key="follower_count" prop="follower_count" filter-type="number" label="粉丝数" min-width="110" align="right"><template #default="{ row }"><strong>{{ formatNumber(row.follower_count) }}</strong></template></el-table-column>
+            <el-table-column column-key="followers_change" prop="followers_change" filter-type="number" label="较上次变化" min-width="130" align="right"><template #default="{ row }"><span :class="deltaClass(followerDelta(row.id))">{{ formatDelta(followerDelta(row.id)) }}</span></template></el-table-column>
+            <el-table-column column-key="follower_trend" table-tools-disabled label="粉丝趋势" width="150"><template #default="{ row }"><div :ref="el => setChartRef('follower_count_' + row.id, el)" class="mini-chart"></div></template></el-table-column>
+            <el-table-column column-key="video_count" prop="video_count" filter-type="number" label="视频数量" width="95" align="right"><template #default="{ row }">{{ formatNumber(row.video_count) }}</template></el-table-column>
+            <el-table-column column-key="yesterday_video_count" prop="yesterday_video_count" filter-type="number" label="昨日更新（北京时间）" width="175" align="center"><template #default="{ row }"><el-tooltip content="依据已采集视频的发布时间判断，北京时间昨日 00:00–24:00；未发现不等于确认未发布。" placement="top"><el-tag :type="row.yesterday_video_count > 0 ? 'success' : 'info'" size="small">{{ yesterdayVideoLabel(row) }}</el-tag></el-tooltip></template></el-table-column>
+            <el-table-column column-key="yesterday_video_plays" prop="yesterday_video_plays" filter-type="number" label="昨日视频流量" min-width="190">
+              <template #default="{ row }"><el-tooltip content="北京时间昨日发布视频的最新累计播放量，按发布时间从新到旧逐条展示；不是昨日新增播放量。排序和筛选按这些播放量合计。" placement="top"><span class="yesterday-video-plays">{{ yesterdayVideoPlaysLabel(row) }}</span></el-tooltip></template>
             </el-table-column>
-            <el-table-column prop="project_name" label="项目" min-width="110" show-overflow-tooltip />
-            <el-table-column label="最近检查" width="125"><template #default="{ row }"><el-tooltip :content="row.latest_check_error || '最近账号检查结果；数据在检查失败时保留历史值。'"><el-tag :type="row.latest_check_status === 'not_found' ? 'danger' : ['failed', 'verification_required'].includes(row.latest_check_status) ? 'warning' : row.latest_check_status === 'success' ? 'success' : 'info'" size="small">{{ row.latest_check_status === 'not_found' ? '账号不存在' : row.latest_check_status === 'verification_required' ? '验证拦截' : row.latest_check_status === 'failed' ? '检查失败' : row.latest_check_status === 'success' ? '检查成功' : '尚未检查' }}</el-tag></el-tooltip></template></el-table-column>
-            <el-table-column label="监控开关" width="85"><template #default="{ row }"><el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '启用' : '禁用' }}</el-tag></template></el-table-column>
-            <el-table-column label="最后检查" width="165"><template #default="{ row }">{{ formatDate(row.last_checked_at) }}</template></el-table-column>
-            <el-table-column label="操作" width="175" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="handleCheckAccount(row)">检查</el-button><el-button link type="primary" @click="handleEditAccount(row)">编辑</el-button><el-button link type="danger" @click="handleDeleteAccount(row)">删除</el-button></template></el-table-column>
-          </el-table>
+            <el-table-column column-key="project_name" filter-type="text" prop="project_name" label="项目" min-width="110" show-overflow-tooltip />
+            <el-table-column column-key="latest_check_status" prop="latest_check_status" filter-type="enum" :filter-options="[{ label: '尚未检查', value: 'pending' }, { label: '资料成功，视频未完成', value: 'partial' }, { label: '成功', value: 'success' }, { label: '失败', value: 'failed' }, { label: '账号不存在', value: 'not_found' }, { label: '验证拦截', value: 'verification_required' }]" label="最近检查" width="125"><template #default="{ row }"><el-tooltip :content="row.latest_check_error || '最近账号检查结果；数据在检查失败时保留历史值。'"><el-tag :type="row.latest_check_status === 'not_found' ? 'danger' : ['failed', 'verification_required', 'partial'].includes(row.latest_check_status) ? 'warning' : row.latest_check_status === 'success' ? 'success' : 'info'" size="small">{{ row.latest_check_status === 'not_found' ? '账号不存在' : row.latest_check_status === 'verification_required' ? '验证拦截' : row.latest_check_status === 'failed' ? '检查失败' : row.latest_check_status === 'partial' ? '视频未完成' : row.latest_check_status === 'success' ? '检查成功' : '尚未检查' }}</el-tag></el-tooltip></template></el-table-column>
+            <el-table-column column-key="is_active" prop="is_active" filter-type="enum" :filter-options="[{ label: '启用', value: true }, { label: '禁用', value: false }]" label="监控开关" width="85"><template #default="{ row }"><el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '启用' : '禁用' }}</el-tag></template></el-table-column>
+            <el-table-column column-key="last_checked_at" prop="last_checked_at" filter-type="date" label="最后检查" width="165"><template #default="{ row }">{{ formatDate(row.last_checked_at) }}</template></el-table-column>
+            <el-table-column column-key="actions" table-tools-disabled label="操作" width="175" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="handleCheckAccount(row)">检查</el-button><el-button link type="primary" @click="handleEditAccount(row)">编辑</el-button><el-button link type="danger" @click="handleDeleteAccount(row)">删除</el-button></template></el-table-column>
+          </crm-table>
 
           <!-- 移动端 iOS 卡片列表 -->
           <div v-if="isMobile" class="ios-card-list" v-loading="accountLoading">
@@ -268,19 +268,19 @@
             </div>
           </template>
 
-          <el-table v-if="!isMobile" :data="proxies" v-loading="proxyLoading" @selection-change="handleProxySelectionChange">
-            <el-table-column type="selection" width="55" />
-            <el-table-column prop="proxy_type" label="类型" width="100">
+          <crm-table table-id="monitor-proxies" v-if="!isMobile" :data="proxies" v-loading="proxyLoading" @selection-change="handleProxySelectionChange">
+            <el-table-column column-key="selection" table-tools-disabled type="selection" width="55" />
+            <el-table-column column-key="proxy_type" filter-type="enum" :filter-options="[{ label: 'HTTP', value: 'http' }, { label: 'SOCKS5', value: 'socks5' }]" prop="proxy_type" label="类型" width="100">
               <template #default="{ row }">
                 <el-tag size="small">{{ row.proxy_type?.toUpperCase() }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="host" label="IP" width="150" />
-            <el-table-column prop="port" label="端口" width="100" />
-            <el-table-column prop="username" label="用户名" width="120">
+            <el-table-column column-key="host" filter-type="text" prop="host" label="IP" width="150" />
+            <el-table-column column-key="port" filter-type="number" prop="port" label="端口" width="100" />
+            <el-table-column column-key="username" filter-type="text" prop="username" label="用户名" width="120">
               <template #default="{ row }">{{ row.username || '-' }}</template>
             </el-table-column>
-            <el-table-column label="密码" width="150">
+            <el-table-column column-key="password" table-tools-disabled prop="password" filter-type="text" label="密码" width="150">
               <template #default="{ row }">
                 <div v-if="row.password" style="display: flex; align-items: center; gap: 8px;">
                   <span>{{ visiblePasswords[row.id] ? row.password : '******' }}</span>
@@ -291,12 +291,12 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="is_active" label="状态" width="80">
+            <el-table-column column-key="is_active" filter-type="enum" :filter-options="[{ label: '启用', value: true }, { label: '禁用', value: false }]" prop="is_active" label="状态" width="80">
               <template #default="{ row }">
                 <el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? '启用' : '禁用' }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="last_test_result" label="测试结果" width="100">
+            <el-table-column column-key="last_test_result" filter-type="text" prop="last_test_result" label="测试结果" width="100">
               <template #default="{ row }">
                 <el-tag v-if="row.last_test_result" :type="row.last_test_result === 'success' ? 'success' : 'danger'" size="small">
                   {{ row.last_test_result === 'success' ? '成功' : '失败' }}
@@ -304,17 +304,17 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="last_test_at" label="最后测试" width="180">
+            <el-table-column column-key="last_test_at" filter-type="date" prop="last_test_at" label="最后测试" width="180">
               <template #default="{ row }">{{ formatDate(row.last_test_at) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="220" fixed="right">
+            <el-table-column column-key="actions" table-tools-disabled label="操作" width="220" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="handleTestProxy(row)" :loading="testingIds.includes(row.id)">测试</el-button>
                 <el-button link type="primary" @click="handleEditProxy(row)">编辑</el-button>
                 <el-button link type="danger" @click="handleDeleteProxy(row)">删除</el-button>
               </template>
             </el-table-column>
-          </el-table>
+          </crm-table>
 
           <!-- 移动端 iOS 卡片列表 -->
           <div v-if="isMobile" class="ios-card-list" v-loading="proxyLoading">
@@ -390,7 +390,7 @@
           <div class="ios-card-row"><span class="ios-card-row-label">视频数量</span><span class="ios-card-row-value">{{ formatNumber(row.video_count) }}</span></div>
           <div class="ios-card-row"><span class="ios-card-row-label">昨日更新（北京时间）</span><span class="ios-card-row-value">{{ yesterdayVideoLabel(row) }}</span></div>
           <div class="ios-card-row"><span class="ios-card-row-label">昨日视频流量</span><span class="ios-card-row-value">{{ yesterdayVideoPlaysLabel(row) }}</span></div>
-          <el-alert v-if="['not_found', 'failed', 'verification_required'].includes(row.latest_check_status)" :title="accountCheckNotice(row).title" :description="accountCheckNotice(row).description" :type="row.latest_check_status === 'not_found' ? 'error' : 'warning'" :closable="false" show-icon />
+          <el-alert v-if="['not_found', 'failed', 'verification_required', 'partial'].includes(row.latest_check_status)" :title="accountCheckNotice(row).title" :description="accountCheckNotice(row).description" :type="row.latest_check_status === 'not_found' ? 'error' : 'warning'" :closable="false" show-icon />
           <div v-if="expandedMobileAccounts.includes(row.id)" class="mobile-account-details">
             <div>项目：{{ row.project_name || '-' }}</div>
             <div>关注 {{ formatNumber(row.following_count) }} · 点赞 {{ formatNumber(row.like_count) }} · 视频 {{ row.video_count ?? 0 }}</div>
@@ -569,6 +569,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -587,6 +588,7 @@ import ExportDialog from '@/components/ExportDialog.vue'
 import AccountDialog from '@/components/AccountDialog.vue'
 
 const accountCheckNotice = (row) => {
+  if (row.latest_check_status === 'partial') return { title: '账号资料已更新，视频采集未完成', description: row.latest_check_error || '原有视频数据已保留，可稍后重新检查。' }
   if (row.latest_check_status === 'not_found') return { title: '账号已不可访问：TikTok 提示找不到此账号', description: '可能已改名、删除或被平台移除。下方粉丝和视频仅为历史记录，不代表当前数据。' }
   if (row.latest_check_status === 'verification_required') return { title: '检查未完成：TikTok 要求验证', description: '系统暂时无法确认账号是否仍可访问。下方显示历史数据，请打开 TikTok 主页核实或稍后重新检查。' }
   return { title: '检查未完成：未获取到有效账号数据', description: '当前账号状态尚未确认，不能据此判断正常或不存在。下方显示历史数据，请打开 TikTok 主页核实或重新检查。' }
@@ -721,6 +723,9 @@ const handleMembersSubmit = async () => {
   }
 }
 
+const { tableQuery, queryParams } = useTableQuery('monitor-accounts')
+const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; accountPagination.value.page = 1; loadAccounts() }
+
 // ===== 账号列表 =====
 const accounts = ref([])
 const accountLoading = ref(false)
@@ -744,6 +749,7 @@ const loadAccounts = async () => {
   accountLoading.value = true
   try {
     const params = {
+      ...queryParams.value,
       skip: (accountPagination.value.page - 1) * accountPagination.value.limit,
       limit: accountPagination.value.limit
     }
@@ -912,7 +918,11 @@ const setChartRef = (id, el) => {
   if (chartRefs.value[id] === el) return
   chartInstances.value[id]?.dispose()
   delete chartInstances.value[id]
-  if (el) chartRefs.value[id] = el
+  if (el) {
+    chartRefs.value[id] = el
+    const account = accounts.value.find(item => `follower_count_${item.id}` === id)
+    if (account && accountTrends.value[account.id]) nextTick(() => renderMiniChartWithData(account, 'follower_count', accountTrends.value[account.id]))
+  }
   else delete chartRefs.value[id]
 }
 let trendGeneration = 0

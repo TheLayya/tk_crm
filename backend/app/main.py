@@ -55,6 +55,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     db = SessionLocal()
     try:
         create_super_admin(db)
+        from app.services.op_account_service import recover_interrupted_collections
+        recover_interrupted_collections(db)
     finally:
         db.close()
     # 注册并启动定时监控任务

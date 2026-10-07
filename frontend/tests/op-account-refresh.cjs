@@ -22,6 +22,7 @@ function setup(overrides = {}) {
     onUnmounted: callback => state.unmounted.push(callback),
     useRouter: () => ({}), useRoute: () => ({ query: {} }),
     useAuthStore: () => ({ hasPermission: () => false }),
+    useTableQuery: () => ({ tableQuery: { value: { sortBy: null, sortOrder: null, filters: {} } }, queryParams: { value: {} } }),
     localStorage: { getItem: () => null, setItem: () => {} },
     document: { hidden: false },
     window: { innerWidth: 390, addEventListener: () => {}, removeEventListener: () => {} },

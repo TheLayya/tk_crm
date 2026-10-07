@@ -41,21 +41,21 @@
         </div>
       </template>
 
-      <el-table :data="proxies" v-loading="loading" @selection-change="handleSelectionChange">
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="proxy_type" label="类型" width="100">
+      <crm-table table-id="legacy-monitor-proxies" :data="proxies" v-loading="loading" @selection-change="handleSelectionChange">
+        <el-table-column column-key="selection" table-tools-disabled type="selection" width="55" />
+        <el-table-column column-key="proxy_type" filter-type="enum" :filter-options="[{ label: 'HTTP', value: 'http' }, { label: 'SOCKS5', value: 'socks5' }]" prop="proxy_type" label="类型" width="100">
           <template #default="{ row }">
             <el-tag size="small">{{ row.proxy_type?.toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="host" label="IP" width="150" />
-        <el-table-column prop="port" label="端口" width="100" />
-        <el-table-column prop="username" label="用户名" width="120">
+        <el-table-column column-key="host" filter-type="text" prop="host" label="IP" width="150" />
+        <el-table-column column-key="port" filter-type="number" prop="port" label="端口" width="100" />
+        <el-table-column column-key="username" filter-type="text" prop="username" label="用户名" width="120">
           <template #default="{ row }">
             {{ row.username || '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="密码" width="150">
+        <el-table-column column-key="password" table-tools-disabled prop="password" filter-type="text" label="密码" width="150">
           <template #default="{ row }">
             <div v-if="row.password" style="display: flex; align-items: center; gap: 8px;">
               <span>{{ visiblePasswords[row.id] ? row.password : '******' }}</span>
@@ -70,14 +70,14 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="80">
+        <el-table-column column-key="is_active" filter-type="enum" :filter-options="[{ label: '启用', value: true }, { label: '禁用', value: false }]" prop="is_active" label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
               {{ row.is_active ? '启用' : '禁用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="last_test_result" label="测试结果" width="100">
+        <el-table-column column-key="last_test_result" filter-type="text" prop="last_test_result" label="测试结果" width="100">
           <template #default="{ row }">
             <el-tag
               v-if="row.last_test_result"
@@ -89,12 +89,12 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="last_test_at" label="最后测试" width="180">
+        <el-table-column column-key="last_test_at" filter-type="date" prop="last_test_at" label="最后测试" width="180">
           <template #default="{ row }">
             {{ formatDate(row.last_test_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleTest(row)" :loading="testingIds.includes(row.id)">
               测试
@@ -103,7 +103,7 @@
             <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
     </el-card>
 
     <!-- Create/Edit Dialog -->

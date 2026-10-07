@@ -63,7 +63,7 @@
 
     <!-- 桌面端：表格 -->
     <el-card class="desktop-table">
-      <el-table
+      <crm-table table-id="devices" remote :query="tableQuery" @query-change="handleTableQuery"
         ref="deviceTable"
         row-key="id"
         size="small"
@@ -74,7 +74,7 @@
         element-loading-text="正在加载设备"
         stripe
       >
-        <el-table-column type="expand" width="36">
+        <el-table-column column-key="expand" table-tools-disabled type="expand" width="36">
           <template #default="{ row }">
             <div class="device-inline-details resource-state-grid">
               <section>
@@ -94,40 +94,40 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="名称" width="110">
+        <el-table-column column-key="name" prop="name" filter-type="text" label="名称" width="110">
           <template #default="{ row }">
             <button type="button" class="resource-expand-trigger" :aria-expanded="expandedDeviceIds.includes(row.id)" :title="expandedDeviceIds.includes(row.id) ? '点击收起终端详情' : '点击展开终端详情'" @click="deviceTable.toggleRowExpansion(row)">{{ row.name }}</button>
           </template>
         </el-table-column>
-        <el-table-column prop="device_type" label="类型" width="100">
+        <el-table-column column-key="device_type" filter-type="enum" :filter-options="[{ label: '电脑', value: 'pc' }, { label: '手机', value: 'phone' }]" prop="device_type" label="类型" width="100">
           <template #default="{ row }">
             {{ row.device_type === 'pc' ? '💻 电脑' : '📱 手机' }}
           </template>
         </el-table-column>
-        <el-table-column prop="owner_name" label="所属人" width="110" />
-        <el-table-column prop="node_ip" label="绑定节点" width="155" show-overflow-tooltip>
+        <el-table-column column-key="owner_name" filter-type="text" prop="owner_name" label="所属人" width="110" />
+        <el-table-column column-key="node_ip" filter-type="text" prop="node_ip" label="绑定节点" width="155" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.node_ip">{{ row.node_ip }}</span>
             <span v-else style="color: #909399;">未绑定</span>
           </template>
         </el-table-column>
-        <el-table-column label="绑定账号" min-width="400">
+        <el-table-column column-key="accounts" prop="accounts" filter-type="text" label="绑定账号" min-width="400">
           <template #default="{ row }">
             <LinkedAccountCards :accounts="row.accounts || []" />
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" width="170">
+        <el-table-column column-key="created_at" prop="created_at" filter-type="date" label="创建时间" width="170">
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <el-button v-if="authStore.hasPermission('device:manage')" type="success" link @click="openRelations(row)">关联</el-button>
             <el-button type="primary" link @click="$router.push(`/devices/${row.id}`)">管理</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
 
       <!-- 分页 -->
       <el-pagination
@@ -234,6 +234,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
@@ -279,8 +280,11 @@ const total = ref(0)
 const loading = ref(false)
 
 /** 筛选查询参数 */
+const { tableQuery, queryParams, resetTableQuery } = useTableQuery('devices')
+const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; query.page = 1; loadDevices() }
+
 const query = reactive({ page: 1, page_size: 20, keyword: '', device_type: '', owner_id: '' })
-const hasFilters = computed(() => Boolean(query.keyword || query.device_type || query.owner_id))
+const hasFilters = computed(() => Boolean(query.keyword || query.device_type || query.owner_id || tableQuery.value.sortBy || Object.keys(tableQuery.value.filters).length))
 const emptyDescription = computed(() => (hasFilters.value ? '没有匹配的设备' : '暂无设备'))
 const selectedOwnerName = computed(
   () => members.value.find((m) => m.id === query.owner_id)?.real_name
@@ -346,7 +350,7 @@ async function loadDevices() {
   const seq = ++listRequestSeq
   loading.value = true
   try {
-    const params = { skip: (query.page - 1) * query.page_size, limit: query.page_size }
+    const params = { ...queryParams.value, skip: (query.page - 1) * query.page_size, limit: query.page_size }
     if (query.keyword) params.keyword = query.keyword
     if (query.device_type) params.device_type = query.device_type
     if (isSuperAdmin.value && query.owner_id) params.owner_id = query.owner_id
@@ -373,6 +377,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
+  resetTableQuery()
   query.keyword = ''
   query.device_type = ''
   query.owner_id = ''

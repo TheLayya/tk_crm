@@ -1,37 +1,127 @@
+import asyncio
 import logging
 import random
-from datetime import datetime
-from typing import Any, Optional, cast
+from concurrent.futures import Future
+from datetime import datetime, timedelta
+from threading import Lock
+from typing import Any, Awaitable, Callable, Optional, cast
 
 from sqlalchemy.orm import Session
 
 from app.models.monitor import MonitorProxy, MonitorSettings
 from app.models.op_account import OpAccount
 from app.models.video import OpAccountVideo
-from app.services.scraper_service import scraper_service
+from app.services.scraper_service import is_retryable_result, scraper_service
 from app.services.video_service import save_video_items
 
 logger = logging.getLogger(__name__)
+RETRY_DELAYS = (300, 900, 1800)
+# ponytail: in-process guard covers the current single-worker deployment; use a DB lease before adding workers.
+_collection_guard = Lock()
+_collection_results: dict[int, Future[bool]] = {}
 
 
-def select_proxy(db: Session) -> Optional[MonitorProxy]:
+def select_proxy(db: Session, excluded_ids: set[int] | None = None) -> Optional[MonitorProxy]:
     """随机选取一个 is_active=True 且 proxy_type='socks5' 的代理，无则返回 None。"""
     proxies = (
         db.query(MonitorProxy)
         .filter(MonitorProxy.is_active == True, MonitorProxy.proxy_type == "socks5")
         .all()
     )
+    proxies = [proxy for proxy in proxies if proxy.id not in (excluded_ids or set())]
     if not proxies:
         return None
     return random.choice(proxies)
 
 
-async def _collect_tiktok(db: Session, account: OpAccount, proxy: MonitorProxy | None) -> dict[str, Any]:
-    """调用 scraper_service 采集 TikTok 用户信息，成功返回 dict，失败抛出异常。"""
-    result = await scraper_service.fetch_user_info(account.account.strip().lstrip("@"), proxy=proxy)
-    if not result.get("success") or not result.get("data"):
-        raise RuntimeError(result.get("error") or "fetch_user_info returned no data")
-    return cast(dict[str, Any], result["data"])
+async def _fetch_with_failover(
+    db: Session, fetch: Callable[..., Awaitable[dict[str, Any]]], value: str,
+    proxy: MonitorProxy | None, used_proxy_ids: set[int], **kwargs: Any,
+) -> tuple[dict[str, Any], MonitorProxy | None]:
+    """At most two distinct configured proxies per account, never a direct fallback."""
+    while True:
+        if proxy is not None:
+            used_proxy_ids.add(proxy.id)
+        result = await fetch(value, proxy=proxy, **kwargs)
+        if not is_retryable_result(result) or proxy is None or len(used_proxy_ids) >= 2:
+            return result, proxy
+        alternate = select_proxy(db, used_proxy_ids)
+        if alternate is None:
+            return result, proxy
+        logger.info("Op collection switching proxy %s -> %s", proxy.id, alternate.id)
+        proxy = alternate
+
+
+def schedule_collection_result(account: OpAccount, interval: int, now: datetime, success: bool) -> None:
+    """Three short retries per cycle; exhausted/permanent failures use the normal interval."""
+    if success:
+        account.collect_retry_count = 0
+    retryable = is_retryable_result({"success": False, "error": account.collect_error})
+    retry_count = max(0, int(account.collect_retry_count or 0))
+    delay = min(RETRY_DELAYS[retry_count], interval) if not success and retryable and retry_count < len(RETRY_DELAYS) else interval
+    account.next_attempt_at = now + timedelta(seconds=delay)
+
+
+async def collect_account(
+    db: Session, account: OpAccount, proxy: MonitorProxy | None = None, *, scheduled: bool = False,
+) -> bool:
+    """Share an in-flight result across manual, import and scheduler tasks for this account."""
+    account_id = account.id
+    with _collection_guard:
+        existing = _collection_results.get(account_id)
+        if existing is None:
+            existing = Future()
+            _collection_results[account_id] = existing
+            owner = True
+        else:
+            owner = False
+    if not owner:
+        result = await asyncio.shield(asyncio.wrap_future(existing))
+        db.expire_all()
+        return result
+
+    result = False
+    identity = None
+    interval = 14400
+    try:
+        # A waiting caller must not reset retries or mutate the owner's status.
+        db.refresh(account)
+        identity = (account.platform, account.account)
+        settings = db.query(MonitorSettings).filter(MonitorSettings.id == 1).first()
+        interval = settings.default_interval if settings else 14400
+        now = datetime.utcnow()
+        short_retry = (
+            scheduled and account.collect_status == "failed"
+            and account.last_attempt_at is not None
+            and is_retryable_result({"success": False, "error": account.collect_error})
+            and max(0, int(account.collect_retry_count or 0)) < len(RETRY_DELAYS)
+        )
+        account.collect_retry_count = max(0, int(account.collect_retry_count or 0)) + 1 if short_retry else 0
+        account.last_attempt_at = now
+        account.next_attempt_at = None
+        db.commit()
+        result = await _collect_account_once(db, account, proxy, settings)
+        current_identity = db.query(OpAccount.platform, OpAccount.account).filter(OpAccount.id == account_id).one_or_none()
+        if current_identity == identity:
+            schedule_collection_result(account, interval, datetime.utcnow(), result)
+            db.commit()
+        return result
+    except BaseException:
+        result = False
+        db.rollback()
+        current_identity = db.query(OpAccount.platform, OpAccount.account).filter(OpAccount.id == account_id).one_or_none()
+        if identity is not None and current_identity == identity:
+            account.collect_status = "failed"
+            account.collect_error = "COLLECTION_INTERRUPTED: 采集任务被中断，将自动重试"
+            schedule_collection_result(account, interval, datetime.utcnow(), False)
+            db.commit()
+        raise
+    finally:
+        # Settle waiters even when the owner is cancelled or its database write raises.
+        with _collection_guard:
+            if not existing.done():
+                existing.set_result(result)
+            _collection_results.pop(account_id, None)
 
 
 def _collect_unsupported(db: Session, account: OpAccount) -> None:
@@ -39,7 +129,9 @@ def _collect_unsupported(db: Session, account: OpAccount) -> None:
     db.commit()
 
 
-async def collect_account(db: Session, account: OpAccount, proxy: MonitorProxy | None) -> bool:
+async def _collect_account_once(
+    db: Session, account: OpAccount, proxy: MonitorProxy | None, settings: MonitorSettings | None,
+) -> bool:
     """
     按 platform 路由采集。
     - tiktok: 采集基础数据与视频；视频失败时保留成功的基础数据与历史视频。
@@ -61,8 +153,16 @@ async def collect_account(db: Session, account: OpAccount, proxy: MonitorProxy |
 
     profile_error = None
     data = None
+    used_proxy_ids: set[int] = set()
+    timeout = settings.request_timeout if settings else 30
     try:
-        data = await _collect_tiktok(db, account, proxy)
+        profile_result, proxy = await _fetch_with_failover(
+            db, scraper_service.fetch_user_info, account.account.strip().lstrip("@"),
+            proxy, used_proxy_ids, timeout=timeout,
+        )
+        if not profile_result.get("success") or not profile_result.get("data"):
+            raise RuntimeError(profile_result.get("error") or "fetch_user_info returned no data")
+        data = cast(dict[str, Any], profile_result["data"])
         current_identity = db.query(OpAccount.platform, OpAccount.account).filter(
             OpAccount.id == account.id
         ).one_or_none()
@@ -103,12 +203,11 @@ async def collect_account(db: Session, account: OpAccount, proxy: MonitorProxy |
         sec_uid = (data or {}).get("sec_uid") or cached_sec_uid
         if not sec_uid:
             raise RuntimeError("账号缺少 SEC_UID，无法采集视频")
-        settings = db.query(MonitorSettings).filter(MonitorSettings.id == 1).first()
-        result = await scraper_service.fetch_user_videos(
-            sec_uid, proxy=proxy,
-            max_count=settings.default_video_count if settings else 20,
+        result, proxy = await _fetch_with_failover(
+            db, scraper_service.fetch_user_videos, sec_uid, proxy, used_proxy_ids,
+            max_count=settings.default_video_count if settings else 20, timeout=timeout,
         )
-        if not result.get("success") or not isinstance(result.get("data"), list):
+        if not result.get("success") or result.get("partial") or not isinstance(result.get("data"), list):
             raise RuntimeError(result.get("error") or "未获取到视频列表")
         video_items = result["data"]
         expected_video_count = (data or {}).get("video_count")

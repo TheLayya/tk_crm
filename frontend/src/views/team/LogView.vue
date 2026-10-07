@@ -47,21 +47,21 @@
           </el-form>
 
           <!-- 桌面端表格 -->
-          <el-table v-if="!isMobile" :data="loginLogs" v-loading="loginLoading" stripe>
-            <el-table-column prop="username" label="用户名" width="120" />
-            <el-table-column prop="ip_address" label="IP地址" width="140" />
-            <el-table-column label="结果" width="80">
+          <crm-table table-id="team-login-logs" remote :query="loginTableQuery" @query-change="handleLoginTableQuery" v-if="!isMobile" :data="loginLogs" v-loading="loginLoading" stripe>
+            <el-table-column column-key="username" filter-type="text" prop="username" label="用户名" width="120" />
+            <el-table-column column-key="ip_address" filter-type="text" prop="ip_address" label="IP地址" width="140" />
+            <el-table-column column-key="result" prop="result" filter-type="enum" :filter-options="[{ label: '成功', value: 'success' }, { label: '失败', value: 'failed' }]" label="结果" width="80">
               <template #default="{ row }">
                 <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
                   {{ row.result === 'success' ? '成功' : '失败' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="reason" label="失败原因" />
-            <el-table-column prop="created_at" label="时间" width="180">
+            <el-table-column column-key="reason" filter-type="text" prop="reason" label="失败原因" />
+            <el-table-column column-key="created_at" filter-type="date" prop="created_at" label="时间" width="180">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
-          </el-table>
+          </crm-table>
 
           <!-- 移动端登录日志卡片 -->
           <div v-if="isMobile" class="ios-card-list" v-loading="loginLoading">
@@ -150,23 +150,23 @@
           </el-form>
 
           <!-- 桌面端表格 -->
-          <el-table v-if="!isMobile" :data="opLogs" v-loading="opLoading" stripe>
-            <el-table-column prop="username" label="操作人" width="120" />
-            <el-table-column prop="module" label="模块" width="120" />
-            <el-table-column prop="action" label="类型" width="90" />
-            <el-table-column prop="summary" label="内容摘要" />
-            <el-table-column prop="ip_address" label="IP地址" width="140" />
-            <el-table-column label="结果" width="80">
+          <crm-table table-id="team-operation-logs" remote :query="opTableQuery" @query-change="handleOpTableQuery" v-if="!isMobile" :data="opLogs" v-loading="opLoading" stripe>
+            <el-table-column column-key="username" filter-type="text" prop="username" label="操作人" width="120" />
+            <el-table-column column-key="module" filter-type="text" prop="module" label="模块" width="120" />
+            <el-table-column column-key="action" filter-type="text" prop="action" label="类型" width="90" />
+            <el-table-column column-key="summary" filter-type="text" prop="summary" label="内容摘要" />
+            <el-table-column column-key="ip_address" filter-type="text" prop="ip_address" label="IP地址" width="140" />
+            <el-table-column column-key="result" prop="result" filter-type="enum" :filter-options="[{ label: '成功', value: 'success' }, { label: '失败', value: 'failed' }]" label="结果" width="80">
               <template #default="{ row }">
                 <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
                   {{ row.result === 'success' ? '成功' : '失败' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="created_at" label="时间" width="180">
+            <el-table-column column-key="created_at" filter-type="date" prop="created_at" label="时间" width="180">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
-          </el-table>
+          </crm-table>
 
           <!-- 移动端操作日志卡片 -->
           <div v-if="isMobile" class="ios-card-list" v-loading="opLoading">
@@ -209,6 +209,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getLoginLogs, getOperationLogs } from '@/api/team'
@@ -219,6 +220,11 @@ const props = defineProps({ username: { type: String, default: '' }, initialTab:
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
 const onResize = () => { windowWidth.value = window.innerWidth }
+
+const { tableQuery: loginTableQuery, queryParams: loginQueryParams } = useTableQuery('team-login-logs')
+const { tableQuery: opTableQuery, queryParams: opQueryParams } = useTableQuery('team-operation-logs')
+const handleLoginTableQuery = (nextQuery) => { loginTableQuery.value = nextQuery; loginPage.value = 1; loadLoginLogs() }
+const handleOpTableQuery = (nextQuery) => { opTableQuery.value = nextQuery; opPage.value = 1; loadOpLogs() }
 
 const activeTab = ref(props.initialTab)
 
@@ -245,13 +251,13 @@ const formatTime = (t) => {
 
 const buildDateParams = (dateRange) => {
   if (!dateRange || !dateRange[0]) return {}
-  return { start_date: dateRange[0], end_date: dateRange[1] }
+  return { start_time: dateRange[0] + 'T00:00:00', end_time: dateRange[1] + 'T23:59:59.999999' }
 }
 
 const loadLoginLogs = async () => {
   loginLoading.value = true
   try {
-    const params = { page: loginPage.value, size: loginPageSize.value }
+    const params = { ...loginQueryParams.value, page: loginPage.value, size: loginPageSize.value }
     if (loginFilters.value.username) params.username = loginFilters.value.username
     if (loginFilters.value.result) params.result = loginFilters.value.result
     Object.assign(params, buildDateParams(loginFilters.value.dateRange))
@@ -268,7 +274,7 @@ const loadLoginLogs = async () => {
 const loadOpLogs = async () => {
   opLoading.value = true
   try {
-    const params = { page: opPage.value, size: opPageSize.value }
+    const params = { ...opQueryParams.value, page: opPage.value, size: opPageSize.value }
     if (opFilters.value.username) params.username = opFilters.value.username
     if (opFilters.value.module) params.module = opFilters.value.module
     if (opFilters.value.action) params.action = opFilters.value.action

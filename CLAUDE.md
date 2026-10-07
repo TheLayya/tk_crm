@@ -121,6 +121,8 @@ npm run dev -- --host 127.0.0.1 --port 5174
 | Windows 1.1.15 冒烟轮 | 2026-10-06 | 独立复审 P1/P2 none，GATE PASS；最终发布审计及安装/卸载实际 exit 0 | 修复 SDK 选择、窗口退出、回执、WebView2 隔离及审计缺失输入；本地包完成，未上传 Windows 资产；覆盖率/mypy 后置 | [docs/handover/2026-10-06-windows-1.1.15-smoke.md](docs/handover/2026-10-06-windows-1.1.15-smoke.md) |
 | 严格类型与覆盖率收敛轮 | 2026-10-06 | 三路独立复审 P1/P2 none，GATE PASS；正式门禁全部 exit 0，448 passed / 83.59%，mypy 73 文件 0 错误 | 保持 SQL 元数据/OpenAPI；补 30 项真实业务测试，修复 CSV/XLSX 24h 变化恒为 0；源码独立提交，未重新发布包或升级团队服务器 | [docs/handover/2026-10-06-strict-typing-and-coverage.md](docs/handover/2026-10-06-strict-typing-and-coverage.md) |
 | Windows 1.1.16 续验轮 | 2026-10-07 | CODEX SAYS：[P1] none；[P2] none；GATE PASS；APPROVE；正式代码门禁 exit 0，449 passed / 83.68%，mypy 73 文件零错误 | 修复探锁响应占用与有界抢锁，8 条交接测试 PASS；回滚夹具首轮 exit 1 后显式退出修正并独立 exit 0；旧包完整审计 exit 0，新运行包安装器最终验收 PENDING，未声明发布或线上升级 | [docs/handover/2026-10-07-windows-1.1.16-resume.md](docs/handover/2026-10-07-windows-1.1.16-resume.md) |
+| 全站表格控件轮 | 2026-10-07 | 独立交叉审查 P1/P2 none，GATE PASS；464 passed / 84.23%，strict mypy 74 文件零错误，前端构建及浏览器控件回归 exit 0 | 28 处表格统一排序、类型筛选、列显隐/顺序/宽度及偏好恢复；修复分页查询和派生值边界，未提交发布部署 | [docs/handover/2026-10-07-all-table-controls.md](docs/handover/2026-10-07-all-table-controls.md) |
+| 采集健壮性轮 | 2026-10-07 | 独立预审/交叉复审 P1/P2 none，GATE PASS；525 passed / 84.74%，mypy 74 文件零错误；本地 Docker 健康和真实采集 HTTP 任务成功 | 有限重试、最多两代理、账号互斥、持久化短重试与启动恢复、Session/保存点隔离、partial 诊断；本地 Docker 已更新，未提交发布或修改公开服务器 | [docs/handover/2026-10-07-collection-resilience.md](docs/handover/2026-10-07-collection-resilience.md) |
 
 ---
 

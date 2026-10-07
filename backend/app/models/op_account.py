@@ -84,6 +84,9 @@ class OpAccount(Base):
     account_created_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     video_collected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    collect_retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     collect_status: Mapped[str] = mapped_column(
         SAEnum("pending", "success", "failed", "unsupported", name="op_collect_status_enum"),
         default="pending",

@@ -96,7 +96,7 @@
       </div>
 
       <!-- 节点数据表格 -->
-      <el-table
+      <crm-table table-id="proxy-nodes" remote :query="tableQuery" @query-change="handleTableQuery"
         ref="nodeTable"
         @expand-change="loadExpandedNode"
         row-key="id"
@@ -107,8 +107,8 @@
         stripe
         style="width: 100%;"
       >
-        <el-table-column type="selection" width="50" fixed="left" />
-        <el-table-column type="expand" width="36" fixed="left">
+        <el-table-column column-key="selection" table-tools-disabled type="selection" width="50" fixed="left" />
+        <el-table-column column-key="expand" table-tools-disabled type="expand" width="36" fixed="left">
           <template #default="{ row }">
             <div class="node-inline-details resource-state-grid" :style="{ width: nodeTable?.$el?.clientWidth ? nodeTable.$el.clientWidth + 'px' : '100%' }">
               <section>
@@ -126,19 +126,19 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="IP" width="130" fixed="left">
+        <el-table-column column-key="ip" prop="ip" filter-type="text" label="IP" width="130" fixed="left">
           <template #default="{ row }">
             <button type="button" class="resource-expand-trigger" :aria-expanded="expandedNodeIds.includes(row.id)" :title="expandedNodeIds.includes(row.id) ? '点击收起节点详情' : '点击展开节点详情'" @click="nodeTable.toggleRowExpansion(row)">{{ row.ip }}</button>
           </template>
         </el-table-column>
-        <el-table-column prop="port" label="端口" width="80" />
-        <el-table-column prop="country" label="国家/地区" width="100"><template #default="{ row }">{{ row.country || '未填写' }}</template></el-table-column>
-        <el-table-column prop="protocol" label="协议" width="90">
+        <el-table-column column-key="port" filter-type="number" prop="port" label="端口" width="80" />
+        <el-table-column column-key="country" filter-type="text" prop="country" label="国家/地区" width="100"><template #default="{ row }">{{ row.country || '未填写' }}</template></el-table-column>
+        <el-table-column column-key="protocol" filter-type="enum" :filter-options="[{ label: 'SOCKS5', value: 'socks5' }, { label: 'HTTP', value: 'http' }, { label: 'HTTPS', value: 'https' }]" prop="protocol" label="协议" width="90">
           <template #default="{ row }">
             <el-tag size="small" type="info">{{ row.protocol?.toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="绑定终端" min-width="180">
+        <el-table-column column-key="devices" prop="devices" filter-type="text" label="绑定终端" min-width="180">
           <template #default="{ row }">
             <el-space wrap v-if="row.devices?.length">
               <el-tag v-for="d in row.devices" :key="d.id" size="small">{{ d.name }}</el-tag>
@@ -146,30 +146,30 @@
             <span v-else>未绑定</span>
           </template>
         </el-table-column>
-        <el-table-column label="关联账号" min-width="400">
+        <el-table-column column-key="accounts" prop="accounts" filter-type="text" label="关联账号" min-width="400">
           <template #default="{ row }">
             <LinkedAccountCards :accounts="row.accounts || []" empty-text="未关联" />
           </template>
         </el-table-column>
-        <el-table-column prop="relay_ip" label="中转IP" width="130">
+        <el-table-column column-key="relay_ip" filter-type="text" prop="relay_ip" label="中转IP" width="130">
           <template #default="{ row }">{{ row.relay_ip || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="relay_port" label="中转端口" width="90">
+        <el-table-column column-key="relay_port" filter-type="number" prop="relay_port" label="中转端口" width="90">
           <template #default="{ row }">{{ row.relay_port || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="90">
+        <el-table-column column-key="status" filter-type="enum" :filter-options="[{ label: '闲置', value: 'idle' }, { label: '自用', value: 'active' }, { label: '已出售', value: 'sold' }, { label: '停用', value: 'disabled' }]" prop="status" label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="expire_date" label="到期日期" width="120">
+        <el-table-column column-key="expire_date" filter-type="date" prop="expire_date" label="到期日期" width="120">
           <template #default="{ row }">
             <span :class="{ 'expiring-soon': isExpiringSoon(row.expire_date) }">
               {{ row.expire_date || '-' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="last_test_result" label="测试结果" width="100">
+        <el-table-column column-key="last_test_result" filter-type="text" prop="last_test_result" label="测试结果" width="100">
           <template #default="{ row }">
             <span v-if="row.last_test_result" class="test-result">
               <el-icon v-if="row.last_test_result === 'success'" color="#67c23a"><CircleCheck /></el-icon>
@@ -179,24 +179,24 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="last_test_latency" label="延迟(ms)" width="90">
+        <el-table-column column-key="last_test_latency" filter-type="number" prop="last_test_latency" label="延迟(ms)" width="90">
           <template #default="{ row }">
             {{ row.last_test_latency != null ? row.last_test_latency : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="purchase_channel" label="采购渠道" width="120">
+        <el-table-column column-key="purchase_channel" filter-type="text" prop="purchase_channel" label="采购渠道" width="120">
           <template #default="{ row }">{{ row.purchase_channel || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="sale_customer" label="出售客户" width="120">
+        <el-table-column column-key="sale_customer" filter-type="text" prop="sale_customer" label="出售客户" width="120">
           <template #default="{ row }">{{ row.sale_customer || '-' }}</template>
         </el-table-column>
-        <el-table-column label="出售人" width="120">
+        <el-table-column column-key="sellers" prop="sellers" filter-type="text" label="出售人" width="120">
           <template #default="{ row }">
             <span v-if="row.sellers && row.sellers.length">{{ row.sellers.join('、') }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="密码" width="130">
+        <el-table-column column-key="password" table-tools-disabled prop="password" filter-type="text" label="密码" width="130">
           <template #default="{ row }">
             <div v-if="row.password" style="display: flex; align-items: center; gap: 6px;">
               <span>{{ visiblePasswords[row.id] ? row.password : '******' }}</span>
@@ -208,7 +208,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="215" fixed="right">
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="215" fixed="right">
           <template #default="{ row }">
             <el-button
               link
@@ -229,7 +229,7 @@
             >二维码</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
 
       <!-- 分页 -->
       <el-pagination
@@ -619,6 +619,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -734,6 +735,9 @@ function closeQrDialog() {
 }
 
 // ─── 筛选条件 ────────────────────────────────────────────────
+const { tableQuery, queryParams, resetTableQuery } = useTableQuery('proxy-nodes')
+const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; page.value = 1; loadNodes() }
+
 const filters = reactive({
   status: [],
   protocol: [],
@@ -751,6 +755,7 @@ const handleFilterChange = () => {
 }
 
 const resetFilters = () => {
+  resetTableQuery()
   filters.status = []
   filters.protocol = []
   filters.purchase_channel = ''
@@ -768,6 +773,7 @@ const pageSize = ref(50)
 
 const buildQueryParams = () => {
   const params = {
+    ...queryParams.value,
     skip: (page.value - 1) * pageSize.value,
     limit: pageSize.value
   }

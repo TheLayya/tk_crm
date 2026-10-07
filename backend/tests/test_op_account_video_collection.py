@@ -68,8 +68,8 @@ def test_scheduler_collects_videos_without_monitor_and_updates_in_place(
     assert account.collect_status == "success"
     assert account.video_collected_at is not None
     assert db.query(MonitorAccount).count() == 0
-    profile.assert_awaited_once_with("Standalone", proxy=None)
-    fetch.assert_awaited_once_with("sec-123", proxy=None, max_count=7)
+    profile.assert_awaited_once_with("Standalone", proxy=None, timeout=30)
+    fetch.assert_awaited_once_with("sec-123", proxy=None, max_count=7, timeout=30)
     assert db.query(OpAccountVideo).one().play_count == 100
     fetch.return_value["data"][0]["play_count"] = 999
     assert asyncio.run(op_collector_service.collect_account(db, account, None))
@@ -90,7 +90,7 @@ def test_zero_video_profile_records_successful_empty_collection(db, normal_user,
         "success": True, "data": [],
     })
     assert asyncio.run(op_collector_service.collect_account(db, account, None))
-    fetch.assert_awaited_once_with("sec-123", proxy=None, max_count=20)
+    fetch.assert_awaited_once_with("sec-123", proxy=None, max_count=20, timeout=30)
     assert account.video_collected_at is not None
     enrich_monitor_summaries(db, [account], normal_user)
     assert account.yesterday_video_count == 0
@@ -125,7 +125,7 @@ def test_zero_profile_count_still_collects_videos_and_stays_pending_until_comple
     profile.side_effect = check_profile
     fetch.side_effect = check_videos
     assert asyncio.run(op_collector_service.collect_account(db, account, None))
-    fetch.assert_awaited_once_with("sec-123", proxy=None, max_count=20)
+    fetch.assert_awaited_once_with("sec-123", proxy=None, max_count=20, timeout=30)
     assert db.query(OpAccountVideo).one().account_id == account.id
     assert account.collect_status == "success"
 
@@ -229,7 +229,7 @@ def test_profile_failure_still_attempts_cached_video_identity_and_preserves_reas
     if not video_success:
         fetch.return_value = {"success": False, "data": None, "error": "Video timeout"}
     assert not asyncio.run(op_collector_service.collect_account(db, account, None))
-    fetch.assert_awaited_once_with("valid-cached-sec", proxy=None, max_count=20)
+    fetch.assert_awaited_once_with("valid-cached-sec", proxy=None, max_count=20, timeout=30)
     assert account.collect_status == "failed"
     assert account.collect_error.startswith(error)
     assert account.nickname == "Old"

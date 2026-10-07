@@ -3,7 +3,7 @@ Team management API: departments, members, roles, and logs.
 """
 import hashlib
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.team import LoginLog, OperationLog, OperationToken, User
 from app.services.auth_service import require_permission
+from app.services.table_query_service import apply_table_query, model_table_fields
 from app.services.team_service import (
     DepartmentNode,
     create_dept,
@@ -156,10 +157,13 @@ def get_members(
     is_active: Optional[bool] = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=500),
+    sort_by: str | None = None,
+    sort_order: Literal["asc", "desc"] = "asc",
+    table_filters: str | None = None,
     db: Session = Depends(get_db),
     _: User = Depends(require_permission("team:member:view")),
 ) -> dict[str, object]:
-    return list_members(dept_id, username, is_active, page, size, db)
+    return list_members(dept_id, username, is_active, page, size, db, sort_by, sort_order, table_filters)
 
 
 @router.post("/member", status_code=201, response_model=None)
@@ -278,6 +282,9 @@ def get_login_logs(
     result: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
+    sort_by: str | None = None,
+    sort_order: Literal["asc", "desc"] = "asc",
+    table_filters: str | None = None,
     db: Session = Depends(get_db),
     _: User = Depends(require_permission("team:log:view")),
 ) -> dict[str, object]:
@@ -291,9 +298,10 @@ def get_login_logs(
         query = query.filter(LoginLog.created_at <= end_time)
     if result:
         query = query.filter(LoginLog.result == result)
-
+    query = apply_table_query(query, model_table_fields(LoginLog), sort_by, sort_order, table_filters,
+                              stable_column=LoginLog.id, default_sort=(LoginLog.created_at, "desc"))
     total = query.count()
-    logs = query.order_by(LoginLog.created_at.desc()).offset((page - 1) * size).limit(size).all()
+    logs = query.offset((page - 1) * size).limit(size).all()
 
     return {
         "total": total,
@@ -322,6 +330,9 @@ def get_operation_logs(
     action: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
+    sort_by: str | None = None,
+    sort_order: Literal["asc", "desc"] = "asc",
+    table_filters: str | None = None,
     db: Session = Depends(get_db),
     _: User = Depends(require_permission("team:log:view")),
 ) -> dict[str, object]:
@@ -337,9 +348,10 @@ def get_operation_logs(
         query = query.filter(OperationLog.module == module)
     if action:
         query = query.filter(OperationLog.action == action)
-
+    query = apply_table_query(query, model_table_fields(OperationLog), sort_by, sort_order, table_filters,
+                              stable_column=OperationLog.id, default_sort=(OperationLog.created_at, "desc"))
     total = query.count()
-    logs = query.order_by(OperationLog.created_at.desc()).offset((page - 1) * size).limit(size).all()
+    logs = query.offset((page - 1) * size).limit(size).all()
 
     return {
         "total": total,

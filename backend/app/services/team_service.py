@@ -1,8 +1,10 @@
 from fastapi import HTTPException
 from typing import Any, TypedDict
 from sqlalchemy.orm import Session
+from sqlalchemy import String, cast as sql_cast, func, select
 
 from app.models.team import Department, User, LoginLog
+from app.services.table_query_service import apply_table_query, model_table_fields
 
 
 # ── Department Services ──────────────────────────────────────────────────────
@@ -130,6 +132,9 @@ def list_members(
     page: int,
     size: int,
     db: Session,
+    sort_by: str | None = None,
+    sort_order: str = "asc",
+    table_filters: str | None = None,
 ) -> dict[str, Any]:
     """List members with optional filters and pagination."""
     query = db.query(User)
@@ -140,7 +145,14 @@ def list_members(
         query = query.filter(User.username.ilike(f"%{username}%"))
     if is_active is not None:
         query = query.filter(User.is_active == is_active)
-
+    fields = model_table_fields(User, names=("id", "username", "real_name", "department_id",
+                                            "is_active", "is_super_admin", "created_at"))
+    fields.update({
+        "department_name": select(Department.name).where(Department.id == User.department_id).scalar_subquery(),
+        "roles": select(sql_cast(func.group_concat(Role.name, " "), String)).select_from(UserRole).join(
+            Role, Role.id == UserRole.role_id).where(UserRole.user_id == User.id).scalar_subquery(),
+    })
+    query = apply_table_query(query, fields, sort_by, sort_order, table_filters, stable_column=User.id)
     total = query.count()
     users = query.offset((page - 1) * size).limit(size).all()
     department_ids = {u.department_id for u in users if u.department_id is not None}

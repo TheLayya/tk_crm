@@ -9,7 +9,7 @@
 """
 import logging
 import json
-from typing import List, Optional, cast
+from typing import List, Literal, Optional, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -144,6 +144,9 @@ def list_devices(
     keyword: Optional[str] = Query(None),
     device_type: Optional[str] = Query(None, pattern=r"^(pc|phone)$"),
     owner_id: Optional[int] = Query(None),
+    sort_by: str | None = None,
+    sort_order: Literal["asc", "desc"] = "asc",
+    table_filters: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:view")),
 ) -> dict[str, object]:
@@ -172,6 +175,7 @@ def list_devices(
             current_user_id=current_user.id,
             is_super_admin=current_user.is_super_admin,
             owner_ids=owner_ids,
+            sort_by=sort_by, sort_order=sort_order, table_filters=table_filters,
         )
         owner_map = _build_owner_map(db, devices)
         node_map = _build_node_map(db, devices)
@@ -180,6 +184,8 @@ def list_devices(
     except device_service.DeviceServiceError as e:
         # 服务层业务校验（如缺少用户上下文）保留原状态码，不吞成 500
         raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"list_devices failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -427,13 +433,17 @@ def get_device_logs(
     device_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
+    sort_by: str | None = None,
+    sort_order: Literal["asc", "desc"] = "asc",
+    table_filters: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("device:view")),
 ) -> dict[str, object]:
     """设备历史轨迹（含已删除设备，仅超管可查已删除；服务层执行授权与计数）。"""
     try:
         logs, total = device_service.get_device_logs(
-            db, device_id, current_user, skip=skip, limit=limit
+            db, device_id, current_user, skip=skip, limit=limit,
+            sort_by=sort_by, sort_order=sort_order, table_filters=table_filters,
         )
         items = [
             DeviceLogOut(
@@ -450,6 +460,8 @@ def get_device_logs(
         return {"items": items, "total": total}
     except device_service.DeviceServiceError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"get_device_logs failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

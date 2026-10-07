@@ -3,7 +3,7 @@ History and trend data API endpoints
 """
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from sqlalchemy import and_
 from app.core.database import get_db
 from app.models.monitor import MonitorAccount, MonitorHistory
 from app.schemas.history import HistoryResponse, TrendDataPoint, TrendResponse
+from app.services.table_query_service import apply_table_query, model_table_fields
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,9 @@ def get_account_history(
     end_time: Optional[datetime] = Query(None, description="End of time range filter"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Literal["asc", "desc"] = Query("asc"),
+    table_filters: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ) -> list[MonitorHistory]:
     """
@@ -57,13 +61,15 @@ def get_account_history(
         
         # Order by checked_at descending and paginate
         history = (
-            query.order_by(MonitorHistory.checked_at.desc())
+            apply_table_query(query, model_table_fields(MonitorHistory), sort_by, sort_order,
+                              table_filters, stable_column=MonitorHistory.id,
+                              default_sort=(MonitorHistory.checked_at, "desc"))
             .offset(skip)
             .limit(limit)
             .all()
         )
         
-        return history
+        return cast(list[MonitorHistory], history)
     
     except HTTPException:
         raise

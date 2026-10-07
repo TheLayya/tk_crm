@@ -10,6 +10,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models.proxy_node import ProxyNode
 from app.services.sale_validation_service import validate_sale_information
+from app.services.table_query_service import apply_table_query, model_table_fields
 from app.schemas.proxy_node import (
     ChannelStats,
     ProxyNodeCreate,
@@ -81,13 +82,20 @@ def get_nodes(
     skip: int = 0,
     limit: int = 100,
     allowed_node_ids: Optional[set[int]] = None,
+    sort_by: str | None = None,
+    sort_order: str = "asc",
+    table_filters: str | None = None,
+    extra_fields: dict[str, Any] | None = None,
 ) -> Tuple[List[ProxyNode], int]:
     """带筛选的分页查询，返回 (nodes_list, total_count)。"""
     query = db.query(ProxyNode)
     query = _apply_filter(query, filter)
     if allowed_node_ids is not None:
         query = query.filter(ProxyNode.id.in_(allowed_node_ids))
-
+    fields = model_table_fields(ProxyNode, exclude=("password",))
+    fields.update(extra_fields or {})
+    query = apply_table_query(query, fields, sort_by, sort_order, table_filters,
+                              stable_column=ProxyNode.id)
     total = query.count()
     nodes = query.offset(skip).limit(limit).all()
     for node in nodes:

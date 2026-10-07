@@ -7,35 +7,35 @@
       <el-button :disabled="loading || !report.items.length" @click="exportReport">导出明细 CSV</el-button>
       <span>按北京时间统计；卡密消耗与平台注册分别计数，不相加、不自动结算分成。</span>
     </div>
-    <el-table v-loading="loading" :data="report.members" size="small" empty-text="当前日期范围暂无完成记录">
-      <el-table-column prop="username" label="成员" />
-      <el-table-column prop="keys_consumed" label="卡密已消耗" />
-      <el-table-column prop="emails_completed" label="平台注册完成" />
-    </el-table>
+    <crm-table table-id="card-key-work-report-members" v-loading="loading" :data="report.members" size="small" empty-text="当前日期范围暂无完成记录">
+      <el-table-column column-key="username" filter-type="text" prop="username" label="成员" />
+      <el-table-column column-key="keys_consumed" filter-type="number" prop="keys_consumed" label="卡密已消耗" />
+      <el-table-column column-key="emails_completed" filter-type="number" prop="emails_completed" label="平台注册完成" />
+    </crm-table>
     <details v-if="report.items.length">
       <summary>完成明细（{{ report.items.length }} 条）</summary>
-      <el-table :data="pagedItems" size="small">
-        <el-table-column prop="username" label="成员" width="120" />
-        <el-table-column prop="kind" label="完成类型" width="120" />
-        <el-table-column prop="reference" label="关联记录" min-width="240" />
-        <el-table-column label="完成时间" width="190"><template #default="{ row }">{{ formatTime(row.time) }}</template></el-table-column>
-      </el-table>
-      <el-pagination v-model:current-page="page" :page-size="10" :total="report.items.length" layout="total, prev, pager, next" />
+      <crm-table table-id="card-key-work-report-items" :page="page" :page-size="10" @total-change="reportTotal = $event" @query-change="page = 1" :data="report.items" size="small">
+        <el-table-column column-key="username" filter-type="text" prop="username" label="成员" width="120" />
+        <el-table-column column-key="kind" filter-type="text" prop="kind" label="完成类型" width="120" />
+        <el-table-column column-key="reference" filter-type="text" prop="reference" label="关联记录" min-width="240" />
+        <el-table-column column-key="time" prop="time" filter-type="date" label="完成时间" width="190"><template #default="{ row }">{{ formatTime(row.time) }}</template></el-table-column>
+      </crm-table>
+      <el-pagination v-model:current-page="page" :page-size="10" :total="reportTotal" layout="total, prev, pager, next" />
     </details>
   </el-card>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { getCardKeyWorkReport } from '@/api/card_keys'
 
 const props = defineProps({ projectId: { type: Number, required: true }, projectName: { type: String, required: true } })
 const range = ref(null)
 const report = ref({ members: [], items: [] })
 const page = ref(1)
+const reportTotal = ref(0)
 const loading = ref(false)
 let requestVersion = 0
-const pagedItems = computed(() => report.value.items.slice((page.value - 1) * 10, page.value * 10))
 const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—'
 const load = async () => {
   const version = ++requestVersion

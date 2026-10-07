@@ -4,7 +4,7 @@ Account CRUD API endpoints with batch operations
 from app.models.team import User
 from datetime import datetime
 import logging
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
@@ -31,6 +31,7 @@ from app.services.auth_service import (
 from app.models.monitor import Project, MonitorHistory, latest_check_summary
 from app.models.video import Video
 from app.services.project_service import get_visible_project_ids
+from app.services.table_query_service import apply_table_rows, field_kind, parse_table_filters
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +45,24 @@ def get_accounts(
     is_active: Optional[bool] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Literal["asc", "desc"] = Query("asc"),
+    table_filters: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_from_header),
     _: User = Depends(require_permission("monitor:view")),
 ) -> dict[str, object]:
     try:
+        row_fields = {name: field_kind(column) for name, column in monitor_service.MONITOR_TABLE_FIELDS.items()}
+        row_fields.update({"project_name": "text", "latest_check_status": "enum", "latest_check_error": "text",
+                           "followers_change": "number", "yesterday_video_count": "number",
+                           "yesterday_video_plays": "number", "video_data_updated_at": "date"})
+        parsed = parse_table_filters(table_filters, row_fields)
+        parse_table_filters({name: condition for name, condition in parsed.items()
+                             if name in monitor_service.MONITOR_TABLE_FIELDS}, monitor_service.MONITOR_TABLE_FIELDS)
+        # Validate even when the user's project scope produces an empty result.
+        apply_table_rows([], row_fields, sort_by, sort_order, parsed)
+        derived = bool((set(parsed) | ({sort_by} if sort_by else set())) - set(monitor_service.MONITOR_TABLE_FIELDS))
         data_scope = get_user_data_scope(db, current_user)
         dept_usernames = get_dept_member_usernames(db, current_user) if data_scope == "dept" else None
         allowed_project_ids = get_visible_project_ids(db, current_user.username, data_scope, dept_usernames)
@@ -60,15 +74,21 @@ def get_accounts(
         total = monitor_service.count_accounts(
             db, project_id=project_id, keyword=keyword, is_active=is_active,
             allowed_project_ids=allowed_project_ids,
+            sort_by=None if derived else sort_by,
+            sort_order=sort_order,
+            table_filters=None if derived else parsed,
         )
         accounts = monitor_service.get_accounts(
             db,
             project_id=project_id,
             keyword=keyword,
             is_active=is_active,
-            skip=skip,
-            limit=limit,
+            skip=0 if derived else skip,
+            limit=None if derived else limit,
             allowed_project_ids=allowed_project_ids,
+            sort_by=None if derived else sort_by,
+            sort_order=sort_order,
+            table_filters=None if derived else parsed,
         )
 
         account_ids = [account.id for account in accounts]
@@ -82,15 +102,23 @@ def get_accounts(
         result = []
         for account in accounts:
             account_dict = AccountResponse.model_validate(account).model_dump()
-            latest = db.query(MonitorHistory).filter(MonitorHistory.account_id == account.id).order_by(MonitorHistory.checked_at.desc(), MonitorHistory.id.desc()).first()
+            history = db.query(MonitorHistory).filter(MonitorHistory.account_id == account.id).order_by(MonitorHistory.checked_at.desc(), MonitorHistory.id.desc()).limit(2).all()
+            latest = history[0] if history else None
             account_dict.update(latest_check_summary(latest))
             account_dict['project_name'] = account.project.name if account.project else None
             account_dict['yesterday_video_count'] = yesterday_counts.get(account.id)
             account_dict['yesterday_video_plays'] = yesterday_plays.get(account.id, []) if yesterday_counts.get(account.id) is not None else None
             account_dict['video_data_updated_at'] = video_updated_at.get(account.id)
+            account_dict['followers_change'] = history[0].follower_count - history[1].follower_count if len(history) == 2 else None
             result.append(account_dict)
-
+        if derived:
+            # ponytail: derived queries scan all scoped accounts; move enrichment into SQL if datasets outgrow memory.
+            result = apply_table_rows(result, row_fields, sort_by, sort_order, parsed)
+            total = len(result)
+            result = result[skip:skip + limit]
         return {"items": result, "total": total}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get accounts: {e}")
         raise HTTPException(

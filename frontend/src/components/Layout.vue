@@ -155,11 +155,16 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.16'
+const APP_VERSION = '1.1.17'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
+    date: '2026-10-07',
+    items: ['全站表格支持排序、筛选、列显示和自定义顺序', '采集增加有限重试、代理切换、任务互斥和中断恢复', '视频部分结果和失败状态更准确，保留已采资料']
+  },
+  {
+    version: '1.1.16',
     date: '2026-10-06',
     items: ['修复监控账号导出24小时变化量始终为0', '严格类型检查与80%测试覆盖率门禁全部通过', 'Windows更新增加跨进程互斥，防止重开窗口重复更新']
   },

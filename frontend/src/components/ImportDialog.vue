@@ -51,9 +51,9 @@
         <el-tag type="info">总计: {{ results.total }}</el-tag>
       </div>
 
-      <el-table :data="results.results" max-height="300" style="margin-top: 10px">
-        <el-table-column prop="username" label="用户名" width="150" />
-        <el-table-column prop="status" label="状态" width="100">
+      <crm-table table-id="monitor-import-results" :data="results.results" max-height="300" style="margin-top: 10px">
+        <el-table-column column-key="username" filter-type="text" prop="username" label="用户名" width="150" />
+        <el-table-column column-key="status" filter-type="enum" :filter-options="[{ label: '成功', value: 'success' }, { label: '重复', value: 'duplicate' }, { label: '失败', value: 'failed' }]" prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag
               :type="row.status === 'success' ? 'success' : row.status === 'duplicate' ? 'warning' : 'danger'"
@@ -63,8 +63,8 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="reason" label="原因" />
-      </el-table>
+        <el-table-column column-key="reason" filter-type="text" prop="reason" label="原因" />
+      </crm-table>
     </div>
 
     <template #footer>

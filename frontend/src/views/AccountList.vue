@@ -64,14 +64,14 @@
       </div>
 
       <!-- Table -->
-      <el-table
+      <crm-table table-id="legacy-monitor-accounts" remote :query="tableQuery" @query-change="handleTableQuery"
         :data="accounts"
         v-loading="loading"
         @selection-change="handleSelectionChange"
       >
-        <el-table-column type="selection" width="55" />
+        <el-table-column column-key="selection" table-tools-disabled type="selection" width="55" />
         
-        <el-table-column label="账号信息" min-width="300">
+        <el-table-column column-key="username" prop="username" filter-type="text" :table-fields="[{ prop: 'username', label: '用户名', type: 'text' }, { prop: 'nickname', label: '昵称', type: 'text' }]" label="账号信息" min-width="300">
           <template #default="{ row }">
             <div style="display: flex; align-items: center; gap: 12px;">
               <el-avatar :src="row.avatar_url" :size="50" v-if="row.avatar_url">
@@ -103,9 +103,9 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="project_name" label="所属项目" width="120" />
+        <el-table-column column-key="project_name" filter-type="text" prop="project_name" label="所属项目" width="120" />
         
-        <el-table-column label="粉丝数" min-width="200">
+        <el-table-column column-key="follower_count" prop="follower_count" filter-type="number" label="粉丝数" min-width="200">
           <template #default="{ row }">
             <div class="stat-with-chart">
               <div class="stat-info">
@@ -116,7 +116,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="关注数" min-width="200">
+        <el-table-column column-key="following_count" prop="following_count" filter-type="number" label="关注数" min-width="200">
           <template #default="{ row }">
             <div class="stat-with-chart">
               <div class="stat-info">
@@ -127,7 +127,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="点赞数" min-width="200">
+        <el-table-column column-key="like_count" prop="like_count" filter-type="number" label="点赞数" min-width="200">
           <template #default="{ row }">
             <div class="stat-with-chart">
               <div class="stat-info">
@@ -138,7 +138,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="视频数" min-width="160">
+        <el-table-column column-key="video_count" prop="video_count" filter-type="number" label="视频数" min-width="160">
           <template #default="{ row }">
             <div class="stat-with-chart">
               <div class="stat-info">
@@ -149,14 +149,14 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="国家/地区" width="100" align="center">
+        <el-table-column column-key="region" prop="region" filter-type="text" label="国家/地区" width="100" align="center">
           <template #default="{ row }">
             <span v-if="row.region">{{ row.region }}</span>
             <span v-else style="color: #909399;">-</span>
           </template>
         </el-table-column>
         
-        <el-table-column label="注册时间" width="110" align="center">
+        <el-table-column column-key="account_created_at" prop="account_created_at" filter-type="date" label="注册时间" width="110" align="center">
           <template #default="{ row }">
             <span v-if="row.account_created_at" style="font-size: 12px;">
               {{ formatShortDate(row.account_created_at) }}
@@ -165,21 +165,21 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="代理" width="80" align="center">
+        <el-table-column column-key="use_proxy" prop="use_proxy" filter-type="enum" :filter-options="[{ label: '是', value: true }, { label: '否', value: false }]" label="代理" width="80" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.use_proxy" type="success" size="small">启用</el-tag>
             <el-tag v-else type="info" size="small">关闭</el-tag>
           </template>
         </el-table-column>
         
-        <el-table-column label="视频监控" width="90" align="center">
+        <el-table-column column-key="enable_video_monitoring" prop="enable_video_monitoring" filter-type="enum" :filter-options="[{ label: '是', value: true }, { label: '否', value: false }]" label="视频监控" width="90" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.enable_video_monitoring" type="success" size="small">启用</el-tag>
             <el-tag v-else type="info" size="small">关闭</el-tag>
           </template>
         </el-table-column>
         
-        <el-table-column prop="is_active" label="状态" width="80">
+        <el-table-column column-key="is_active" filter-type="enum" :filter-options="[{ label: '启用', value: true }, { label: '禁用', value: false }]" prop="is_active" label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'">
               {{ row.is_active ? '激活' : '禁用' }}
@@ -187,13 +187,13 @@
           </template>
         </el-table-column>
         
-        <el-table-column prop="last_checked_at" label="最后检查" width="180">
+        <el-table-column column-key="last_checked_at" filter-type="date" prop="last_checked_at" label="最后检查" width="180">
           <template #default="{ row }">
             {{ formatDate(row.last_checked_at) }}
           </template>
         </el-table-column>
         
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="viewDetail(row)">详情</el-button>
             <el-button link type="primary" @click="handleCheck(row)">立即检查</el-button>
@@ -201,7 +201,7 @@
             <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
 
       <!-- Pagination -->
       <div class="pagination">
@@ -301,6 +301,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -316,6 +317,9 @@ import AccountDialog from '@/components/AccountDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
+
+const { tableQuery, queryParams } = useTableQuery('legacy-monitor-accounts')
+const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; pagination.value.page = 1; loadAccounts() }
 
 const accounts = ref([])
 const projects = ref([])
@@ -390,6 +394,7 @@ const loadAccounts = async (renderCharts = true) => {
   loading.value = true
   try {
     const params = {
+      ...queryParams.value,
       skip: (pagination.value.page - 1) * pagination.value.limit,
       limit: pagination.value.limit
     }

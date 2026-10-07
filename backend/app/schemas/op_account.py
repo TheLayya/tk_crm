@@ -163,6 +163,9 @@ class OpAccountResponse(BaseModel):
     video_source: str = "op"
     collect_status: str
     collect_error: Optional[str] = None
+    last_attempt_at: Optional[datetime] = None
+    next_attempt_at: Optional[datetime] = None
+    collect_retry_count: int = 0
     gmail_check_status: Optional[str] = None
     gmail_check_raw_status: Optional[str] = None
     gmail_checked_at: Optional[datetime] = None

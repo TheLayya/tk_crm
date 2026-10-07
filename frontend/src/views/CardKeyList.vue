@@ -42,18 +42,18 @@
         <el-checkbox v-if="canManage" v-model="filters.mine" @change="reloadKeys">只看我的</el-checkbox>
         <el-input v-model="filters.keyword" clearable placeholder="搜索卡密 / 链接" style="width:220px" @keyup.enter="reloadKeys" @clear="reloadKeys" /><el-button link type="primary" @click="reloadKeys">搜索</el-button><el-button link type="primary" @click="load">刷新</el-button>
       </div>
-      <el-table v-if="selected" v-loading="loading" :data="keys" size="small" empty-text="暂无记录，领取后在这里找回">
-        <el-table-column label="卡密 / 链接" min-width="420"><template #default="{ row }"><code v-if="row.content">{{ row.content }}</code><span v-else class="muted">领取后可见</span></template></el-table-column>
-        <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag><div v-if="row.remark" class="key-remark" :title="row.remark">{{ row.remark }}</div></template></el-table-column>
-        <el-table-column label="领取人" prop="claimed_by" width="130" />
-        <el-table-column label="领取时间" width="180"><template #default="{ row }">{{ formatDate(row.claimed_at) }}</template></el-table-column>
-        <el-table-column label="消耗时间" width="180"><template #default="{ row }">{{ formatDate(row.consumed_at) }}</template></el-table-column>
-        <el-table-column label="操作" width="235" fixed="right"><template #default="{ row }"><span v-if="row.id === pendingKey?.id" class="muted">上方操作</span><template v-else><el-button v-if="row.content" link type="primary" @click="copy(row.content)">复制</el-button><el-button v-if="canManage && row.status === 'available'" link type="danger" @click="invalid(row)">标记无效</el-button><template v-if="row.status === 'claimed' && (row.claimed_by === username || canManage)"><el-button :disabled="consuming" link type="primary" @click="consume(row)">确认消耗</el-button><el-button :disabled="consuming" link type="warning" @click="release(row)">归还</el-button></template></template><el-button v-if="canManage || row.claimed_by === username" link @click="editKeyRemark(row)">备注</el-button><el-button v-if="row.history?.length" link @click="historyRow = row">记录</el-button></template></el-table-column>
-      </el-table>
+      <crm-table table-id="card-key-records" remote :query="tableQuery" @query-change="handleTableQuery" v-if="selected" v-loading="loading" :data="keys" size="small" empty-text="暂无记录，领取后在这里找回">
+        <el-table-column column-key="content" prop="content" filter-type="text" label="卡密 / 链接" min-width="420"><template #default="{ row }"><code v-if="row.content">{{ row.content }}</code><span v-else class="muted">领取后可见</span></template></el-table-column>
+        <el-table-column column-key="status" prop="status" filter-type="enum" :filter-options="[{ label: '可领取', value: 'available' }, { label: '待消耗', value: 'claimed' }, { label: '已消耗', value: 'consumed' }, { label: '无效售后', value: 'invalid' }]" label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag><div v-if="row.remark" class="key-remark" :title="row.remark">{{ row.remark }}</div></template></el-table-column>
+        <el-table-column column-key="claimed_by" filter-type="text" label="领取人" prop="claimed_by" width="130" />
+        <el-table-column column-key="claimed_at" prop="claimed_at" filter-type="date" label="领取时间" width="180"><template #default="{ row }">{{ formatDate(row.claimed_at) }}</template></el-table-column>
+        <el-table-column column-key="consumed_at" prop="consumed_at" filter-type="date" label="消耗时间" width="180"><template #default="{ row }">{{ formatDate(row.consumed_at) }}</template></el-table-column>
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="235" fixed="right"><template #default="{ row }"><span v-if="row.id === pendingKey?.id" class="muted">上方操作</span><template v-else><el-button v-if="row.content" link type="primary" @click="copy(row.content)">复制</el-button><el-button v-if="canManage && row.status === 'available'" link type="danger" @click="invalid(row)">标记无效</el-button><template v-if="row.status === 'claimed' && (row.claimed_by === username || canManage)"><el-button :disabled="consuming" link type="primary" @click="consume(row)">确认消耗</el-button><el-button :disabled="consuming" link type="warning" @click="release(row)">归还</el-button></template></template><el-button v-if="canManage || row.claimed_by === username" link @click="editKeyRemark(row)">备注</el-button><el-button v-if="row.history?.length" link @click="historyRow = row">记录</el-button></template></el-table-column>
+      </crm-table>
       <el-pagination v-if="total" class="pagination" v-model:current-page="filters.page" :page-size="filters.page_size" :total="total" layout="total, prev, pager, next" @current-change="loadKeys" />
     </el-card>
     <el-dialog :model-value="!!historyRow" title="卡密流转记录" width="min(800px, 94vw)" @close="historyRow = null">
-      <el-table :data="historyRow?.history || []" size="small"><el-table-column label="操作" width="85"><template #default="{ row }">{{ { claim: '领取', release: '归还', consume: '消耗', invalid: '无效售后', remark: '更新备注' }[row.action] }}</template></el-table-column><el-table-column prop="username" label="操作人" /><el-table-column label="时间" width="190"><template #default="{ row }">{{ formatDate(row.time) }}</template></el-table-column><el-table-column prop="remark" label="备注" min-width="180" /></el-table>
+      <crm-table table-id="card-key-flow-history" :data="historyRow?.history || []" size="small"><el-table-column column-key="action" prop="action" filter-type="text" label="操作" width="85"><template #default="{ row }">{{ { claim: '领取', release: '归还', consume: '消耗', invalid: '无效售后', remark: '更新备注' }[row.action] }}</template></el-table-column><el-table-column column-key="username" filter-type="text" prop="username" label="操作人" /><el-table-column column-key="time" prop="time" filter-type="date" label="时间" width="190"><template #default="{ row }">{{ formatDate(row.time) }}</template></el-table-column><el-table-column column-key="remark" filter-type="text" prop="remark" label="备注" min-width="180" /></crm-table>
     </el-dialog>
     <CardKeyWorkReport v-if="canManage && selected" :project-id="selected.id" :project-name="selected.name" />
     <el-dialog v-model="projectVisible" :title="editing ? '编辑项目' : '新建项目'" width="min(600px, 94vw)">
@@ -62,7 +62,7 @@
     </el-dialog>
     <el-dialog v-model="platformVisible" title="平台管理" width="min(620px, 94vw)">
       <div class="platform-create"><el-input v-model="platformDraft.name" placeholder="例如 TikTok" @keyup.enter="savePlatform" /><el-button type="primary" :loading="platformSaving" @click="savePlatform">{{ platformDraft.id ? '保存修改' : '新增平台' }}</el-button><el-button v-if="platformDraft.id" @click="resetPlatformDraft">取消编辑</el-button></div>
-      <el-table :data="platforms" size="small" empty-text="还没有平台配置"><el-table-column prop="name" label="平台" /><el-table-column label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? '启用' : '停用' }}</el-tag></template></el-table-column><el-table-column label="操作" width="180"><template #default="{ row }"><el-button link type="primary" @click="editPlatform(row)">编辑</el-button><el-button link :type="row.is_active ? 'warning' : 'success'" @click="togglePlatform(row)">{{ row.is_active ? '停用' : '启用' }}</el-button></template></el-table-column></el-table>
+      <crm-table table-id="card-key-platforms" :data="platforms" size="small" empty-text="还没有平台配置"><el-table-column column-key="name" filter-type="text" prop="name" label="平台" /><el-table-column column-key="is_active" prop="is_active" filter-type="enum" :filter-options="[{ label: '启用', value: true }, { label: '禁用', value: false }]" label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? '启用' : '停用' }}</el-tag></template></el-table-column><el-table-column column-key="actions" table-tools-disabled fixed="right" label="操作" width="180"><template #default="{ row }"><el-button link type="primary" @click="editPlatform(row)">编辑</el-button><el-button link :type="row.is_active ? 'warning' : 'success'" @click="togglePlatform(row)">{{ row.is_active ? '停用' : '启用' }}</el-button></template></el-table-column></crm-table>
       <template #footer><el-button @click="platformVisible=false">关闭</el-button></template>
     </el-dialog>
     <el-dialog v-model="completeVisible" title="注册完成并创建运营账号" width="min(520px, 94vw)"><el-form label-width="100px"><el-form-item label="注册邮箱"><span>{{ pendingEmail?.email }}</span></el-form-item><el-form-item label="平台账号" required><el-input v-model="completeForm.account" placeholder="填写刚注册的平台用户名" /></el-form-item><el-form-item label="账号密码"><el-input v-model="completeForm.password" type="password" show-password /></el-form-item><el-form-item label="账号 2FA"><el-input v-model="completeForm.totp_secret" placeholder="没有可留空" /></el-form-item><p class="form-hint">确认后自动创建运营账号、关联当前邮箱、添加平台标签并释放邮箱。</p></el-form><template #footer><el-button @click="completeVisible=false">取消</el-button><el-button type="primary" :loading="completing" @click="submitCompleteEmail">确认完成</el-button></template></el-dialog>
@@ -71,6 +71,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
@@ -83,6 +84,9 @@ const canManage = computed(() => auth.hasPermission('card_key:manage'))
 const username = computed(() => auth.user?.username)
 const projects = ref([]); const members = ref([]); const keys = ref([]); const selectedId = ref(null); const loading = ref(false); const claiming = ref(false); const saving = ref(false); const importing = ref(false); const projectVisible = ref(false); const importVisible = ref(false); const editing = ref(false); const importText = ref('')
 const projectForm = reactive({ id: null, name: '', description: '', target_platform: '', members: [], is_active: true }); const selected = computed(() => projects.value.find(x => x.id === selectedId.value))
+const { tableQuery, queryParams } = useTableQuery('card-key-records')
+const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; filters.page = 1; loadKeys() }
+
 const filters = reactive({ page: 1, page_size: 30, status: '', mine: false, keyword: '' })
 const total = ref(0)
 const pendingKey = ref(null)
@@ -139,7 +143,7 @@ const loadKeys = async () => {
   loading.value = true
   try {
     const [result, pending, email] = await Promise.all([
-      getCardKeys(selectedId.value, filters),
+      getCardKeys(selectedId.value, { ...filters, ...queryParams.value }),
       getCardKeys(selectedId.value, { mine: true, status: 'claimed', page_size: 1 }),
       selected.value?.target_platform ? getClaimedEmail(selectedId.value) : Promise.resolve(null)
     ])

@@ -24,9 +24,9 @@
     </el-card>
 
     <el-card class="table-card" shadow="never">
-      <el-table class="email-table" ref="tableRef" v-loading="loading" :data="items" row-key="id" stripe @expand-change="handleExpand" @selection-change="selected = $event">
-        <el-table-column type="selection" width="40" />
-        <el-table-column type="expand" width="42">
+      <crm-table table-id="emails" remote :query="tableQuery" @query-change="handleTableQuery" class="email-table" ref="tableRef" v-loading="loading" :data="items" row-key="id" stripe @expand-change="handleExpand" @selection-change="selected = $event">
+        <el-table-column column-key="selection" table-tools-disabled type="selection" width="40" />
+        <el-table-column column-key="expand" table-tools-disabled type="expand" width="42">
           <template #default="{ row }">
             <div class="email-expanded">
               <div class="detail-grid">
@@ -62,7 +62,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="邮箱" min-width="250">
+        <el-table-column column-key="email" prop="email" filter-type="text" label="邮箱" min-width="250">
           <template #default="{ row }">
             <el-button class="email-name" link @click="tableRef.toggleRowExpansion(row)">{{ row.email }}</el-button>
             <div class="email-copy-actions">
@@ -72,29 +72,29 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="country" label="国家" width="110" />
-        <el-table-column label="平台注册 / 领取" min-width="220"><template #default="{ row }"><el-tag v-for="tag in row.platform_tags" :key="tag" size="small" style="margin:2px">{{ tag }}<span v-if="row.platform_registrants?.[tag]"> · {{ row.platform_registrants[tag] }}</span></el-tag><span v-if="!row.platform_tags?.length">未标记</span><div v-if="row.claimed_by" class="remark">{{ row.claimed_by }} 正在注册 {{ row.claimed_platform }}</div></template></el-table-column>
-        <el-table-column label="检测状态" width="120">
+        <el-table-column column-key="country" filter-type="text" prop="country" label="国家" width="110" />
+        <el-table-column column-key="platform_tags" prop="platform_tags" filter-type="text" :table-fields="[{ prop: 'platform_tags', label: '已注册平台', type: 'text' }, { prop: 'claimed_by', label: '领取人', type: 'text' }, { prop: 'claimed_platform', label: '领取平台', type: 'text' }]" label="平台注册 / 领取" min-width="220"><template #default="{ row }"><el-tag v-for="tag in row.platform_tags" :key="tag" size="small" style="margin:2px">{{ tag }}<span v-if="row.platform_registrants?.[tag]"> · {{ row.platform_registrants[tag] }}</span></el-tag><span v-if="!row.platform_tags?.length">未标记</span><div v-if="row.claimed_by" class="remark">{{ row.claimed_by }} 正在注册 {{ row.claimed_platform }}</div></template></el-table-column>
+        <el-table-column column-key="gmail_check_status" prop="gmail_check_status" filter-type="text" label="检测状态" width="120">
           <template #default="{ row }"><el-tag size="small" :type="checkTag(row.gmail_check_status)">{{ row.gmail_check_status || '未检测' }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="当前关联" width="110" align="center">
+        <el-table-column column-key="current_relation_count" prop="current_relation_count" filter-type="number" label="当前关联" width="110" align="center">
           <template #default="{ row }"><span class="count">{{ row.current_relation_count }}</span> 个账号</template>
         </el-table-column>
-        <el-table-column label="使用状态" width="110">
+        <el-table-column column-key="management_status" prop="management_status" filter-type="enum" :filter-options="statuses.map(status => ({ label: status, value: status }))" label="使用状态" width="110">
           <template #default="{ row }"><el-tag size="small" :type="statusTag(row.management_status)">{{ row.management_status }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="最后检测" width="165"><template #default="{ row }">{{ formatDate(row.gmail_checked_at) }}</template></el-table-column>
-        <el-table-column prop="device_name" label="绑定手机" width="110" />
-        <el-table-column prop="node_ip" label="绑定节点" width="170" />
-        <el-table-column label="采购 / 出售" width="180"><template #default="{ row }"><div>{{ row.purchase_channel || '未登记采购' }} · {{ money(row.purchase_price) }}</div><div>{{ row.sale_customer || '未登记出售' }} · {{ money(row.sale_price) }}</div></template></el-table-column>
-        <el-table-column label="操作" width="190" fixed="right">
+        <el-table-column column-key="gmail_checked_at" prop="gmail_checked_at" filter-type="date" label="最后检测" width="165"><template #default="{ row }">{{ formatDate(row.gmail_checked_at) }}</template></el-table-column>
+        <el-table-column column-key="device_name" filter-type="text" prop="device_name" label="绑定手机" width="110" />
+        <el-table-column column-key="node_ip" filter-type="text" prop="node_ip" label="绑定节点" width="170" />
+        <el-table-column column-key="purchase_channel" prop="purchase_channel" filter-type="text" :table-fields="[{ prop: 'purchase_channel', label: '采购渠道', type: 'text' }, { prop: 'purchase_price', label: '采购金额', type: 'number' }, { prop: 'purchase_date', label: '采购日期', type: 'date' }, { prop: 'sale_customer', label: '出售客户', type: 'text' }, { prop: 'sale_price', label: '出售金额', type: 'number' }, { prop: 'sale_date', label: '出售日期', type: 'date' }]" label="采购 / 出售" width="180"><template #default="{ row }"><div>{{ row.purchase_channel || '未登记采购' }} · {{ money(row.purchase_price) }}</div><div>{{ row.sale_customer || '未登记出售' }} · {{ money(row.sale_price) }}</div></template></el-table-column>
+        <el-table-column column-key="actions" table-tools-disabled label="操作" width="190" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canCheck && row.email.endsWith('@gmail.com')" :disabled="checking" link type="primary" @click="check(row)">检测</el-button>
             <el-button v-if="canManage" link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="canManage && !row.current_relation_count" link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </crm-table>
       <div class="pager"><span>共 {{ total }} 条</span><el-pagination v-model:current-page="page" v-model:page-size="pageSize" layout="prev, pager, next" :total="total" @current-change="load" /></div>
     </el-card>
 
@@ -152,6 +152,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listEmails, createEmail, updateEmail, deleteEmail, importEmails, checkEmails, getEmailRelations, getEmailAccountOptions, bindEmailAccount, unbindEmailAccount, getEmailPlatforms } from '@/api/emails'
@@ -181,6 +182,9 @@ const loadAssetOptions = async (visible) => {
   if (auth.hasPermission('device:view')) devices.value = (await getDevices({ limit: 200, device_type: 'phone' })).items
   if (auth.hasPermission('proxy_node:view')) nodes.value = (await getProxyNodes({ limit: 500 })).items.filter(node => ['idle', 'active'].includes(node.status))
 }
+const { tableQuery, queryParams } = useTableQuery('emails')
+const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; page.value = 1; load() }
+
 const filters = reactive({ keyword: '', management_status: '', platform: '' })
 const items = ref([]); const total = ref(0); const page = ref(1); const pageSize = ref(50); const loading = ref(false)
 const formVisible = ref(false); const editing = ref(false); const saving = ref(false)
@@ -202,7 +206,7 @@ const copyCredentials = (row) => copy([
 ].join('\n'), '登录资料')
 const statusTag = (value) => ({ '使用中': 'success', '已出售': 'warning', '锁定': 'warning', '废弃': 'danger' }[value] || 'info')
 const checkTag = (value) => ({ 正常: 'success', 封禁: 'danger', 验证: 'warning', 未注册: 'info' }[value] || 'info')
-const load = async () => { loading.value = true; try { const data = await listEmails({ ...filters, skip: (page.value - 1) * pageSize.value, limit: pageSize.value }); items.value = data.items; total.value = data.total } finally { loading.value = false } }
+const load = async () => { loading.value = true; try { const data = await listEmails({ ...filters, ...queryParams.value, skip: (page.value - 1) * pageSize.value, limit: pageSize.value }); items.value = data.items; total.value = data.total } finally { loading.value = false } }
 const handleExpand = async (row, expanded) => { if (expanded.some(item => item.id === row.id)) { row.relations = await getEmailRelations(row.id); row.assetHistory = await request.get(`/emails/${row.id}/asset-history`) } }
 const resetForm = () => Object.assign(form, { email: '', password: '', recovery_email: '', totp_secret: '', account_created_at: '', account_created_year: null, country: '', management_status: '闲置', platform_tags: [], remark: '' })
 const openCreate = () => { editing.value = false; resetForm(); Object.assign(form, tradeDefaults()); formVisible.value = true }

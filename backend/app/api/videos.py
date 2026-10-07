@@ -3,7 +3,7 @@ Video and VideoStats API endpoints
 """
 from app.models.video import VideoStats
 import logging
-from typing import List
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -22,6 +22,9 @@ def get_account_videos(
     account_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Literal["asc", "desc"] = Query("asc"),
+    table_filters: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     """
@@ -46,10 +49,12 @@ def get_account_videos(
             )
         
         # Get total count
-        total = db.query(Video).filter(Video.account_id == account_id).count()
+        query = video_service.table_videos_query(db, account_id, sort_by=sort_by,
+                                                 sort_order=sort_order, table_filters=table_filters)
+        total = query.count()
         
         # Get paginated videos
-        videos = video_service.get_videos(db, account_id, skip=skip, limit=limit)
+        videos = query.offset(skip).limit(limit).all()
         
         return {
             "items": videos,

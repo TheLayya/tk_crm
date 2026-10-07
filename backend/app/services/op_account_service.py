@@ -10,6 +10,7 @@ from typing import Any, Callable, List, Optional, cast
 
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
+from app.services.table_query_service import apply_table_query, model_table_fields
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.database import SessionLocal
@@ -203,6 +204,9 @@ def update_op_account(db: Session, id: int, data: OpAccountUpdate, actor: str | 
         account.previous_follower_count = None
         account.last_collected_at = None
         account.video_collected_at = None
+        account.last_attempt_at = None
+        account.next_attempt_at = None
+        account.collect_retry_count = 0
         account.collect_status = "pending"
         account.collect_error = None
     if {'device_id', 'node_id'} & update_data.keys():
@@ -234,9 +238,12 @@ def list_op_accounts(
     purchase_channel: Optional[str] = None,
     sale_customer: Optional[str] = None,
     skip: int = 0,
-    limit: int = 50,
+    limit: Optional[int] = 50,
     current_user: Optional[User] = None,
     exclude_gmail: bool = False,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
+    table_filters: object = None,
 ) -> tuple[list[OpAccount], int]:
     query = scoped_op_accounts(db, current_user) if current_user is not None else db.query(OpAccount)
     if exclude_gmail:
@@ -258,6 +265,9 @@ def list_op_accounts(
         query = query.filter(OpAccount.purchase_channel == purchase_channel)
     if sale_customer:
         query = query.filter(OpAccount.sale_customer == sale_customer)
+    fields = model_table_fields(OpAccount, exclude=("password", "totp_secret", "email_password", "project_id", "previous_follower_count"))
+    query = apply_table_query(query, fields, sort_by, sort_order, table_filters,
+                              stable_column=OpAccount.id, default_sort=(OpAccount.id, "asc"))
     total = query.count()
     items = query.offset(skip).limit(limit).all()
     # 反序列化每条记录的 sellers
@@ -753,19 +763,22 @@ async def run_scheduled_collections(db_factory: Callable[[], Session]) -> None:
         )
         due_accounts = []
         for account in accounts:
-            last_attempt = account.updated_at if account.collect_status == "failed" else account.last_collected_at
-            if (last_attempt is None or now >= last_attempt + timedelta(seconds=interval)
-                    or (account.video_collected_at is None and account.collect_status != "failed")):
+            last_attempt = (account.last_attempt_at or account.updated_at) if account.collect_status == "failed" else account.last_collected_at
+            if account.next_attempt_at is not None:
+                due = now >= account.next_attempt_at
+            else:
+                due = (last_attempt is None or now >= last_attempt + timedelta(seconds=interval)
+                       or (account.video_collected_at is None and account.collect_status != "failed"))
+            if due:
                 due_accounts.append(account)
         if not due_accounts:
             return
 
-        proxy = select_proxy(db)
         logger.info("Scheduled op-account collection: %d accounts due", len(due_accounts))
         for account in due_accounts:
             account_id = account.id
             try:
-                await collect_account(db, account, proxy)
+                await collect_account(db, account, select_proxy(db), scheduled=True)
             except Exception:
                 db.rollback()
                 logger.exception("Scheduled collection failed for op account %s", account_id)
@@ -821,8 +834,10 @@ def run_collect_task(task_id: str, account_ids: list[int]) -> None:
 
     db: Session = SessionLocal()
     try:
-        proxy = select_proxy(db)
-        for account_id in account_ids:
+        task = db.get(OpCollectTask, task_id)
+        if task is None or task.status != "running":
+            return
+        for account_id in dict.fromkeys(account_ids):
             account = db.query(OpAccount).filter(OpAccount.id == account_id).first()
             if not account:
                 _increment_task(db, task_id, success=False)
@@ -832,11 +847,12 @@ def run_collect_task(task_id: str, account_ids: list[int]) -> None:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    ok = loop.run_until_complete(collect_account(db, account, proxy))
+                    ok = loop.run_until_complete(collect_account(db, account, select_proxy(db)))
                 finally:
                     loop.close()
                 _increment_task(db, task_id, success=ok)
             except Exception as e:
+                db.rollback()
                 logger.error(f"run_collect_task: error collecting account {account_id}: {e}")
                 _increment_task(db, task_id, success=False)
 
@@ -847,6 +863,7 @@ def run_collect_task(task_id: str, account_ids: list[int]) -> None:
     except Exception as e:
         logger.error(f"run_collect_task fatal error: {e}")
         try:
+            db.rollback()
             task = db.query(OpCollectTask).filter(OpCollectTask.id == task_id).first()
             if task:
                 task.status = "failed"
@@ -859,13 +876,35 @@ def run_collect_task(task_id: str, account_ids: list[int]) -> None:
 
 def _increment_task(db: Session, task_id: str, success: bool) -> None:
     task = db.query(OpCollectTask).filter(OpCollectTask.id == task_id).first()
-    if task:
+    if task and task.status == "running" and task.completed < task.total:
         task.completed += 1
         if success:
             task.success += 1
         else:
             task.failed += 1
         db.commit()
+
+
+def recover_interrupted_collections(db: Session, started_at: datetime | None = None) -> None:
+    """Call once before starting this single-worker process's scheduler."""
+    from app.models.monitor import MonitorSettings
+    from app.services.op_collector_service import schedule_collection_result
+
+    now = started_at or datetime.utcnow()
+    settings = db.query(MonitorSettings).filter(MonitorSettings.id == 1).first()
+    interval = settings.default_interval if settings else 14400
+    for task in db.query(OpCollectTask).filter(OpCollectTask.status == "running", OpCollectTask.created_at <= now).all():
+        task.failed += max(0, task.total - task.completed)
+        task.completed = task.total
+        task.status = "failed"
+    for account in db.query(OpAccount).filter(
+        OpAccount.collect_status == "pending", OpAccount.last_attempt_at.isnot(None),
+        OpAccount.last_attempt_at <= now,
+    ).all():
+        account.collect_status = "failed"
+        account.collect_error = "COLLECTION_INTERRUPTED: 上次采集因服务重启中断，将自动重试"
+        schedule_collection_result(account, interval, now, False)
+    db.commit()
 
 
 # ---------------------------------------------------------------------------

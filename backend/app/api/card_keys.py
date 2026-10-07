@@ -1,5 +1,5 @@
 from fastapi.responses import JSONResponse
-from typing import TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 
 import hashlib
@@ -21,6 +21,7 @@ from app.models.card_key import CardKey, CardKeyEmailUsage, CardKeyPlatform, Car
 from app.models.op_account import EmailAccount, EmailAccountRelation, OpAccount
 from app.models.team import User
 from app.services.auth_service import require_permission, _get_user_permissions
+from app.services.table_query_service import apply_table_query, apply_table_rows, model_table_fields, parse_table_filters
 
 router = APIRouter(prefix="/card-keys", tags=["Card keys"])
 
@@ -292,6 +293,8 @@ def import_keys(project_id: int, body: ImportBody, db: Session = Depends(get_db)
 @router.get("/{project_id}/keys", response_model=None)
 def list_keys(project_id: int, page: int = Query(1, ge=1), page_size: int = Query(30, ge=1, le=100),
               status: str = "", mine: bool = False, keyword: str = "",
+              sort_by: str | None = None, sort_order: Literal["asc", "desc"] = "asc",
+              table_filters: str | None = None,
               db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project:
@@ -307,14 +310,23 @@ def list_keys(project_id: int, page: int = Query(1, ge=1), page_size: int = Quer
         if status not in ("available", "claimed", "consumed", "invalid"):
             raise HTTPException(422, "无效状态")
         query = query.filter(CardKey.status == status)
-    if not keyword.strip():
-        return {"items": [_key_json(key) for key in query.order_by(CardKey.id.desc()).offset((page - 1) * page_size).limit(page_size)], "total": query.count()}
-    rows = query.order_by(CardKey.id.desc()).all()
+    fields = {"id": "number", "content": "text", "status": "enum", "claimed_by": "text",
+              "claimed_at": "date", "consumed_at": "date", "remark": "text"}
+    filters = parse_table_filters(table_filters, fields)
+    if not keyword.strip() and sort_by != "content" and "content" not in filters:
+        query = apply_table_query(query, model_table_fields(CardKey, names=[name for name in fields if name != "content"]),
+                                  sort_by, sort_order, filters, stable_column=CardKey.id,
+                                  default_sort=(CardKey.id, "desc"))
+        return {"items": [_key_json(key) for key in query.offset((page - 1) * page_size).limit(page_size)],
+                "total": query.count()}
+    # ponytail: encrypted content must be decrypted before matching; add a search index if projects become large.
+    rows = [_key_json(key) for key in query.order_by(CardKey.id.desc()).all()]
     if keyword.strip():
         needle = keyword.strip().casefold()
-        rows = [key for key in rows if needle in (key.content or "").casefold()]
+        rows = [key for key in rows if needle in (str(key.get("content") or "")).casefold()]
+    rows = apply_table_rows(rows, fields, sort_by, sort_order, filters)
     start = (page - 1) * page_size
-    return {"items": [_key_json(key) for key in rows[start:start + page_size]], "total": len(rows)}
+    return {"items": rows[start:start + page_size], "total": len(rows)}
 
 
 @router.post("/{project_id}/claim", response_model=None)

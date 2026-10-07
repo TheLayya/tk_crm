@@ -1,4 +1,4 @@
-from typing import Any, overload, cast
+from typing import Any, Literal, overload, cast
 from sqlalchemy.orm import Query as ORMQuery
 import csv
 import json
@@ -7,7 +7,7 @@ from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_
+from sqlalchemy import String, cast as sql_cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ from app.services.asset_scope_service import scoped_op_accounts, get_visible_nod
 from app.services.gmail_checker_service import check_gmail_accounts, normalize_status
 from app.services.op_account_service import parse_email_import_line
 from app.services.sale_validation_service import validate_sale_information
+from app.services.table_query_service import apply_table_query, model_table_fields
 
 
 router = APIRouter(prefix="/emails", tags=["emails"])
@@ -161,6 +162,8 @@ def prepare_trade(values: dict[str, Any]) -> None:
 def list_emails(keyword: str | None = None, management_status: str | None = None,
                 platform: str | None = None,
                 skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
+                sort_by: str | None = None, sort_order: Literal["asc", "desc"] = "asc",
+                table_filters: str | None = None,
                 db: Session = Depends(get_db), user: User = Depends(require_permission("email:view"))) -> dict[str, object]:
     query = scoped_query(db, EmailAccount, user)
     if keyword:
@@ -169,8 +172,20 @@ def list_emails(keyword: str | None = None, management_status: str | None = None
         query = query.filter(EmailAccount.management_status == management_status)
     if platform:
         query = query.filter(EmailAccount.platform_tags.icontains(json.dumps(platform.strip(), ensure_ascii=False), autoescape=True))
+    fields = model_table_fields(EmailAccount, exclude=("password", "totp_secret"))
+    fields.update({
+        "device_name": select(Device.name).where(Device.id == EmailAccount.device_id).scalar_subquery(),
+        "node_ip": select(ProxyNode.ip + ":" + sql_cast(ProxyNode.port, String)).where(
+            ProxyNode.id == EmailAccount.node_id).scalar_subquery(),
+        "current_relation_count": select(func.count(EmailAccountRelation.id)).where(
+            EmailAccountRelation.email_id == EmailAccount.id,
+            EmailAccountRelation.unbound_at.is_(None),
+        ).scalar_subquery(),
+    })
+    query = apply_table_query(query, fields, sort_by, sort_order, table_filters,
+                              stable_column=EmailAccount.id, default_sort=(EmailAccount.id, "desc"))
     total = query.count()
-    emails = query.order_by(EmailAccount.id.desc()).offset(skip).limit(limit).all()
+    emails = query.offset(skip).limit(limit).all()
     email_ids = [email.id for email in emails]
     counts = {email_id: count for email_id, count in db.query(EmailAccountRelation.email_id, func.count(EmailAccountRelation.id)).filter(
         EmailAccountRelation.email_id.in_(email_ids),

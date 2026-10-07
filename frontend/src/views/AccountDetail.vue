@@ -63,41 +63,41 @@
 
         <!-- Desktop table -->
         <div v-if="!isMobile" style="overflow-x: auto;">
-          <el-table :data="history" max-height="400">
-            <el-table-column prop="checked_at" label="检查时间" width="180">
+          <crm-table table-id="account-detail-history" remote :query="historyTableQuery" @query-change="handleHistoryTableQuery" :data="history" max-height="400">
+            <el-table-column column-key="checked_at" filter-type="date" prop="checked_at" label="检查时间" width="180">
               <template #default="{ row }">
                 {{ formatDate(row.checked_at) }}
               </template>
             </el-table-column>
-            <el-table-column prop="follower_count" label="粉丝数" width="120">
+            <el-table-column column-key="follower_count" filter-type="number" prop="follower_count" label="粉丝数" width="120">
               <template #default="{ row }">
                 {{ formatNumber(row.follower_count) }}
               </template>
             </el-table-column>
-            <el-table-column prop="like_count" label="点赞数" width="120">
+            <el-table-column column-key="like_count" filter-type="number" prop="like_count" label="点赞数" width="120">
               <template #default="{ row }">
                 {{ formatNumber(row.like_count) }}
               </template>
             </el-table-column>
-            <el-table-column prop="video_count" label="视频数" width="100">
+            <el-table-column column-key="video_count" filter-type="number" prop="video_count" label="视频数" width="100">
               <template #default="{ row }">
                 {{ formatNumber(row.video_count) }}
               </template>
             </el-table-column>
-            <el-table-column prop="following_count" label="关注数" width="100">
+            <el-table-column column-key="following_count" filter-type="number" prop="following_count" label="关注数" width="100">
               <template #default="{ row }">
                 {{ formatNumber(row.following_count) }}
               </template>
             </el-table-column>
-            <el-table-column prop="check_status" label="状态" width="100">
+            <el-table-column column-key="check_status" filter-type="enum" :filter-options="[{ label: '成功', value: 'success' }, { label: '失败', value: 'failed' }]" prop="check_status" label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.check_status === 'success' ? 'success' : 'danger'" size="small">
                   {{ row.check_status === 'success' ? '成功' : '失败' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="error_message" label="错误信息" />
-          </el-table>
+            <el-table-column column-key="error_message" filter-type="text" prop="error_message" label="错误信息" />
+          </crm-table>
         </div>
 
         <!-- Mobile card list -->
@@ -154,8 +154,8 @@
 
         <!-- Desktop table -->
         <div v-if="!isMobile" style="overflow-x: auto;">
-          <el-table :data="videos" max-height="600">
-            <el-table-column label="封面" width="120">
+          <crm-table table-id="account-detail-videos" remote :query="videoTableQuery" @query-change="handleVideoTableQuery" :data="videos" max-height="600">
+            <el-table-column column-key="cover" table-tools-disabled label="封面" width="120">
               <template #default="{ row }">
                 <el-image
                   v-if="row.cover_url"
@@ -187,34 +187,34 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="video_id" label="视频ID" width="150" />
-            <el-table-column prop="title" label="标题" show-overflow-tooltip min-width="200" />
-            <el-table-column prop="published_at" label="发布时间" width="180">
+            <el-table-column column-key="video_id" filter-type="text" prop="video_id" label="视频ID" width="150" />
+            <el-table-column column-key="title" filter-type="text" prop="title" label="标题" show-overflow-tooltip min-width="200" />
+            <el-table-column column-key="published_at" filter-type="date" prop="published_at" label="发布时间" width="180">
               <template #default="{ row }">
                 {{ formatPublishDate(row.published_at) }}
               </template>
             </el-table-column>
-            <el-table-column prop="play_count" label="播放数" width="120">
+            <el-table-column column-key="play_count" filter-type="number" prop="play_count" label="播放数" width="120">
               <template #default="{ row }">
                 {{ formatNumber(row.play_count) }}
               </template>
             </el-table-column>
-            <el-table-column prop="like_count" label="点赞数" width="120">
+            <el-table-column column-key="like_count" filter-type="number" prop="like_count" label="点赞数" width="120">
               <template #default="{ row }">
                 {{ formatNumber(row.like_count) }}
               </template>
             </el-table-column>
-            <el-table-column prop="comment_count" label="评论数" width="120">
+            <el-table-column column-key="comment_count" filter-type="number" prop="comment_count" label="评论数" width="120">
               <template #default="{ row }">
                 {{ formatNumber(row.comment_count) }}
               </template>
             </el-table-column>
-            <el-table-column prop="share_count" label="分享数" width="120">
+            <el-table-column column-key="share_count" filter-type="number" prop="share_count" label="分享数" width="120">
               <template #default="{ row }">
                 {{ formatNumber(row.share_count) }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
+            <el-table-column column-key="actions" table-tools-disabled label="操作" width="150" fixed="right">
               <template #default="{ row }">
                 <el-button size="small" @click="viewVideo(row)">
                   <el-icon><Link /></el-icon>
@@ -222,7 +222,7 @@
                 </el-button>
               </template>
             </el-table-column>
-          </el-table>
+          </crm-table>
         </div>
 
         <!-- Mobile card list -->
@@ -292,6 +292,7 @@
 </template>
 
 <script setup>
+import { useTableQuery } from '@/composables/useTableQuery'
 import { ref, onMounted, watch, nextTick, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -304,9 +305,15 @@ import { getAccountVideos } from '@/api/videos'
 const route = useRoute()
 const router = useRouter()
 
+const { tableQuery: historyTableQuery, queryParams: historyQueryParams } = useTableQuery('account-detail-history')
+const { tableQuery: videoTableQuery, queryParams: videoQueryParams } = useTableQuery('account-detail-videos')
+const handleHistoryTableQuery = (nextQuery) => { historyTableQuery.value = nextQuery; loadHistory() }
+const handleVideoTableQuery = (nextQuery) => { videoTableQuery.value = nextQuery; videoPage.value = 1; loadVideos() }
+
 const loading = ref(false)
 const account = ref(null)
 const history = ref([])
+const chartHistory = ref([])
 const videos = ref([])
 const videoPage = ref(1)
 const videoPageSize = ref(20)
@@ -356,7 +363,14 @@ const loadAccount = async () => {
 const loadHistory = async () => {
   try {
     const accountId = route.params.id
-    history.value = await getAccountHistory(accountId, { limit: 100 })
+    const query = historyQueryParams.value
+    history.value = await getAccountHistory(accountId, { limit: 100, ...query })
+    if (!query.sort_by && !query.table_filters) {
+      chartHistory.value = history.value
+    } else {
+      const chartResponse = await getAccountHistory(accountId, { limit: 100 })
+      chartHistory.value = Array.isArray(chartResponse) ? chartResponse : (chartResponse.items || [])
+    }
     await nextTick()
     updateChart()
   } catch (error) {
@@ -369,6 +383,7 @@ const loadVideos = async () => {
   try {
     const accountId = route.params.id
     const response = await getAccountVideos(accountId, {
+      ...videoQueryParams.value,
       skip: (videoPage.value - 1) * videoPageSize.value,
       limit: videoPageSize.value
     })
@@ -418,8 +433,8 @@ const initChart = () => {
 }
 
 const updateChart = () => {
-  if (!chartInstance.value || !history.value.length) return
-  const data = [...history.value].reverse()
+  if (!chartInstance.value || !chartHistory.value.length) return
+  const data = [...chartHistory.value].reverse()
   const metricMap = {
     followers: { key: 'follower_count', name: '粉丝数' },
     following: { key: 'following_count', name: '关注数' },
