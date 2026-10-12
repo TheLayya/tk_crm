@@ -24,6 +24,12 @@
     </el-card>
 
     <el-card class="table-card" shadow="never">
+      <div class="batch-actions">
+        <span>已选 {{ selected.length }} 个邮箱</span>
+        <el-button v-if="canManage" type="primary" :disabled="!selected.length || loading" @click="openBatchSale">批量售出</el-button>
+        <el-button :disabled="!selected.length || loading" @click="copySelectedCredentials">复制选中资料</el-button>
+        <el-button v-if="selected.length" link @click="tableRef.clearSelection()">清空选择</el-button>
+      </div>
       <crm-table table-id="emails" remote :query="tableQuery" @query-change="handleTableQuery" class="email-table" ref="tableRef" v-loading="loading" :data="items" row-key="id" stripe @expand-change="handleExpand" @selection-change="selected = $event">
         <el-table-column column-key="selection" table-tools-disabled type="selection" width="40" />
         <el-table-column column-key="expand" table-tools-disabled type="expand" width="42">
@@ -32,7 +38,7 @@
               <div class="detail-grid">
                 <span class="credential-field"><b>邮箱密码</b><span class="credential-value">{{ row.showPassword ? row.password : mask(row.password) }}</span><span v-if="row.password" class="credential-actions"><el-button link @click="row.showPassword = !row.showPassword">{{ row.showPassword ? '隐藏' : '显示' }}</el-button><el-button link type="primary" @click="copy(row.password, '邮箱密码')">复制密码</el-button></span></span>
                 <span class="credential-field"><b>辅助邮箱</b><span class="credential-value">{{ row.recovery_email || '—' }}</span><el-button v-if="row.recovery_email" link type="primary" @click="copy(row.recovery_email, '辅助邮箱')">复制辅助邮箱</el-button></span>
-                <span class="credential-field"><b>2FA 密钥</b><span class="credential-value">{{ row.showTotp ? row.totp_secret : mask(row.totp_secret) }}</span><span v-if="row.totp_secret" class="credential-actions"><el-button link @click="row.showTotp = !row.showTotp">{{ row.showTotp ? '隐藏' : '显示' }}</el-button><el-button link type="primary" @click="copy(row.totp_secret, '2FA 密钥')">复制 2FA 密钥</el-button></span></span>
+                <span class="credential-field"><b>2FA 密钥</b><span class="credential-value">{{ row.showTotp ? row.totp_secret : mask(row.totp_secret) }}</span><span v-if="row.totp_secret" class="credential-actions"><el-button link @click="row.showTotp = !row.showTotp">{{ row.showTotp ? '隐藏密钥' : '显示密钥' }}</el-button><el-button link type="primary" @click="copy(row.totp_secret, '2FA 密钥')">复制 2FA 密钥</el-button></span><EmailTotp v-if="row.totp_secret" :key="row.id" :email-id="row.id" @copy="value => copy(value, '2FA 验证码')" /></span>
                 <span><b>注册</b>{{ row.account_created_at || row.account_created_year || '—' }}</span>
                 <span><b>检测</b>{{ row.gmail_check_status || '未检测' }}</span>
                 <span><b>添加人</b>{{ row.registrant || '—' }}</span>
@@ -95,8 +101,35 @@
           </template>
         </el-table-column>
       </crm-table>
-      <div class="pager"><span>共 {{ total }} 条</span><el-pagination v-model:current-page="page" v-model:page-size="pageSize" layout="prev, pager, next" :total="total" @current-change="load" /></div>
+      <div class="pager"><span>共 {{ total }} 条</span><el-pagination v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[50, 100, 200, 500]" layout="sizes, prev, pager, next" :total="total" @current-change="load" @size-change="page = 1; load()" /></div>
     </el-card>
+
+    <el-dialog v-model="batchSaleVisible" title="批量售出邮箱" width="min(620px, 94vw)" :close-on-click-modal="false" :close-on-press-escape="!batchSelling" :show-close="!batchSelling" @closed="batchSaleRows = []">
+      <template v-if="!batchSaleCompleted">
+        <p>本次售出 {{ batchSaleRows.length }} 个邮箱，统一登记以下信息。</p>
+        <el-form label-width="140px" :disabled="batchSelling">
+          <el-form-item label="出售客户" required><el-input v-model="batchSale.sale_customer" maxlength="255" placeholder="填写客户名称" /></el-form-item>
+          <el-form-item label="出售单价（每个）" required><el-input-number v-model="batchSale.sale_price" :min="0" :max="99999999.99" :precision="2" controls-position="right" style="width:100%" /></el-form-item>
+          <el-form-item label="出售日期" required><el-date-picker v-model="batchSale.sale_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
+          <el-form-item label="出售人" required>
+            <SellerSelector v-if="auth.hasPermission('team:member:view')" v-model="batchSale.sellers" :disabled="batchSelling" />
+            <el-input v-else :model-value="batchSale.sellers.join(' / ')" readonly />
+          </el-form-item>
+        </el-form>
+        <p class="sale-total">{{ batchSaleRows.length }} 个 × {{ money(batchSale.sale_price) }}，合计 {{ money(batchSaleTotal) }}</p>
+        <details class="sale-email-list"><summary>查看本次售出的邮箱（{{ batchSaleRows.length }} 个）</summary><div v-for="row in batchSaleRows" :key="row.id">{{ row.email }}</div></details>
+      </template>
+      <template v-else>
+        <el-alert :title="`成功售出 ${batchSaleRows.length} 个邮箱`" type="success" :closable="false" />
+        <p>{{ batchSale.sale_customer }} · 合计 {{ money(batchSaleTotal) }} · {{ batchSale.sale_date }}</p>
+        <p class="import-tip">交付格式：邮箱----密码----辅助邮箱----2FA 密钥，每行一个邮箱。可重新复制或直接选中下方资料手动复制。</p>
+        <el-input class="delivery-text" :model-value="batchDeliveryText" type="textarea" :rows="8" readonly />
+      </template>
+      <template #footer>
+        <template v-if="batchSaleCompleted"><el-button @click="batchSaleVisible = false">完成</el-button><el-button type="primary" @click="copyBatchDelivery">复制交付资料</el-button></template>
+        <template v-else><el-button :disabled="batchSelling" @click="batchSaleVisible = false">取消</el-button><el-button type="primary" :loading="batchSelling" :disabled="batchSelling" @click="sellBatch">确认售出并复制资料</el-button></template>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="formVisible" :title="editing ? '编辑邮箱' : '新增邮箱'" width="760px" top="5vh">
       <el-form label-width="100px">
@@ -155,13 +188,15 @@
 import { useTableQuery } from '@/composables/useTableQuery'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listEmails, createEmail, updateEmail, deleteEmail, importEmails, checkEmails, getEmailRelations, getEmailAccountOptions, bindEmailAccount, unbindEmailAccount, getEmailPlatforms } from '@/api/emails'
+import { listEmails, createEmail, updateEmail, batchSellEmails, deleteEmail, importEmails, checkEmails, getEmailRelations, getEmailAccountOptions, bindEmailAccount, unbindEmailAccount, getEmailPlatforms } from '@/api/emails'
 import { useAuthStore } from '@/stores/auth'
 import request from '@/api/request'
 import { getDevices } from '@/api/devices'
 import { getProxyNodes } from '@/api/proxy_nodes'
 import SellerSelector from '@/components/SellerSelector.vue'
 import { copyText } from '@/utils/clipboard'
+import { saleInformationError } from '@/utils/saleValidation'
+import EmailTotp from '@/components/EmailTotp.vue'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('email:manage'))
@@ -191,6 +226,11 @@ const formVisible = ref(false); const editing = ref(false); const saving = ref(f
 const form = reactive({ email: '', password: '', recovery_email: '', totp_secret: '', account_created_at: '', account_created_year: null, country: '', management_status: '闲置', platform_tags: [], remark: '' })
 const importVisible = ref(false); const importText = ref(''); const importFormat = ref('auto'); const importDelimiter = ref('auto'); const importPurchaseChannel = ref(''); const importPurchasePrice = ref(null); const importResult = ref(null); const importing = ref(false); const checkingImport = ref(false); const importCheckResult = ref(null)
 const bindVisible = ref(false); const binding = ref(false); const bindEmail = ref(null); const bindAccountId = ref(null); const bindRemark = ref(''); const accountOptions = ref([])
+const batchSaleVisible = ref(false); const batchSelling = ref(false); const batchSaleCompleted = ref(false); const batchSaleRows = ref([])
+const batchSale = reactive({ sale_customer: '', sale_price: null, sale_date: '', sellers: [] })
+const batchSaleTotal = computed(() => batchSale.sale_price == null ? null : Math.round(batchSale.sale_price * 100) * batchSaleRows.value.length / 100)
+const deliveryText = (rows) => rows.map(row => [row.email, row.password || '', row.recovery_email || '', row.totp_secret || ''].join('----')).join('\n')
+const batchDeliveryText = computed(() => deliveryText(batchSaleRows.value))
 
 const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
 const mask = (value) => value ? '••••••' : '—'
@@ -204,6 +244,37 @@ const copyCredentials = (row) => copy([
   `辅助邮箱：${row.recovery_email || ''}`,
   `2FA 密钥：${row.totp_secret || ''}`,
 ].join('\n'), '登录资料')
+const copySelectedCredentials = () => copy(deliveryText(selected.value), `${selected.value.length} 个邮箱的登录资料`)
+const copyBatchDelivery = async () => {
+  try { await copyText(batchDeliveryText.value); ElMessage.success(`已复制 ${batchSaleRows.value.length} 个邮箱的交付资料`) }
+  catch { ElMessage.warning('售出已保存，复制失败，请手动复制下方交付资料或重试') }
+}
+const openBatchSale = () => {
+  if (!selected.value.length || !canManage.value) return
+  if (selected.value.some(row => row.management_status === '已出售')) return ElMessage.warning('选中邮箱包含已出售记录，请取消选择后重试')
+  if (selected.value.some(row => row.claimed_by)) return ElMessage.warning('选中邮箱正在被领取使用，请取消选择后重试')
+  const today = new Date()
+  Object.assign(batchSale, { sale_customer: '', sale_price: null, sale_date: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`, sellers: auth.user?.username ? [auth.user.username] : [] })
+  batchSaleRows.value = selected.value.map(row => ({ ...row }))
+  batchSaleCompleted.value = false
+  batchSaleVisible.value = true
+}
+const sellBatch = async () => {
+  if (batchSelling.value || batchSaleCompleted.value || !canManage.value) return
+  const error = saleInformationError(batchSale, true)
+  if (error) return ElMessage.warning(error)
+  batchSelling.value = true
+  try {
+    try { await batchSellEmails({ ...batchSale, sale_customer: batchSale.sale_customer.trim(), email_ids: batchSaleRows.value.map(row => row.id) }) }
+    catch { return }
+    batchSaleCompleted.value = true
+    tableRef.value?.clearSelection()
+    selected.value = []
+    await copyBatchDelivery()
+    try { await load() }
+    catch { ElMessage.warning('售出已保存，列表刷新失败，请稍后刷新') }
+  } finally { batchSelling.value = false }
+}
 const statusTag = (value) => ({ '使用中': 'success', '已出售': 'warning', '锁定': 'warning', '废弃': 'danger' }[value] || 'info')
 const checkTag = (value) => ({ 正常: 'success', 封禁: 'danger', 验证: 'warning', 未注册: 'info' }[value] || 'info')
 const load = async () => { loading.value = true; try { const data = await listEmails({ ...filters, ...queryParams.value, skip: (page.value - 1) * pageSize.value, limit: pageSize.value }); items.value = data.items; total.value = data.total } finally { loading.value = false } }
@@ -215,10 +286,8 @@ const save = async () => {
   if (!editing.value && !form.purchase_channel?.trim()) return ElMessage.warning('请填写采购渠道')
   if (!editing.value && (form.purchase_price == null || !Number.isFinite(form.purchase_price) || form.purchase_price < 0)) return ElMessage.warning('请填写有效的采购成本，免费来源请填 0')
   if (form.management_status === '已出售') {
-    if (!form.sale_customer?.trim()) return ElMessage.warning('请填写出售客户')
-    if (form.sale_price == null || !Number.isFinite(form.sale_price) || form.sale_price < 0) return ElMessage.warning('请填写有效的出售金额')
-    if (!form.sale_date) return ElMessage.warning('请填写出售日期')
-    if (!form.sellers?.length) return ElMessage.warning('请填写出售人')
+    const error = saleInformationError(form, true)
+    if (error) return ElMessage.warning(error)
   }
   saving.value = true
   try {
@@ -285,6 +354,13 @@ onMounted(async () => { platforms.value = await getEmailPlatforms(); await load(
 .page-heading h2 { margin:0 0 5px; color:#1f2937; font-size:22px; }
 .page-heading span, .import-tip { color:#909399; font-size:13px; }
 .heading-actions { display:flex; gap:8px; }
+.batch-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.batch-actions > span { color:#606266; font-size:13px; margin-right:4px; }
+.batch-actions .el-button { margin-left:0; }
+.sale-total { font-weight:600; }
+.sale-email-list { margin-top:12px; color:#606266; overflow-wrap:anywhere; }
+.sale-email-list > div { padding-top:6px; }
+.delivery-text { margin-top:10px; }
 .filter-card, .table-card { margin-bottom:14px; border-radius:10px; }
 .filters { display:flex; gap:10px; max-width:760px; }
 .filters .el-input { width:340px; } .filters .el-select { width:140px; }
@@ -308,7 +384,7 @@ onMounted(async () => { platforms.value = await getEmailPlatforms(); await load(
 .relation-item > * { min-width:0; max-width:100%; }
 .relation-main { flex:1 1 250px; font-weight:500; } .relation-time { color:#909399; font-size:12px; }
 .remark { margin-top:10px; color:#909399; font-size:12px; }
-.pager { display:flex; justify-content:flex-end; align-items:center; gap:20px; padding-top:14px; color:#909399; font-size:13px; }
+.pager { display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:20px; padding-top:14px; color:#909399; font-size:13px; }
 .import-tip { margin-top:10px; line-height:1.6; } .import-result { margin-top:10px; color:#606266; }
 @media (max-width:768px) { .email-page { padding:8px; } .page-heading { align-items:flex-start; gap:10px; } .page-heading h2 { font-size:18px; } .filters { flex-wrap:wrap; } .filters .el-input { width:100%; } .filters .el-select { width:140px; } .detail-grid { grid-template-columns:1fr; } .email-expanded { padding:10px; } .relation-item { flex-wrap:wrap; } .relation-main { min-width:0; } }
 </style>

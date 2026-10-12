@@ -295,6 +295,14 @@ class EmailImportRequest(BaseModel):
     delimiter: Literal["auto", "----", "|", ":"] = "auto"
 
 
+class EmailBatchSaleRequest(BaseModel):
+    email_ids: List[PositiveInt] = Field(min_length=1, max_length=500)
+    sale_customer: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+    sale_price: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
+    sale_date: date
+    sellers: List[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]] = Field(min_length=1)
+
+
 class EmailRelationRequest(BaseModel):
     op_account_id: PositiveInt
     remark: Optional[str] = None

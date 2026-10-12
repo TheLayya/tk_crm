@@ -1,7 +1,10 @@
 import pytest
+import json
+from datetime import date
+from decimal import Decimal
 from sqlalchemy import text
 from app.models.op_account import EmailAccount, EmailAccountRelation, EmailAssetRelation, OpAccount
-from app.models.team import Role, RolePermission, UserRole
+from app.models.team import Department, OperationLog, Role, RolePermission, UserRole
 from tests.conftest import auth_headers
 
 
@@ -310,6 +313,90 @@ def test_email_scope_and_check_require_consent(client, db, normal_user, monkeypa
     assert client.post("/api/emails/check", headers=headers, json={"account_ids": [hidden.id], "consent": False}).status_code == 422
 
 
+def test_email_totp_standard_vector_and_auth(client, db, super_admin, normal_user, monkeypatch):
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    email = EmailAccount(email="totp@gmail.com", registrant="root", totp_secret=secret)
+    db.add(email)
+    db.commit()
+    monkeypatch.setattr("app.services.totp_service.time.time", lambda: 59)
+    path = f"/api/emails/{email.id}/totp"
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers=auth_headers(normal_user)).status_code == 403
+    response = client.get(path, headers=auth_headers(super_admin))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"code": "287082", "remaining": 1, "valid_for": 1}
+    assert response.headers["cache-control"] == "no-store"
+    assert secret not in response.text
+    listed = client.get("/api/emails", headers=auth_headers(super_admin)).json()["items"][0]
+    assert all(field not in listed for field in ("code", "remaining", "valid_for"))
+
+
+def test_email_totp_subsecond_expiry(client, db, super_admin, monkeypatch):
+    email = EmailAccount(email="boundary-totp@gmail.com", registrant="root",
+                         totp_secret="GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+    db.add(email)
+    db.commit()
+    path = f"/api/emails/{email.id}/totp"
+    headers = auth_headers(super_admin)
+    monkeypatch.setattr("app.api.emails.time.time", lambda: 59.9)
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["code"] == "287082"
+    assert response.json()["remaining"] == 1
+    assert response.json()["valid_for"] == pytest.approx(0.1)
+    monkeypatch.setattr("app.api.emails.time.time", lambda: 60.0)
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"code": "359152", "remaining": 30, "valid_for": 30}
+
+
+@pytest.mark.parametrize("secret", [None, "", "---", "invalid!"])
+def test_email_totp_rejects_missing_or_invalid_secret(client, db, super_admin, secret):
+    email = EmailAccount(email="invalid-totp@gmail.com", registrant="root", totp_secret=secret)
+    db.add(email)
+    db.commit()
+    response = client.get(f"/api/emails/{email.id}/totp", headers=auth_headers(super_admin))
+    assert response.status_code == 422
+    assert response.json() == {"detail": "该邮箱没有有效的 2FA 密钥"}
+
+
+@pytest.mark.parametrize("scope, visible", [
+    ("self", {"registrant", "operator"}),
+    ("dept", {"registrant", "operator", "peer"}),
+    ("all", {"registrant", "operator", "peer", "outside"}),
+])
+def test_email_totp_respects_scope(client, db, normal_user, other_user, super_admin, monkeypatch, scope, visible):
+    department = Department(name="email-team")
+    role = Role(name=f"email-totp-{scope}", data_scope=scope)
+    db.add_all([department, role])
+    db.flush()
+    normal_user.department_id = other_user.department_id = department.id
+    db.add(UserRole(user_id=normal_user.id, role_id=role.id))
+    db.add(RolePermission(role_id=role.id, permission="email:view"))
+    owners = {
+        "registrant": {"registrant": normal_user.username},
+        "operator": {"operator": normal_user.username},
+        "peer": {"registrant": other_user.username},
+        "outside": {"operator": super_admin.username},
+    }
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    emails = {name: EmailAccount(email=f"{name}@gmail.com", totp_secret=secret, **owner)
+              for name, owner in owners.items()}
+    db.add_all(emails.values())
+    db.commit()
+    monkeypatch.setattr("app.services.totp_service.time.time", lambda: 59)
+    headers = auth_headers(normal_user)
+    for name, email in emails.items():
+        response = client.get(f"/api/emails/{email.id}/totp", headers=headers)
+        if name in visible:
+            assert response.status_code == 200, response.text
+            assert response.json() == {"code": "287082", "remaining": 1, "valid_for": 1}
+        else:
+            assert response.status_code == 404
+            assert secret not in response.text and "287082" not in response.text
+    assert client.get("/api/emails/999999/totp", headers=headers).status_code == 404
+
+
 def test_email_probe_does_not_override_management_status(client, db, super_admin, monkeypatch):
     email = EmailAccount(email="probe@gmail.com", registrant="root", management_status="锁定")
     db.add(email)
@@ -363,3 +450,189 @@ def test_email_asset_scope(client, db, normal_user, super_admin):
                            json={"email": "scoped@gmail.com", "device_id": device.id,
                                  "purchase_channel": "供应商", "purchase_price": 0})
     assert response.status_code == 403
+
+
+def sale_payload(email_ids, **values):
+    return {"email_ids": email_ids, "sale_customer": "客户 A", "sale_price": "8.50",
+            "sale_date": "2026-10-12", "sellers": ["root"], **values}
+
+
+def test_email_batch_sale_deduplicates_and_preserves_credentials_assets(client, db, super_admin):
+    emails = [EmailAccount(email=f"sale-{index}@gmail.com", password="delivery-password",
+                           totp_secret="DELIVERYKEY", recovery_email="recovery@example.com",
+                           registrant=super_admin.username, operator="original-operator",
+                           purchase_channel="供应商", purchase_price=Decimal("3.50"),
+                           management_status=status, platform_tags='["TikTok"]')
+              for index, status in enumerate(["闲置", "使用中"])]
+    db.add_all(emails)
+    db.commit()
+    ids = [email.id for email in emails]
+    response = client.post("/api/emails/batch-sale", headers=auth_headers(super_admin),
+                           json=sale_payload([ids[1], ids[0], ids[1]], sale_customer=" 客户 A ", sellers=[" root "]))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"updated": 2, "email_ids": [ids[1], ids[0]]}
+    assert "delivery-password" not in response.text and "DELIVERYKEY" not in response.text
+    for email in emails:
+        db.refresh(email)
+        assert (email.management_status, email.sale_customer, email.sale_price, email.sale_date) == (
+            "已出售", "客户 A", Decimal("8.50"), date(2026, 10, 12))
+        assert json.loads(email.sellers) == ["root"]
+        assert (email.password, email.totp_secret, email.recovery_email) == (
+            "delivery-password", "DELIVERYKEY", "recovery@example.com")
+        assert (email.purchase_channel, email.purchase_price, email.platform_tags, email.operator) == (
+            "供应商", Decimal("3.50"), '["TikTok"]', "original-operator")
+    log = db.query(OperationLog).filter_by(summary="UPDATE /api/emails/batch-sale").one()
+    assert (log.module, log.action, log.username, log.result) == ("邮箱管理", "UPDATE", "root", "success")
+
+
+def test_email_batch_sale_requires_valid_trade_and_bounded_ids(client, db, super_admin):
+    email = EmailAccount(email="sale-validation@gmail.com", registrant=super_admin.username)
+    db.add(email)
+    db.commit()
+    headers = auth_headers(super_admin)
+    invalid_values = [
+        {"email_ids": []}, {"email_ids": [0]}, {"email_ids": [-1]}, {"email_ids": [email.id] * 501},
+        {"sale_customer": " "}, {"sale_customer": "x" * 256}, {"sale_price": -1},
+        {"sale_price": "NaN"}, {"sale_price": "Infinity"}, {"sale_price": "8.555"},
+        {"sale_price": "100000000.00"}, {"sale_date": None}, {"sale_date": "2026-13-01"},
+        {"sellers": []}, {"sellers": [" "]}, {"sellers": [None]},
+    ]
+    for values in invalid_values:
+        payload = sale_payload([email.id])
+        payload.update(values)
+        response = client.post("/api/emails/batch-sale", headers=headers, json=payload)
+        assert response.status_code == 422, (values, response.text)
+    for field in ("sale_customer", "sale_price", "sale_date", "sellers"):
+        payload = sale_payload([email.id])
+        del payload[field]
+        assert client.post("/api/emails/batch-sale", headers=headers, json=payload).status_code == 422
+    db.refresh(email)
+    assert email.management_status == "闲置" and email.sale_customer is None
+    assert client.post("/api/emails/batch-sale", headers=headers,
+                       json=sale_payload([email.id], sale_price=0)).status_code == 200
+
+
+def test_email_batch_sale_rejects_missing_and_sold_without_partial_changes(client, db, super_admin):
+    available = EmailAccount(email="available@gmail.com", registrant=super_admin.username)
+    sold = EmailAccount(email="sold@gmail.com", registrant=super_admin.username,
+                        management_status="已出售", sale_customer="原客户", sale_price=Decimal("6.00"),
+                        sale_date=date(2026, 10, 1), sellers='["original-seller"]')
+    db.add_all([available, sold])
+    db.commit()
+    headers = auth_headers(super_admin)
+    assert client.post("/api/emails/batch-sale", headers=headers,
+                       json=sale_payload([available.id, 999999])).status_code == 404
+    assert client.post("/api/emails/batch-sale", headers=headers,
+                       json=sale_payload([available.id, sold.id])).status_code == 409
+    db.refresh(available)
+    db.refresh(sold)
+    assert available.management_status == "闲置" and available.sale_customer is None
+    assert (sold.sale_customer, sold.sale_price, sold.sale_date, sold.sellers) == (
+        "原客户", Decimal("6.00"), date(2026, 10, 1), '["original-seller"]')
+
+
+@pytest.mark.parametrize("scope, expected", [
+    ("self", {"registrant", "operator"}),
+    ("dept", {"registrant", "operator", "peer"}),
+    ("all", {"registrant", "operator", "peer", "outside"}),
+])
+def test_email_batch_sale_respects_permissions_and_scope(client, db, normal_user, other_user, super_admin, scope, expected):
+    department = Department(name="email-sale-team")
+    role = Role(name=f"email-sale-{scope}", data_scope=scope)
+    db.add_all([department, role])
+    db.flush()
+    normal_user.department_id = other_user.department_id = department.id
+    db.add(UserRole(user_id=normal_user.id, role_id=role.id))
+    owners = {"registrant": {"registrant": normal_user.username}, "operator": {"operator": normal_user.username},
+              "peer": {"registrant": other_user.username}, "outside": {"registrant": super_admin.username}}
+    emails = {name: EmailAccount(email=f"sale-{name}@gmail.com", **owner) for name, owner in owners.items()}
+    db.add_all(emails.values())
+    db.commit()
+    payload = sale_payload([emails["registrant"].id], sellers=[normal_user.username])
+    headers = auth_headers(normal_user)
+    assert client.post("/api/emails/batch-sale", json=payload).status_code == 401
+    assert client.post("/api/emails/batch-sale", headers=headers, json=payload).status_code == 403
+    db.add(RolePermission(role_id=role.id, permission="email:manage"))
+    db.commit()
+    if scope != "all":
+        response = client.post("/api/emails/batch-sale", headers=headers,
+                               json=sale_payload([emails["registrant"].id, emails["outside"].id]))
+        assert response.status_code == 404
+        db.refresh(emails["registrant"])
+        assert emails["registrant"].management_status == "闲置"
+    for name, email in emails.items():
+        response = client.post("/api/emails/batch-sale", headers=headers,
+                               json=sale_payload([email.id], sellers=[normal_user.username]))
+        assert response.status_code == (200 if name in expected else 404), response.text
+        db.refresh(email)
+        assert email.management_status == ("已出售" if name in expected else "闲置")
+
+
+@pytest.mark.parametrize("concurrent_action", ["sale", "claim"])
+def test_email_batch_sale_rolls_back_if_another_sale_or_claim_wins(client, db, super_admin, monkeypatch, concurrent_action):
+    from sqlalchemy.orm import Query
+    available = EmailAccount(email="race-available@gmail.com", registrant=super_admin.username)
+    concurrent = EmailAccount(email="race-sold@gmail.com", registrant=super_admin.username)
+    db.add_all([available, concurrent])
+    db.commit()
+    update = Query.update
+
+    def concurrent_update(query, *args, **kwargs):
+        # Another request changes one selected email after the initial status check.
+        if concurrent_action == "sale":
+            concurrent.management_status = "已出售"
+            concurrent.sale_customer = "先成交客户"
+            concurrent.sale_price = Decimal("5.00")
+            concurrent.sale_date = date(2026, 10, 11)
+            concurrent.sellers = '["first-seller"]'
+        else:
+            concurrent.claimed_by = "claim-user"
+            concurrent.claimed_platform = "TikTok"
+        db.commit()
+        return update(query, *args, **kwargs)
+
+    monkeypatch.setattr(Query, "update", concurrent_update)
+    response = client.post("/api/emails/batch-sale", headers=auth_headers(super_admin),
+                           json=sale_payload([available.id, concurrent.id]))
+    assert response.status_code == 409, response.text
+    db.refresh(available)
+    db.refresh(concurrent)
+    assert available.management_status == "闲置" and available.sale_customer is None
+    if concurrent_action == "sale":
+        assert (concurrent.management_status, concurrent.sale_customer, concurrent.sale_price, concurrent.sellers) == (
+            "已出售", "先成交客户", Decimal("5.00"), '["first-seller"]')
+    else:
+        assert (concurrent.management_status, concurrent.claimed_by, concurrent.claimed_platform) == (
+            "闲置", "claim-user", "TikTok")
+
+
+def test_email_batch_sale_rejects_claimed_without_partial_changes(client, db, super_admin):
+    available = EmailAccount(email="unclaimed@gmail.com", registrant=super_admin.username)
+    claimed = EmailAccount(email="claimed@gmail.com", registrant=super_admin.username,
+                           claimed_by="claim-user", claimed_platform="TikTok")
+    db.add_all([available, claimed])
+    db.commit()
+    response = client.post("/api/emails/batch-sale", headers=auth_headers(super_admin),
+                           json=sale_payload([available.id, claimed.id]))
+    assert response.status_code == 409, response.text
+    db.refresh(available)
+    db.refresh(claimed)
+    assert available.management_status == "闲置" and available.sale_customer is None
+    assert (claimed.management_status, claimed.claimed_by, claimed.claimed_platform) == (
+        "闲置", "claim-user", "TikTok")
+
+
+def test_email_batch_sale_supports_500_rows_and_list_limit(client, db, super_admin):
+    emails = [EmailAccount(email=f"bulk-{index}@gmail.com", registrant=super_admin.username) for index in range(500)]
+    db.add_all(emails)
+    db.commit()
+    headers = auth_headers(super_admin)
+    listed = client.get("/api/emails", headers=headers, params={"limit": 500})
+    assert listed.status_code == 200, listed.text
+    assert len(listed.json()["items"]) == 500
+    assert client.get("/api/emails", headers=headers, params={"limit": 501}).status_code == 422
+    response = client.post("/api/emails/batch-sale", headers=headers,
+                           json=sale_payload([email.id for email in emails]))
+    assert response.status_code == 200, response.text
+    assert response.json()["updated"] == 500
+    assert db.query(EmailAccount).filter_by(management_status="已出售").count() == 500

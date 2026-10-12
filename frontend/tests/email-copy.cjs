@@ -2,12 +2,15 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || path.join(process.env.LOCALAPPDATA, 'TkCRM-Dev/ui-qa/node_modules/playwright'))
+const { launchUiBrowser } = require('../../desktop/tests/ui-browser.cjs')
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' })
+  const { browser, close } = await launchUiBrowser(chromium)
   const context = await browser.newContext({ viewport: { width: 1366, height: 768 } })
   try {
     const page = await context.newPage()
+    page.setDefaultTimeout(12000)
+    await page.clock.install()
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.addInitScript(() => {
@@ -31,9 +34,19 @@ async function main() {
     const password = 'copy-test-password-<&>'
     const recovery = 'long-recovery-address@example.invalid'
     const secret = 'JBSWY3DPEHPK3PXP'
+    let totpRequests = 0, totpMode = 'valid', releaseTotp
     await page.route('**/api/**', async route => {
       const endpoint = new URL(route.request().url()).pathname
       if (!endpoint.startsWith('/api/')) return route.continue()
+      if (endpoint === '/api/emails/1/totp') {
+        totpRequests += 1
+        const response = totpRequests === 1 ? { code: '287082', remaining: 2, valid_for: 2 } : { code: '359152', remaining: 30, valid_for: 30 }
+        if (totpMode === 'invalid') return route.fulfill({ status: 422, json: { detail: '2FA 密钥格式无效' } })
+        if (totpMode === 'delayed') return new Promise(resolve => {
+          releaseTotp = async () => { await route.fulfill({ json: response }); resolve() }
+        })
+        return route.fulfill({ json: response })
+      }
       const responses = {
         '/api/settings/public': { site_name: '复制验收' },
         '/api/updates/check': { current_version: '1.1.12', has_update: false },
@@ -70,6 +83,17 @@ async function main() {
     await expanded.waitFor()
     assert(!(await expanded.innerText()).includes(password), 'Password must stay masked')
     assert(!(await expanded.innerText()).includes(secret), '2FA secret must stay masked')
+    const totp = expanded.locator('.email-totp')
+    await totp.getByText('287082', { exact: true }).waitFor()
+    assert.equal(totpRequests, 1, 'Expanding must automatically request the code')
+    await expectCopy(totp, '复制验证码', '287082')
+    const clockBefore = await page.evaluate(() => performance.now())
+    await page.clock.fastForward(2000)
+    await totp.getByText('359152', { exact: true }).waitFor()
+    assert((await page.evaluate(() => performance.now())) >= clockBefore + 2000, 'TOTP test must advance the monotonic clock')
+    assert.equal(totpRequests, 2, 'Expiry must automatically refresh the code')
+    await expectCopy(totp, '复制验证码', '359152')
+    assert(!(await expanded.innerText()).includes(secret), 'Generating and copying a code must not reveal its key')
     await expectCopy(expanded, '复制密码', password)
     await expectCopy(expanded, '复制辅助邮箱', recovery)
     await expectCopy(expanded, '复制 2FA 密钥', secret)
@@ -88,6 +112,11 @@ async function main() {
       }
     }
     await page.setViewportSize({ width: 1366, height: 768 })
+    if (process.env.TKCRM_EMAIL_COPY_ARTIFACT) {
+      await page.clock.fastForward(5000)
+      fs.mkdirSync(path.dirname(process.env.TKCRM_EMAIL_COPY_ARTIFACT), { recursive: true })
+      await page.screenshot({ path: process.env.TKCRM_EMAIL_COPY_ARTIFACT, fullPage: true, style: '.el-message { visibility: hidden !important }' })
+    }
     await page.evaluate(() => { window.__clipboardMode = 'denied' })
     await expectCopy(actions, '复制密码', password, 'fallback')
     await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }) })
@@ -101,6 +130,9 @@ async function main() {
     assert.equal(await page.locator('textarea[readonly]').count(), 0)
 
     await page.locator('.email-name').first().click()
+    const afterCollapse = totpRequests
+    await page.clock.fastForward(31000)
+    assert.equal(totpRequests, afterCollapse, 'Collapsing must stop TOTP refresh requests')
     const empty = page.locator('.email-copy-actions').last()
     assert.equal(await empty.getByRole('button', { name: '复制密码', exact: true }).count(), 0)
     await page.evaluate(() => {
@@ -110,12 +142,63 @@ async function main() {
     await expectCopy(empty, '复制资料', '邮箱：empty@example.invalid\n邮箱密码：\n辅助邮箱：\n2FA 密钥：')
     await page.locator('.email-name').last().click()
     assert.equal(await page.locator('.email-expanded').getByRole('button', { name: /复制/ }).count(), 0)
+    assert.equal(await page.locator('.email-totp').count(), 0, 'Empty keys must not create a code or request')
+    await page.locator('.email-name').last().click()
+
+    totpMode = 'invalid'
+    await page.locator('.email-name').first().click()
+    await totp.getByText('2FA 密钥格式无效', { exact: true }).waitFor()
+    assert.equal(await totp.locator('code').count(), 0, 'Invalid keys must not display a stale code')
+    assert.equal(await totp.getByRole('button', { name: '复制验证码', exact: true }).count(), 0)
+    const afterInvalid = totpRequests
+    await page.clock.fastForward(31000)
+    assert.equal(totpRequests, afterInvalid, 'Invalid keys must wait for an explicit retry')
+    totpMode = 'valid'
+    await totp.getByRole('button', { name: '重试', exact: true }).click()
+    await totp.getByText('359152', { exact: true }).waitFor()
+    assert.equal(totpRequests, afterInvalid + 1, 'Retry must issue a new request')
+
+    totpMode = 'delayed'
+    const refreshRequest = page.waitForRequest('**/api/emails/1/totp')
+    await page.clock.fastForward(31000)
+    await refreshRequest
+    await totp.getByText('正在获取验证码…', { exact: true }).waitFor()
+    assert.equal(await totp.locator('code').count(), 0, 'Expired codes must disappear while refresh is pending')
+    assert.equal(await totp.getByRole('button', { name: '复制验证码', exact: true }).count(), 0)
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
+    await page.clock.fastForward(31000)
+    await releaseTotp()
+    await totp.getByText('正在更新验证码…', { exact: true }).waitFor()
+    assert.equal(await totp.locator('code').count(), 0, 'A late response must not extend an expired code lifetime')
+    assert.equal(await totp.getByRole('button', { name: '重试', exact: true }).count(), 0, 'Expired responses must automatically retry')
+    totpMode = 'valid'
+    await page.clock.fastForward(250)
+    await totp.getByText('359152', { exact: true }).waitFor()
+    await page.clock.resume()
+
+    totpMode = 'delayed'
+    const collapseRequest = page.waitForRequest('**/api/emails/1/totp')
+    await page.clock.fastForward(31000)
+    await collapseRequest
+    await page.locator('.email-name').first().click()
+    await expanded.waitFor({ state: 'hidden' })
+    const afterDelayedCollapse = totpRequests
+    await releaseTotp()
+    await page.clock.fastForward(31000)
+    assert.equal(totpRequests, afterDelayedCollapse, 'A late response must not restart a collapsed timer')
+    assert.equal(await page.locator('.email-totp').count(), 0)
+
+    const unmountRequest = page.waitForRequest('**/api/emails/1/totp')
+    await page.locator('.email-name').first().click()
+    await unmountRequest
+    await page.evaluate(() => document.querySelector('#app').__vue_app__.config.globalProperties.$router.push('/403'))
+    await page.locator('.forbidden-container').waitFor()
+    const afterUnmount = totpRequests
+    await releaseTotp()
+    await page.clock.fastForward(31000)
+    assert.equal(totpRequests, afterUnmount, 'A late response must not restart requests after page unmount')
     assert.deepEqual(errors, [], 'Email runtime errors')
-    if (process.env.TKCRM_EMAIL_COPY_ARTIFACT) {
-      fs.mkdirSync(path.dirname(process.env.TKCRM_EMAIL_COPY_ARTIFACT), { recursive: true })
-      await page.screenshot({ path: process.env.TKCRM_EMAIL_COPY_ARTIFACT, fullPage: true })
-    }
-  } finally { await context.close(); await browser.close() }
-  console.log('Email copy: individual/bundle, masks, empty fields, fallback/failure, and widths passed')
+  } finally { await close() }
+  console.log('Email copy/TOTP: copies, masks, expiry refresh, invalid-key retry, collapse/unmount, fallback, and widths passed')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

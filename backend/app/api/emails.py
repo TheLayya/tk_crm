@@ -3,10 +3,12 @@ from sqlalchemy.orm import Query as ORMQuery
 import csv
 import json
 import re
+import time
 from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import String, cast as sql_cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,7 +21,7 @@ from app.models.proxy_node import ProxyNode
 from app.models.team import User
 from app.schemas.op_account import (
     EmailAccountCreate, EmailAccountUpdate, EmailAccountResponse,
-    EmailImportRequest, EmailRelationRequest, GmailCheckRequest,
+    EmailImportRequest, EmailRelationRequest, EmailBatchSaleRequest, GmailCheckRequest,
 )
 from app.services.auth_service import require_permission, get_user_data_scope, get_dept_member_usernames
 from app.services.asset_scope_service import scoped_op_accounts, get_visible_node_ids
@@ -27,6 +29,7 @@ from app.services.gmail_checker_service import check_gmail_accounts, normalize_s
 from app.services.op_account_service import parse_email_import_line
 from app.services.sale_validation_service import validate_sale_information
 from app.services.table_query_service import apply_table_query, model_table_fields
+from app.services.totp_service import totp_code
 
 
 router = APIRouter(prefix="/emails", tags=["emails"])
@@ -161,7 +164,7 @@ def prepare_trade(values: dict[str, Any]) -> None:
 @router.get("", response_model=None)
 def list_emails(keyword: str | None = None, management_status: str | None = None,
                 platform: str | None = None,
-                skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
+                skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=500),
                 sort_by: str | None = None, sort_order: Literal["asc", "desc"] = "asc",
                 table_filters: str | None = None,
                 db: Session = Depends(get_db), user: User = Depends(require_permission("email:view"))) -> dict[str, object]:
@@ -253,6 +256,31 @@ def import_emails(body: EmailImportRequest, db: Session = Depends(get_db), user:
             "failed": sum(row["_result"] == "failed" for row in rows), "rows": rows}
 
 
+@router.post("/batch-sale", response_model=None)
+def batch_sell_emails(body: EmailBatchSaleRequest, db: Session = Depends(get_db), user: User = Depends(require_permission("email:manage"))) -> dict[str, object]:
+    email_ids = list(dict.fromkeys(body.email_ids))
+    query = scoped_query(db, EmailAccount, user).filter(EmailAccount.id.in_(email_ids))
+    emails = query.with_entities(EmailAccount.id, EmailAccount.management_status, EmailAccount.claimed_by).all()
+    if len(emails) != len(email_ids):
+        raise HTTPException(status_code=404, detail="部分邮箱不存在或无权访问，请刷新后重试")
+    if any(email.management_status == "已出售" for email in emails):
+        raise HTTPException(status_code=409, detail="所选邮箱包含已出售邮箱，请刷新后重新选择")
+    if any(email.claimed_by is not None for email in emails):
+        raise HTTPException(status_code=409, detail="所选邮箱包含领取中的邮箱，请先完成注册或归还后再出售")
+    values = body.model_dump(exclude={"email_ids"})
+    values["management_status"] = "已出售"
+    validate_sale(values)
+    prepare_trade(values)
+    # A conditional update prevents a concurrent sale from overwriting its trade details.
+    updated = query.filter(EmailAccount.management_status != "已出售", EmailAccount.claimed_by.is_(None)).update(
+        {getattr(EmailAccount, field): value for field, value in values.items()}, synchronize_session=False)
+    if updated != len(email_ids):
+        db.rollback()
+        raise HTTPException(status_code=409, detail="所选邮箱的状态已变化，请刷新后重新选择")
+    save(db)
+    return {"updated": updated, "email_ids": email_ids}
+
+
 @router.post("/check", response_model=None)
 def check_emails(body: GmailCheckRequest, db: Session = Depends(get_db), user: User = Depends(require_permission("email:check"))) -> dict[str, object]:
     from app.api.op_accounts import gmail_check_lock
@@ -316,6 +344,16 @@ def update_email(email_id: int, body: EmailAccountUpdate, db: Session = Depends(
         setattr(email, field, value)
     save(db)
     return email_response(email, db=db)
+
+
+@router.get("/{email_id}/totp", response_model=None)
+def get_email_totp(email_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("email:view"))) -> JSONResponse:
+    email = get_email(db, email_id, user)
+    timestamp = time.time()
+    code, remaining = totp_code(email.totp_secret, now=timestamp)
+    if not code:
+        raise HTTPException(status_code=422, detail="该邮箱没有有效的 2FA 密钥")
+    return JSONResponse({"code": code, "remaining": remaining, "valid_for": 30 - timestamp % 30}, headers={"Cache-Control": "no-store"})
 
 
 @router.delete("/{email_id}", response_model=None)

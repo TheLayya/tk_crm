@@ -4,10 +4,6 @@ from typing import Literal, TypedDict, cast
 
 import hashlib
 import json
-import base64
-import binascii
-import hmac
-import struct
 import time
 from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,6 +18,7 @@ from app.models.op_account import EmailAccount, EmailAccountRelation, OpAccount
 from app.models.team import User
 from app.services.auth_service import require_permission, _get_user_permissions
 from app.services.table_query_service import apply_table_query, apply_table_rows, model_table_fields, parse_table_filters
+from app.services.totp_service import totp_code
 
 router = APIRouter(prefix="/card-keys", tags=["Card keys"])
 
@@ -138,21 +135,7 @@ def _email_json(email: EmailAccount) -> dict[str, object]:
 
 
 def _totp_code(secret: object) -> tuple[str | None, int | None]:
-    try:
-        if not secret:
-            return None, None
-        normalized = "".join(str(secret).split()).replace("-", "").upper()
-        key = base64.b32decode(normalized + "=" * (-len(normalized) % 8), casefold=True)
-        if not key:
-            return None, None
-        timestamp = int(time.time())
-        counter = timestamp // 30
-        digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
-        offset = digest[-1] & 0x0F
-        number = (struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1000000
-        return f"{number:06d}", 30 - (timestamp % 30)
-    except (ValueError, TypeError, binascii.Error):
-        return None, None
+    return totp_code(secret, now=time.time())
 
 
 def _history(key: CardKey, action: str, username: str, now: datetime) -> list[dict[str, object]]:
