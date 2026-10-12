@@ -1,16 +1,16 @@
 {
-  "version": "1.1.18",
-  "date": "2026-10-07",
+  "version": "1.1.19",
+  "date": "2026-10-12",
   "changes": [
-    "修复邮箱展开详情在统一表格中的宽度",
-    "Windows安装验收改为等待实际就绪状态",
-    "增加项目内发布技能和双端发布校验工具"
+    "邮箱支持批量售出，一次登记客户、单价、售卖人和日期",
+    "售出后自动复制整批交付资料，支持复制失败重试",
+    "邮箱详情显示 2FA 验证码，每页最多显示 500 条"
   ],
-  "source_commit": "ffacc61a5eccbdb3a9ca36ae17e466668f2d3974",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.18/release-v1.1.18.tar.gz",
-  "sha256": "281c75ef003e29c500e2df3d087803d1b3d0a64f1dffa0969bd9cf6e328bd647",
-  "server_source_commit": "ffacc61a5eccbdb3a9ca36ae17e466668f2d3974",
-  "windows_source_commit": "ffacc61a5eccbdb3a9ca36ae17e466668f2d3974",
-  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.18/TkCRM-1.1.18-win-x64-setup.exe",
-  "windows_sha256": "dc10de3105b78da321bbeb07110ceaffa578e9b1685c4a103b80793400c76750"
+  "source_commit": "75474c44cb5de1e431c87298a235e5ba786a8a5f",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.19/release-v1.1.19.tar.gz",
+  "sha256": "7b490b96d133f5078b625e9b751927bb43f64bed62db6f2748870101161d098a",
+  "server_source_commit": "75474c44cb5de1e431c87298a235e5ba786a8a5f",
+  "windows_source_commit": "75474c44cb5de1e431c87298a235e5ba786a8a5f",
+  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.19/TkCRM-1.1.19-win-x64-setup.exe",
+  "windows_sha256": "bab76f46a0f24d44f71f8f3cc7ed69643319f4788af3b2fa029700db2188f7d6"
 }
