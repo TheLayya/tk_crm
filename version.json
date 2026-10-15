@@ -1,16 +1,18 @@
 {
-  "version": "1.1.20",
+  "version": "1.1.21",
   "date": "2026-10-15",
   "changes": [
-    "邮箱批量导入逐行识别混合三至六项格式",
-    "支持国家字段、空列和错列或重复的 2FA 密钥",
-    "新增英文/中文逗号、Tab 分隔，错误行独立提示"
+    "统一内部工作台视觉与中文控件，表格支持密度记忆和批量展开",
+    "账号、邮箱、节点、设备和备忘支持直接与批量复制，完整资料可粘贴表格",
+    "邮箱支持批量修改使用状态、手动标记检测状态及清空未检测，保留自动检测入口",
+    "备忘提醒直达并支持重复定位，成员筛选、部门层级与角色说明更清晰",
+    "运营账号筛选、排序和完整导出使用相同查询，候选按可见范围提供"
   ],
-  "source_commit": "2ce46df6524d6d34246ccb98b6371081dad9d84d",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.20/release-v1.1.20.tar.gz",
-  "sha256": "2307d6a946dde39c70d95d6893db78e7311f68c4a6eef10048bae75d10a8d6ba",
-  "server_source_commit": "2ce46df6524d6d34246ccb98b6371081dad9d84d",
-  "windows_source_commit": "2ce46df6524d6d34246ccb98b6371081dad9d84d",
-  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.20/TkCRM-1.1.20-win-x64-setup.exe",
-  "windows_sha256": "484cb615f873e616735dde35e160099edd6c0ebbc7e36470e2c33e673f4eaad8"
+  "source_commit": "e8bce4fb738fc3f9e9c070af6f6390338ad7000d",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.21/release-v1.1.21.tar.gz",
+  "sha256": "39bafe3b78077592a60787fd8a896e31818ab3c9498055555b0d63d8de324243",
+  "server_source_commit": "e8bce4fb738fc3f9e9c070af6f6390338ad7000d",
+  "windows_source_commit": "e8bce4fb738fc3f9e9c070af6f6390338ad7000d",
+  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.21/TkCRM-1.1.21-win-x64-setup.exe",
+  "windows_sha256": "4a211526cfbe507702b421d66b4edbedcaa6b8d3f4e88fa0a45194e5b8f97d8e"
 }
