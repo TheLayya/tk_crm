@@ -4,7 +4,7 @@
       <div><h2>卡密管理</h2><span>按项目统一领取，避免遗漏和重复使用</span></div>
       <div class="heading-actions"><el-button v-if="canManage" @click="platformVisible = true">平台管理</el-button><el-button v-if="canManage" type="primary" @click="openProject()">＋新建项目</el-button></div>
     </div>
-    <el-card shadow="never" class="project-card">
+    <el-card ref="projectCard" shadow="never" class="project-card">
       <div class="toolbar">
         <el-select v-model="selectedId" filterable aria-label="选择项目" placeholder="选择项目" style="width:280px" @change="changeProject">
           <el-option v-for="project in projects" :key="project.id" :label="`${project.name}${project.is_active ? '' : '（已结束）'}`" :value="project.id" />
@@ -20,6 +20,8 @@
       </div>
       <el-alert v-if="selected && !selected.is_active" title="项目已结束，停止新领取，已领取卡密仍可确认消耗" type="warning" :closable="false" />
       <el-empty v-if="!selected" :description="canManage ? '先新建项目，选择协助成员并导入卡密' : '暂无分配给你的项目'" :image-size="70" />
+      <el-tabs v-if="selected" v-model="activeWorkspace" class="workspace-tabs">
+        <el-tab-pane :label="canManage ? '卡密记录' : '我的领取记录'" name="records">
       <div v-if="selected" class="batch-bar" v-loading="loading">
         <strong>领取批次</strong>
         <el-select v-model="selectedBatchId" filterable aria-label="领取批次" placeholder="选择领取批次" class="batch-select" @change="reloadKeys">
@@ -33,11 +35,11 @@
       </div>
       <div v-if="selected" class="claim-bar">
         <div><strong>当前项目</strong><span>{{ selected.name }}</span><small>协助成员：{{ memberLabel(selected.members) }}</small></div>
-        <div class="project-metrics"><template v-if="selected.target_platform"><el-tag size="small" type="success">检测正常可领 {{ selected.email_normal_available }}</el-tag><el-tag size="small">可领总数 {{ selected.email_available }}</el-tag><el-tag size="small" type="info">领取中 {{ selected.email_claimed }}</el-tag><el-tag size="small">注册完成 {{ selected.emails_completed }}</el-tag></template><el-popover placement="bottom" width="360" trigger="click"><template #reference><el-button link type="primary">成员完成量</el-button></template><div v-for="stat in selected.member_stats" :key="stat.username" class="member-stat"><span>{{ stat.username }}</span><span>卡密已消耗 {{ stat.consumed }} · 待消耗 {{ stat.claimed }} · 注册 {{ stat.emails_completed }}</span></div></el-popover></div>
+        <div class="project-metrics"><template v-if="selected.target_platform"><el-tag size="small" type="success">检测正常可领 {{ selected.email_normal_available }}</el-tag><el-tag size="small">可领总数 {{ selected.email_available }}</el-tag><el-tag size="small" type="info">领取中 {{ selected.email_claimed }}</el-tag><el-tag size="small">注册完成 {{ selected.emails_completed }}</el-tag></template><el-popover placement="bottom" width="360" trigger="click"><template #reference><el-button link type="primary">累计成员进度</el-button></template><div class="member-progress"><div v-for="stat in selected.member_stats" :key="stat.username" class="member-stat"><span>{{ stat.username }}</span><span>卡密已消耗 {{ stat.consumed }} · 待消耗 {{ stat.claimed }} · 注册 {{ stat.emails_completed }}</span></div></div></el-popover></div>
         <el-button type="primary" :disabled="!canClaimKey" :loading="claiming" @click="claim">{{ selectedBatch ? '领取所选批次' : '领取下一份' }}</el-button>
       </div>
       <div v-if="pendingKey" class="pending-key">
-        <strong>我的待消耗</strong><span class="pending-batch">{{ pendingKey.batch_name || '历史未分批' }}</span><code>{{ pendingKey.content }}</code>
+        <strong>我的待消耗</strong><span class="pending-batch">{{ pendingKey.batch_name || '历史未分批' }}</span><button class="key-content-preview pending-content" type="button" aria-label="查看待消耗卡密全文" @click="contentRow = pendingKey"><code>{{ pendingKey.content }}</code></button>
         <el-button size="small" @click="copy(pendingKey.content)">复制</el-button>
         <el-button size="small" type="primary" :loading="consuming" @click="consume(pendingKey)">确认已消耗</el-button>
         <el-button size="small" :disabled="consuming" @click="release(pendingKey)">归还未使用</el-button>
@@ -55,21 +57,31 @@
         <el-checkbox v-if="canManage" v-model="filters.mine" @change="reloadKeys">只看我的</el-checkbox>
         <el-input v-model="filters.keyword" clearable placeholder="搜索卡密 / 链接" style="width:220px" @keyup.enter="reloadKeys" @clear="reloadKeys" /><el-button link type="primary" @click="reloadKeys">搜索</el-button><el-button link type="primary" @click="load">刷新</el-button>
       </div>
-      <crm-table table-id="card-key-records" remote :query="tableQuery" @query-change="handleTableQuery" v-if="selected" v-loading="loading" :data="keys" size="small" empty-text="暂无记录，领取后在这里找回">
-        <el-table-column column-key="content" prop="content" filter-type="text" label="卡密 / 链接" min-width="420"><template #default="{ row }"><code v-if="row.content">{{ row.content }}</code><span v-else class="muted">领取后可见</span></template></el-table-column>
-        <el-table-column column-key="batch_name" prop="batch_name" table-tools-disabled label="批次" min-width="180"><template #default="{ row }"><span>{{ row.batch_name || '历史未分批' }}</span><el-tag v-if="row.batch_status && row.batch_status !== 'active'" class="batch-state-tag" size="small" :type="batchStatusType(row.batch_status)">{{ batchStatusLabel(row.batch_status) }}</el-tag><div v-if="row.batch_remark" class="batch-row-remark" :title="row.batch_remark">{{ row.batch_remark }}</div></template></el-table-column>
+      <crm-table table-id="card-key-records" remote :query="tableQuery" @query-change="handleTableQuery" v-if="selected" v-loading="loading" :data="keys" :max-height="tableHeights['card-key-records']" size="small" empty-text="暂无记录，领取后在这里找回">
+        <el-table-column column-key="content" prop="content" filter-type="text" label="卡密 / 链接" min-width="320"><template #default="{ row }"><button v-if="row.content" class="key-content-preview" type="button" aria-label="查看完整卡密" title="点击查看全文，可一键复制" @click="contentRow = row"><code>{{ row.content }}</code></button><span v-else class="muted">领取后可见</span></template></el-table-column>
+        <el-table-column column-key="batch_name" prop="batch_name" table-tools-disabled label="批次" min-width="180"><template #default="{ row }"><span class="batch-row-name" :title="row.batch_name || '历史未分批'">{{ row.batch_name || '历史未分批' }}</span><el-tag v-if="row.batch_status && row.batch_status !== 'active'" class="batch-state-tag" size="small" :type="batchStatusType(row.batch_status)">{{ batchStatusLabel(row.batch_status) }}</el-tag><div v-if="row.batch_remark" class="batch-row-remark" :title="row.batch_remark">{{ row.batch_remark }}</div></template></el-table-column>
         <el-table-column column-key="status" prop="status" filter-type="enum" :filter-options="[{ label: '可领取', value: 'available' }, { label: '待消耗', value: 'claimed' }, { label: '已消耗', value: 'consumed' }, { label: '无效售后', value: 'invalid' }]" label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag><div v-if="row.remark" class="key-remark" :title="row.remark">{{ row.remark }}</div></template></el-table-column>
         <el-table-column column-key="claimed_by" filter-type="text" label="领取人" prop="claimed_by" width="130" />
         <el-table-column column-key="claimed_at" prop="claimed_at" filter-type="date" label="领取时间" width="180"><template #default="{ row }">{{ formatDate(row.claimed_at) }}</template></el-table-column>
         <el-table-column column-key="consumed_at" prop="consumed_at" filter-type="date" label="消耗时间" width="180"><template #default="{ row }">{{ formatDate(row.consumed_at) }}</template></el-table-column>
         <el-table-column column-key="actions" table-tools-disabled label="操作" width="235" fixed="right"><template #default="{ row }"><el-button v-if="row.content" link type="primary" @click="copy(row.content)">复制</el-button><template v-if="row.id !== pendingKey?.id"><el-button v-if="canManage && row.status === 'available'" link type="danger" @click="invalid(row)">标记无效</el-button><template v-if="row.status === 'claimed' && (row.claimed_by === username || canManage)"><el-button :disabled="consuming" link type="primary" @click="consume(row)">确认消耗</el-button><el-button :disabled="consuming" link type="warning" @click="release(row)">归还</el-button></template></template><el-button v-if="canManage || row.claimed_by === username" link @click="editKeyRemark(row)">备注</el-button><el-button v-if="row.history?.length" link @click="historyRow = row">记录</el-button></template></el-table-column>
       </crm-table>
-      <el-pagination v-if="total" class="pagination" v-model:current-page="filters.page" :page-size="filters.page_size" :total="total" layout="total, prev, pager, next" @current-change="loadKeys" />
+      <el-pagination v-if="total" class="pagination" v-model:current-page="filters.page" v-model:page-size="filters.page_size" :page-sizes="[15, 30, 50, 100]" :total="total" layout="total, sizes, prev, pager, next" @size-change="reloadKeys" @current-change="loadKeys" />
+        </el-tab-pane>
+        <el-tab-pane v-if="canManage" label="成员工作量" name="workload" lazy>
+          <CardKeyWorkReport :project-id="selected.id" :project-name="selected.name" />
+        </el-tab-pane>
+      </el-tabs>
     </el-card>
+    <el-dialog :model-value="!!contentRow" title="完整卡密 / 链接" width="min(760px, 94vw)" @close="contentRow = null">
+      <div class="content-meta"><el-tag size="small" :type="statusType(contentRow?.status)">{{ statusLabel(contentRow?.status) }}</el-tag><span>{{ contentRow?.batch_name || '历史未分批' }}</span></div>
+      <pre class="full-key-content" tabindex="0" aria-label="完整卡密内容">{{ contentRow?.content }}</pre>
+      <p v-if="contentRow?.remark" class="content-remark">备注：{{ contentRow.remark }}</p>
+      <template #footer><el-button @click="contentRow = null">关闭</el-button><el-button type="primary" @click="copy(contentRow.content)">复制完整内容</el-button></template>
+    </el-dialog>
     <el-dialog :model-value="!!historyRow" title="卡密流转记录" width="min(800px, 94vw)" @close="historyRow = null">
       <crm-table table-id="card-key-flow-history" :data="historyRow?.history || []" size="small"><el-table-column column-key="action" prop="action" filter-type="text" label="操作" width="85"><template #default="{ row }">{{ { claim: '领取', release: '归还', consume: '消耗', invalid: '无效售后', remark: '更新备注' }[row.action] }}</template></el-table-column><el-table-column column-key="username" filter-type="text" prop="username" label="操作人" /><el-table-column column-key="time" prop="time" filter-type="date" label="时间" width="190"><template #default="{ row }">{{ formatDate(row.time) }}</template></el-table-column><el-table-column column-key="remark" filter-type="text" prop="remark" label="备注" min-width="180" /></crm-table>
     </el-dialog>
-    <CardKeyWorkReport v-if="canManage && selected" :project-id="selected.id" :project-name="selected.name" />
     <el-dialog v-model="projectVisible" :title="editing ? '编辑项目' : '新建项目'" width="min(600px, 94vw)">
       <el-form label-width="90px"><el-form-item label="项目名称" required><el-input v-model="projectForm.name" /></el-form-item><el-form-item label="项目备注"><el-input v-model="projectForm.description" type="textarea" :rows="3" placeholder="任务说明、上游联系方式、采购批次与售后说明" /></el-form-item><el-form-item label="目标平台"><el-select v-model="projectForm.target_platform" filterable clearable placeholder="选择目标平台" style="width:100%"><el-option v-for="platform in activePlatforms" :key="platform.id" :label="platform.name" :value="platform.name" /></el-select><div class="form-hint">没有合适的平台？关闭此窗口后点击“平台管理”创建。</div></el-form-item><el-form-item label="协助成员" required><el-select v-model="projectForm.members" multiple filterable style="width:100%" @change="normalizeMembers"><el-option label="全员" value="__all__" /><el-option v-for="member in members" :key="member.username" :label="member.real_name ? `${member.username}（${member.real_name}）` : member.username" :value="member.username" /></el-select></el-form-item><el-form-item label="项目状态"><el-switch v-model="projectForm.is_active" active-text="进行中" inactive-text="已结束" /></el-form-item></el-form>
       <template #footer><el-button @click="projectVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveProject">保存</el-button></template>
@@ -98,7 +110,8 @@
 
 <script setup>
 import { useTableQuery } from '@/composables/useTableQuery'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useViewportTableHeight } from '@/composables/useViewportTableHeight'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import CardKeyWorkReport from '@/components/CardKeyWorkReport.vue'
@@ -127,6 +140,11 @@ const completeTarget = reactive({ id: null, platform: '' })
 const activePlatforms = computed(() => platforms.value.filter(platform => platform.is_active))
 const consuming = ref(false)
 const historyRow = ref(null)
+const contentRow = ref(null)
+const activeWorkspace = ref('records')
+const projectCard = ref(null)
+const { heights: tableHeights, refresh: refreshTableHeight } = useViewportTableHeight(projectCard, [{ id: 'card-key-records', max: 440, bottom: 64 }])
+watch(activeWorkspace, () => nextTick(refreshTableHeight))
 const importTarget = reactive({ id: null, name: '' })
 const importBatch = reactive({ name: '', remark: '' })
 const batches = ref([])
@@ -148,6 +166,7 @@ const batchStatusType = status => ({ active: 'success', paused: 'warning', archi
 let requestVersion = 0
 let projectRequestVersion = 0
 const clearData = () => {
+  contentRow.value = null
   requestVersion++
   loading.value = false
   projects.value = []
@@ -170,6 +189,7 @@ const load = async () => {
     projects.value = result
     platforms.value = platformResult
     if (!projects.value.some(project => project.id === selectedId.value)) {
+      contentRow.value = null
       selectedId.value = projects.value[0]?.id || null
       selectedBatchId.value = -1
       batches.value = []
@@ -234,6 +254,7 @@ const refreshTotp = async () => {
 }
 const reloadKeys = () => { filters.page = 1; keys.value = []; total.value = 0; historyRow.value = null; return loadKeys() }
 const changeProject = () => {
+  contentRow.value = null
   selectedBatchId.value = -1
   batches.value = []
   batchesProjectId.value = null
@@ -321,7 +342,7 @@ const saveImport = async () => {
   } finally { importing.value = false }
 }
 const openBatches = () => { Object.assign(batchTarget, { id: selected.value.id, name: selected.value.name }); batchError.value = ''; showArchivedBatches.value = false; batchVisible.value = true }
-const viewBatch = (batch) => { if (selectedId.value !== batchTarget.id) return; selectedBatchId.value = batch.id; batchVisible.value = false; reloadKeys() }
+const viewBatch = (batch) => { if (selectedId.value !== batchTarget.id) return; activeWorkspace.value = 'records'; selectedBatchId.value = batch.id; batchVisible.value = false; reloadKeys() }
 const editBatch = (batch) => { Object.assign(batchForm, { id: batch.id, name: batch.name, remark: batch.remark || '' }); batchError.value = ''; batchEditVisible.value = true }
 const saveBatch = async () => {
   if (batchSaving.value) return
@@ -422,6 +443,17 @@ onBeforeUnmount(() => { if (totpTimer) window.clearInterval(totpTimer) })
 </script>
 
 <style scoped>
+.workspace-tabs { min-width:0; }
+.workspace-tabs :deep(.el-tabs__header) { margin-bottom:12px; }
+.key-content-preview { display:block; width:100%; min-width:0; padding:0; border:0; background:transparent; text-align:left; cursor:pointer; }
+.key-content-preview code { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:24px; font-size:12px; }
+.key-content-preview:hover code { color:var(--el-color-primary); }
+.key-content-preview:focus-visible { outline:2px solid var(--el-color-primary); outline-offset:2px; border-radius:3px; }
+.batch-row-name { display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
+.content-meta { display:flex; gap:10px; align-items:center; color:#64748b; overflow-wrap:anywhere; }
+.full-key-content { max-height:45vh; overflow:auto; padding:14px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; color:#203047; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.6; user-select:text; }
+.content-remark { color:#64748b; overflow-wrap:anywhere; }
+.member-progress { max-height:300px; overflow:auto; }
 .batch-bar { display:flex; align-items:center; flex-wrap:wrap; gap:9px; padding:12px; margin:12px 0; border:1px solid #dce4ed; border-radius:8px; background:#f8fafc; }
 .batch-select { width:300px; max-width:100%; }
 .batch-counts { font-size:13px; color:#475569; }
@@ -464,7 +496,7 @@ onBeforeUnmount(() => { if (totpTimer) window.clearInterval(totpTimer) })
  .claim-bar small { color:#909399; }
  code { color:#303133; word-break:break-all; white-space:pre-wrap; }
  .pending-key { display:flex; align-items:center; gap:10px; padding:10px 12px; margin:10px 0; border:1px solid #d9ecff; background:#ecf5ff; border-radius:6px; }
- .pending-key code { flex:1 1 220px; min-width:0; }
+ .pending-key .pending-content { flex:1 1 220px; width:auto; min-width:0; }
  .record-filters { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:12px 0; }
  .pagination { justify-content:flex-end; margin-top:12px; }
  @media(max-width:768px) {
@@ -475,7 +507,7 @@ onBeforeUnmount(() => { if (totpTimer) window.clearInterval(totpTimer) })
    .claim-bar { align-items:flex-start; gap:8px; }
    .claim-bar small { display:block; margin:5px 0; }
    .pending-key { align-items:flex-start; flex-wrap:wrap; }
-   .pending-key code { flex-basis:100%; }
+   .pending-key .pending-content { flex-basis:100%; }
    .pending-key .el-button { flex:1 1 auto; }
    .project-description { flex-basis:100%; }
  }

@@ -45,7 +45,7 @@ async function main() {
   const latestEmail = () => requests.filter(request => request.pathname === '/api/emails').at(-1)
   const closePopovers = async () => { await page.keyboard.press('Escape'); await page.locator('.page-heading').first().click({ force: true }) }
   const openFilter = async label => { await closePopovers(); await table('emails').getByRole('button', { name: label + '筛选', exact: true }).click(); const panels = page.locator('.crm-table-filter-panel:visible'); await panels.last().waitFor(); return panels.last() }
-  const submit = async panel => { const before = requests.filter(request => request.pathname === '/api/emails').length; await panel.getByRole('button', { name: '查询', exact: true }).click(); await page.waitForFunction(() => document.querySelector('.crm-table-filter-button.is-active')); await page.waitForTimeout(50); assert(requests.filter(request => request.pathname === '/api/emails').length > before) }
+  const submit = async panel => { const request = page.waitForRequest(request => new URL(request.url()).pathname === '/api/emails'); await panel.getByRole('button', { name: '查询', exact: true }).click(); await request; await page.waitForFunction(() => document.querySelector('.crm-table-filter-button.is-active')) }
   try {
     await visit('/emails', 'emails')
     let panel = await openFilter('邮箱'); await panel.getByPlaceholder('包含文字').fill('alpha'); await submit(panel)
@@ -54,7 +54,12 @@ async function main() {
     assert.equal(JSON.parse(latestEmail().searchParams.get('table_filters')).current_relation_count.min, '0')
     panel = await openFilter('采购 / 出售'); await panel.locator('.el-select').click(); await page.getByRole('option', { name: '采购金额', exact: true }).click(); await panel.getByPlaceholder('最小值').fill('0'); await submit(panel)
     assert.equal(JSON.parse(latestEmail().searchParams.get('table_filters')).purchase_price.min, '0')
-    panel = await openFilter('最后检测'); await panel.getByPlaceholder('开始日期').fill('2026-10-07'); await panel.getByPlaceholder('结束日期').fill('2026-10-07'); await panel.getByPlaceholder('结束日期').press('Tab'); await submit(panel)
+    panel = await openFilter('最后检测')
+    const startDate = panel.getByPlaceholder('开始日期'), endDate = panel.getByPlaceholder('结束日期')
+    await startDate.click(); await page.locator('.el-date-range-picker:visible').waitFor()
+    await startDate.fill('2026-10-07'); await endDate.fill('2026-10-07'); await endDate.press('Enter')
+    await page.locator('.el-date-range-picker:visible').waitFor({ state: 'hidden' })
+    await submit(panel)
     assert.equal(JSON.parse(latestEmail().searchParams.get('table_filters')).gmail_checked_at.max, '2026-10-07')
     panel = await openFilter('使用状态'); await panel.locator('.el-select').click(); await page.getByRole('option', { name: '闲置', exact: true }).click(); await panel.getByRole('button', { name: '查询', exact: true }).click(); await page.waitForTimeout(100)
     assert.deepEqual(JSON.parse(latestEmail().searchParams.get('table_filters')).management_status.value, ['闲置'])
@@ -87,9 +92,15 @@ async function main() {
     console.log('column layout, copy, expand, reload and isolation passed')
     for (const [route, id] of [['/monitor', 'monitor-accounts'], ['/op-accounts', 'op-accounts'], ['/work-items', 'work-items'], ['/proxy-nodes', 'proxy-nodes'], ['/devices', 'devices'], ['/team/manage', 'team-members'], ['/accounts/1', 'account-detail-history']]) await visit(route, id)
     await visit('/card-keys', 'card-key-records')
-    await table('card-key-work-report-items').evaluate(element => { element.closest('details').open = true })
-    const report = table('card-key-work-report-items'); await report.locator('th').filter({ hasText: '成员' }).locator('.sort-caret.descending').click({ force: true })
+    await page.getByRole('tab', { name: '成员工作量', exact: true }).click()
+    await page.getByRole('button', { name: '全部时间', exact: true }).click()
+    await page.getByRole('tab', { name: /完成明细/ }).click()
+    const report = table('card-key-work-report-items'); await report.locator('.el-table__header-wrapper').waitFor()
+    await report.locator('th').filter({ hasText: '成员' }).locator('.sort-caret.descending').click({ force: true })
     assert((await report.locator('.el-table__body tr').first().innerText()).includes('member-20'), 'Local sort must operate before page slicing')
+    assert.equal(await report.locator('.el-table__body tr').count(), 10, 'Local report rows must be sliced to the current page')
+    await page.locator('.report-pagination .el-pager li.number').filter({ hasText: /^2$/ }).click()
+    assert((await report.locator('.el-table__body tr').first().innerText()).includes('member-10'), 'Local pagination must retain the full-data sort')
     await report.getByRole('button', { name: '成员筛选', exact: true }).click(); const reportPanel = page.locator('.crm-table-filter-panel:visible').last(); await reportPanel.getByPlaceholder('包含文字').fill('member-20'); await reportPanel.getByRole('button', { name: '查询', exact: true }).click()
     assert.equal(await report.locator('.el-table__body tr').count(), 1, 'Local filter must search rows beyond the first original page')
     console.log('representative routes and local full-data sort passed')
