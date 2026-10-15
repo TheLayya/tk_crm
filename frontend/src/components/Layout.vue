@@ -157,11 +157,16 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.22'
+const APP_VERSION = '1.1.23'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
+    date: '2026-10-16',
+    items: ['长卡密单行预览，点击查看全文并完整复制', '卡密记录按视口自适应滚动，分页保持可见', '成员工作量独立页签，按日期和成员查看汇总与明细']
+  },
+  {
+    version: '1.1.22',
     date: '2026-10-15',
     items: ['卡密导入支持批次名称和备注，领取可指定批次', '异常批次支持暂停、恢复、删除或保留历史归档', '统一内部工作台视觉与中文控件，邮箱支持批量状态修改']
   },
