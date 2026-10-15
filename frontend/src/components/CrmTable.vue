@@ -16,15 +16,20 @@ const flag = value => value === true || value === ''
 
 export default defineComponent({
   name: 'CrmTable', inheritAttrs: false,
-  props: { tableId: { type: String, required: true }, data: { type: Array, default: () => [] }, remote: Boolean, query: { type: Object, default: null }, page: { type: Number, default: null }, pageSize: { type: Number, default: null }, legacyColumnConfig: { type: String, default: '' } },
-  emits: ['query-change', 'total-change'],
+  props: { tableId: { type: String, required: true }, data: { type: Array, default: () => [] }, remote: Boolean, query: { type: Object, default: null }, page: { type: Number, default: null }, pageSize: { type: Number, default: null }, legacyColumnConfig: { type: String, default: '' }, extraQueryActive: Boolean },
+  emits: ['query-change', 'total-change', 'query-reset'],
   setup(props, { attrs, slots, emit, expose }) {
     const auth = useAuthStore()
     const username = computed(() => auth.user?.username || 'anonymous')
     const table = ref(null), container = ref(null), settingsOpen = ref(false)
     const localQuery = ref(readQuery(props.tableId, username.value)), layout = ref(readLayout(props.tableId, username.value))
+    const densityKey = () => `${layoutStorageKey(props.tableId, username.value)}:density`
+    const readDensity = () => { try { return localStorage.getItem(densityKey()) === 'standard' ? 'standard' : 'compact' } catch { return 'compact' } }
+    const density = ref(readDensity()), selectedRows = ref([]), expandedRows = ref([])
+    const setDensity = value => { density.value = value; try { localStorage.setItem(densityKey(), value) } catch {} scheduleLayout() }
+    const rowKey = row => { const key = attrs.rowKey || attrs['row-key']; return typeof key === 'function' ? key(row) : key ? row[key] : row }
     const drafts = reactive({}), sortFields = reactive({})
-    let columns = [], fields = {}, lastTotal = null, lastSignature = '', syncingSort = false, layoutPending = false, legacy = null
+    let columns = [], fields = {}, displayedRows = [], lastTotal = null, lastSignature = '', syncingSort = false, layoutPending = false, legacy = null
     const hasSavedLayout = () => { try { return Boolean(localStorage.getItem(layoutStorageKey(props.tableId, username.value))) } catch { return false } }
     const readLegacy = () => { try { const saved = props.legacyColumnConfig && !hasSavedLayout() ? JSON.parse(localStorage.getItem(props.legacyColumnConfig) || 'null') : null; return Array.isArray(saved) ? saved : null } catch { return null } }
     legacy = readLegacy()
@@ -76,11 +81,18 @@ export default defineComponent({
       const values = unique(props.data.flatMap(row => Array.isArray(row[field.prop]) ? row[field.prop] : [row[field.prop]]).filter(value => value === null || ['string', 'number', 'boolean'].includes(typeof value)))
       return values.map(value => ({ value, label: value === null ? '未填写' : typeof value === 'boolean' ? value ? '是' : '否' : String(value) }))
     }
+    const filterValueLabel = (field, condition) => {
+      if (condition.type !== 'enum') return condition.value !== undefined ? textValue(condition.value) || '未填写' : `${condition.min ?? '不限'} 至 ${condition.max ?? '不限'}`
+      const column = columns.find(item => columnFields(item).some(choice => choice.prop === field))
+      const metadata = column && columnFields(column).find(choice => choice.prop === field)
+      const options = column ? enumOptions(column, metadata) : []
+      return (Array.isArray(condition.value) ? condition.value : [condition.value]).map(value => options.find(option => option.value === value)?.label || (value === null || value === '' ? '未填写' : typeof value === 'boolean' ? value ? '是' : '否' : String(value))).join('、')
+    }
     const filterPanel = column => {
       const draft = drafts[column.key] || { field: columnFields(column)[0]?.prop, value: '', min: '', max: '', dates: null }, field = selectedField(column)
       if (!field) return []
       const update = (key, value) => { if (!drafts[column.key]) drafts[column.key] = draft; drafts[column.key][key] = value }, choices = columnFields(column)
-      const input = field.type === 'enum' ? h(ElSelect, { modelValue: Array.isArray(draft.value) ? draft.value : draft.value === '' ? [] : [draft.value], multiple: true, clearable: true, filterable: true, placeholder: '选择值', 'onUpdate:modelValue': value => update('value', value) }, () => enumOptions(column, field).map(option => h(ElOption, { key: JSON.stringify(option.value), ...option })))
+      const input = field.type === 'enum' ? h(ElSelect, { modelValue: Array.isArray(draft.value) ? draft.value : draft.value === '' ? [] : [draft.value], multiple: true, clearable: true, filterable: true, placement: 'right-start', fallbackPlacements: ['left-start', 'bottom-start', 'top-start'], placeholder: '选择值', 'onUpdate:modelValue': value => update('value', value) }, () => enumOptions(column, field).map(option => h(ElOption, { key: JSON.stringify(option.value), ...option })))
         : field.type === 'number' ? h('div', { class: 'crm-table-range' }, [h(ElInput, { modelValue: draft.min, type: 'number', placeholder: '最小值', 'onUpdate:modelValue': value => update('min', value) }), h('span', '至'), h(ElInput, { modelValue: draft.max, type: 'number', placeholder: '最大值', 'onUpdate:modelValue': value => update('max', value) })])
           : field.type === 'date' ? h(ElDatePicker, { modelValue: draft.dates, type: 'daterange', valueFormat: 'YYYY-MM-DD', startPlaceholder: '开始日期', endPlaceholder: '结束日期', 'onUpdate:modelValue': value => update('dates', value) })
             : h(ElInput, { modelValue: draft.value, clearable: true, placeholder: '包含文字', 'onUpdate:modelValue': value => update('value', value), onKeyup: event => { if (event.key === 'Enter') applyFilter(column) } })
@@ -99,7 +111,7 @@ export default defineComponent({
       if (queryable) { native.sortable = 'custom'; native.prop = selectedSort }
       const original = column.node.children && typeof column.node.children === 'object' && !Array.isArray(column.node.children) ? column.node.children : {}
       const originalSlots = Object.fromEntries(Object.entries(original).filter(([key, value]) => !key.startsWith('_') && typeof value === 'function').map(([key, render]) => [key, (...args) => { const result = render(...args); return Array.isArray(result) ? result : result ? [result] : [] }]))
-      const renderedSlots = queryable ? { ...originalSlots, header: scope => [h('span', { class: 'crm-table-header' }, [h('span', { class: 'crm-table-header-label' }, originalSlots.header ? originalSlots.header(scope) : meta.label),
+      const renderedSlots = queryable ? { ...originalSlots, header: scope => [h('span', { class: 'crm-table-header' }, [h('span', { class: 'crm-table-header-label', title: meta.label }, originalSlots.header ? originalSlots.header(scope) : meta.label),
         h(ElPopover, { trigger: 'click', placement: 'bottom-start', width: 320, onShow: () => openFilter(column) }, { reference: () => [h('button', { type: 'button', class: ['crm-table-filter-button', choices.some(field => query.filters[field.prop]) && 'is-active'], 'aria-label': `${meta.label || column.key}筛选`, title: '筛选', onClick: event => event.stopPropagation() }, [h(ElIcon, null, () => h(Filter))])], default: () => filterPanel(column) })]) ] } : originalSlots
       return h(column.node.type, native, renderedSlots)
     }
@@ -112,7 +124,7 @@ export default defineComponent({
       })],
       footer: () => [h(ElButton, { onClick: () => { persistLayout({ order: [], hidden: [], widths: {} }); layout.value = normalizeLayout(null); settingsOpen.value = false } }, () => '恢复默认布局'), h(ElButton, { type: 'primary', onClick: () => { settingsOpen.value = false } }, () => '完成')],
     })
-    watch(() => [props.tableId, username.value], () => { localQuery.value = readQuery(props.tableId, username.value); layout.value = readLayout(props.tableId, username.value); legacy = readLegacy(); lastTotal = null; scheduleLayout() })
+    watch(() => [props.tableId, username.value], () => { localQuery.value = readQuery(props.tableId, username.value); layout.value = readLayout(props.tableId, username.value); density.value = readDensity(); legacy = readLegacy(); lastTotal = null; scheduleLayout() })
     watch(() => JSON.stringify(currentQuery.value), scheduleLayout)
     onMounted(scheduleLayout)
     const exposed = { get $el() { return table.value?.$el || container.value } }
@@ -124,12 +136,25 @@ export default defineComponent({
       const query = currentQuery.value, allRows = props.remote ? props.data : queryRows(props.data, query, fields)
       if (lastTotal !== allRows.length) { lastTotal = allRows.length; nextTick(() => emit('total-change', allRows.length)) }
       const rows = !props.remote && props.page !== null && props.pageSize !== null ? allRows.slice((Math.max(1, props.page) - 1) * props.pageSize, Math.max(1, props.page) * props.pageSize) : allRows
+      displayedRows = rows
       const displayed = ordered().filter(visible), signature = displayed.map(column => column.key).join('|'), filters = Object.entries(query.filters)
+      const hasSelection = columns.some(column => column.meta.type === 'selection'), hasExpansion = columns.some(column => column.meta.type === 'expand')
+      const selectedKeys = new Set(selectedRows.value.map(rowKey)), expandedKeys = new Set(expandedRows.value.map(rowKey))
+      const selected = rows.filter(row => selectedKeys.has(rowKey(row))), expanded = rows.filter(row => expandedKeys.has(rowKey(row)))
       if (signature !== lastSignature) { lastSignature = signature; scheduleLayout() }
-      return h('div', { ref: container, class: 'crm-table-wrapper', 'data-table-id': props.tableId }, [h('div', { class: 'crm-table-toolbar' }, [
-        h('div', { class: 'crm-table-active-filters' }, [query.sortBy ? h(ElTag, { closable: true, size: 'small', onClose: () => changeQuery({ ...query, sortBy: null, sortOrder: null }) }, () => `${fields[query.sortBy]?.label || query.sortBy} ${query.sortOrder === 'descending' ? '降序' : '升序'}`) : null, ...filters.map(([field, condition]) => h(ElTag, { key: field, closable: true, size: 'small', onClose: () => removeFilter(field) }, () => `${fields[field]?.label || field}：${condition.value !== undefined ? textValue(condition.value) || '未填写' : `${condition.min ?? '不限'} 至 ${condition.max ?? '不限'}`}`))]),
-        h(ElButton, { size: 'small', disabled: !query.sortBy && !filters.length, onClick: () => changeQuery(null) }, () => '重置查询'), h(ElButton, { size: 'small', icon: Setting, onClick: () => { settingsOpen.value = true } }, () => '列设置')]),
-        h(ElTable, { ...attrs, ref: table, data: rows, border: attrs.border ?? true, onSortChange: event => { attrs.onSortChange?.(event); if (!syncingSort) changeQuery({ ...currentQuery.value, sortBy: event.order ? event.prop : null, sortOrder: event.order }) }, onHeaderDragend: (width, oldWidth, column, event) => { attrs.onHeaderDragend?.(width, oldWidth, column, event); const next = materializedLayout(); next.widths[column.columnKey || column.property] = width; persistLayout(next) } }, { ...slots, default: () => displayed.map(column => renderColumn(column, signature)) }), settingsDialog()])
+      return h('div', { ref: container, class: ['crm-table-wrapper', `crm-table--${density.value}`], 'data-table-id': props.tableId }, [h('div', { class: 'crm-table-toolbar' }, [
+        h('div', { class: 'crm-table-summary', 'aria-live': 'polite' }, [h('span', `本页 ${rows.length} 条`), selected.length ? h('span', { class: 'crm-table-selection-count' }, `已选 ${selected.length} 条`) : null]),
+        h('div', { class: 'crm-table-tools' }, [
+          hasExpansion ? h(ElButton, { size: 'small', disabled: hasSelection ? !selected.length : !rows.length, onClick: () => (hasSelection ? selected : displayedRows).forEach(row => { if (!expandedKeys.has(rowKey(row))) table.value?.toggleRowExpansion(row, true) }) }, () => hasSelection ? '展开选中' : '展开本页') : null,
+          hasExpansion ? h(ElButton, { size: 'small', disabled: !expanded.length, onClick: () => expanded.forEach(row => table.value?.toggleRowExpansion(row, false)) }, () => '收起详情') : null,
+          h('div', { class: 'crm-table-density', role: 'group', 'aria-label': '表格行距' }, ['compact', 'standard'].map(value => h('button', { type: 'button', class: density.value === value ? 'is-active' : '', 'aria-pressed': density.value === value, onClick: () => setDensity(value) }, value === 'compact' ? '紧凑' : '标准'))),
+          h(ElButton, { size: 'small', disabled: !query.sortBy && !filters.length && !props.extraQueryActive, onClick: () => { emit('query-reset'); changeQuery(null) } }, () => '重置查询'), h(ElButton, { size: 'small', icon: Setting, onClick: () => { settingsOpen.value = true } }, () => '列设置')]),
+        h('div', { class: 'crm-table-active-filters' }, [slots['query-summary']?.(), query.sortBy ? h(ElTag, { closable: true, size: 'small', onClose: () => changeQuery({ ...query, sortBy: null, sortOrder: null }) }, () => `${fields[query.sortBy]?.label || query.sortBy} ${query.sortOrder === 'descending' ? '降序' : '升序'}`) : null, ...filters.map(([field, condition]) => h(ElTag, { key: field, closable: true, size: 'small', onClose: () => removeFilter(field) }, () => `${fields[field]?.label || field}：${filterValueLabel(field, condition)}`))])]),
+        h(ElTable, { ...attrs, ref: table, data: rows, border: attrs.border ?? true,
+          rowClassName: scope => { const original = attrs.rowClassName || attrs['row-class-name']; return [typeof original === 'function' ? original(scope) : original, selectedKeys.has(rowKey(scope.row)) ? 'crm-row-selected' : ''].filter(Boolean).join(' ') },
+          onSelectionChange: rows => { selectedRows.value = rows; attrs.onSelectionChange?.(rows) },
+          onExpandChange: (row, expanded) => { if (Array.isArray(expanded)) expandedRows.value = expanded; attrs.onExpandChange?.(row, expanded) },
+          onSortChange: event => { attrs.onSortChange?.(event); if (!syncingSort) changeQuery({ ...currentQuery.value, sortBy: event.order ? event.prop : null, sortOrder: event.order }) }, onHeaderDragend: (width, oldWidth, column, event) => { attrs.onHeaderDragend?.(width, oldWidth, column, event); const next = materializedLayout(); next.widths[column.columnKey || column.property] = width; persistLayout(next) } }, { ...slots, default: () => displayed.map(column => renderColumn(column, signature)) }), settingsDialog()])
     }
   },
 })
@@ -137,13 +162,26 @@ export default defineComponent({
 
 <style>
 .crm-table-wrapper { width: 100%; min-width: 0; container-type: inline-size; }
-.crm-table-toolbar { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-.crm-table-active-filters { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.crm-table-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.crm-table-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; color: var(--el-text-color-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.crm-table-selection-count { color: var(--el-color-primary); font-weight: 600; }
+.crm-table-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.crm-table-tools .el-button + .el-button { margin-left: 0; }
+.crm-table-active-filters { display: flex; flex-basis: 100%; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.crm-table-active-filters:empty { display: none; }
+.crm-table-density { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--el-border-color); border-radius: 6px; background: var(--el-fill-color-light); }
+.crm-table-density button { padding: 3px 9px; border: 0; border-radius: 4px; color: var(--el-text-color-regular); background: transparent; font-size: 12px; cursor: pointer; }
+.crm-table-density button.is-active { color: var(--el-color-primary); background: var(--el-bg-color); box-shadow: 0 1px 3px #20304714; }
+.crm-table-density button:focus-visible, .crm-table-filter-button:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.crm-table-wrapper.crm-table--compact .el-table td.el-table__cell { height: 36px; padding: 5px 0; }
+.crm-table-wrapper.crm-table--standard .el-table td.el-table__cell { height: 46px; padding: 10px 0; }
+.crm-table-wrapper .el-table .el-table__body tr.crm-row-selected > td.el-table__cell { background: var(--el-color-primary-light-9); }
+.crm-table-wrapper .el-table .el-table__body tr.crm-row-selected:hover > td.el-table__cell { background: var(--el-color-primary-light-8); }
 .crm-table-header { display: inline-flex; align-items: center; gap: 4px; max-width: calc(100% - 24px); vertical-align: middle; }
 .crm-table-header-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crm-table-wrapper .el-table th .cell { white-space: nowrap; }
 .crm-table-filter-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 3px; color: #909399; background: transparent; cursor: pointer; }
-.crm-table-filter-button:hover, .crm-table-filter-button.is-active { color: #409eff; background: #ecf5ff; }
+.crm-table-filter-button:hover, .crm-table-filter-button.is-active { color: var(--el-color-primary); background: var(--el-color-primary-light-9); }
 .crm-table-filter-panel { display: flex; flex-direction: column; gap: 12px; }
 .crm-table-filter-panel .el-select, .crm-table-filter-panel .el-date-editor { width: 100%; box-sizing: border-box; }
 .crm-table-range { display: flex; align-items: center; gap: 8px; }
@@ -157,4 +195,8 @@ export default defineComponent({
 .crm-table-settings-row.is-locked .crm-table-drag-handle { cursor: default; }
 .crm-table-column-moves { display: flex; gap: 4px; margin-left: auto; }
 .crm-table-column-moves .el-button + .el-button { margin-left: 0; }
+@media (max-width: 768px) {
+  .crm-table-wrapper .el-table .el-table-fixed-column--right { position: static !important; }
+  .crm-table-wrapper .el-table .el-table-fixed-column--right::before { display: none; }
+}
 </style>

@@ -100,9 +100,9 @@ async function main() {
       assert(await page.getByRole('button', { name: '批量售出', exact: true }).isDisabled(), 'Sale requires a selection')
       assert(await page.getByRole('button', { name: '复制选中资料', exact: true }).isDisabled(), 'Batch copy requires a selection')
       await page.locator('.el-pagination__sizes .el-select').click()
-      for (const size of [50, 100, 200, 500]) assert.equal(await page.locator('li').filter({ hasText: `${size}/page` }).count(), 1)
+      for (const size of [50, 100, 200, 500]) assert.equal(await page.getByRole('option', { name: `${size}条/页`, exact: true }).count(), 1)
       const resized = page.waitForRequest(request => new URL(request.url()).pathname === '/api/emails' && new URL(request.url()).searchParams.get('limit') === '500')
-      await page.getByText('500/page', { exact: true }).click()
+      await page.getByRole('option', { name: '500条/页', exact: true }).click()
       await resized
       // Sell from the idle filter, so the saved rows disappear without closing the receipt.
       const idleRequest = page.waitForRequest(request => new URL(request.url()).pathname === '/api/emails' && new URL(request.url()).searchParams.get('management_status') === '闲置')

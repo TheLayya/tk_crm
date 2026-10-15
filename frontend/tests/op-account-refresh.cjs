@@ -3,6 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
+const deadline = setTimeout(() => { console.error('Operator refresh checks exceeded 10 seconds'); process.exit(2) }, 10000)
 
 const source = fs.readFileSync(path.join(__dirname, '../src/views/OpAccountList.vue'), 'utf8')
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1]
@@ -30,12 +31,13 @@ function setup(overrides = {}) {
     clearInterval: id => state.timers.delete(id),
     ElMessage: { info: message => state.messages.push(message), success: () => {}, warning: () => {} },
     listOpAccounts: async params => { state.requests.push(params); return { items: state.rows.map(account => ({ ...account })), total: state.rows.length } },
+    getOpAccountFilterOptions: async () => ({}),
     triggerCollect: async () => ({ task_id: 'fixture-task' }),
     getCollectTask: async () => ({ total: 1, completed: 1, success: 1, failed: 0, status: 'completed' }),
     module: { exports: {} },
     ...overrides,
   }
-  vm.runInNewContext(script + '\nmodule.exports = { accounts, loading, detailDialog, filters, collectTask, loadAccounts, watchCollectTask, startCollect, videoComponentKey, isCollecting, collectStatusLabel, collectStatusHint }', sandbox)
+  vm.runInNewContext(script + '\nmodule.exports = { accounts, loading, detailDialog, filters, appliedKeyword, collectTask, loadAccounts, watchCollectTask, startCollect, videoComponentKey, isCollecting, collectStatusLabel, collectStatusHint }', sandbox)
   return { state, sandbox, view: sandbox.module.exports, timer: delay => [...state.timers.values()].find(timer => timer.delay === delay)?.callback }
 }
 
@@ -84,7 +86,7 @@ async function main() {
   const old = deferred(), newer = deferred()
   const racing = setup({ listOpAccounts: params => params.keyword === 'new' ? newer.promise : old.promise })
   const first = racing.view.loadAccounts()
-  racing.view.filters.keyword = 'new'
+  racing.view.appliedKeyword.value = 'new'
   const second = racing.view.loadAccounts()
   newer.resolve(list(row('2026-10-06T06:00:00', 200)))
   await second
@@ -104,4 +106,4 @@ async function main() {
   console.log('Operator refresh: completed/import task feedback, video keys, dialog sync, silent scheduler refresh, races and cleanup passed')
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1 })
+main().then(() => clearTimeout(deadline)).catch(error => { clearTimeout(deadline); console.error(error); process.exitCode = 1 })

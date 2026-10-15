@@ -10,11 +10,11 @@ from app.services.project_service import get_visible_project_ids
 from app.services.auth_service import _get_user_permissions, get_user_data_scope, get_dept_member_usernames
 
 
-def enrich_monitor_summaries(db: Session, items: list[OpAccount], current_user: User) -> None:
-    data_scope = get_user_data_scope(db, current_user)
-    scope_usernames = get_dept_member_usernames(db, current_user) if data_scope == "dept" else None
+def enrich_monitor_summaries(db: Session, items: list[OpAccount], current_user: User | None) -> None:
+    data_scope = get_user_data_scope(db, current_user) if current_user is not None else "all"
+    scope_usernames = get_dept_member_usernames(db, current_user) if current_user is not None and data_scope == "dept" else None
     monitor_by_name: dict[str, MonitorAccount] = {}
-    if current_user.is_super_admin or "monitor:view" in _get_user_permissions(db, current_user.id):
+    if current_user is not None and (current_user.is_super_admin or "monitor:view" in _get_user_permissions(db, current_user.id)):
         names = [item.account.lstrip("@").lower() for item in items if item.platform == "tiktok"]
         query = db.query(MonitorAccount).filter(func.lower(MonitorAccount.username).in_(names))
         allowed_ids = get_visible_project_ids(db, current_user.username, data_scope, scope_usernames)

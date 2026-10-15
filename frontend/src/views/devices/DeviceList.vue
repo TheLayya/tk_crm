@@ -63,17 +63,24 @@
 
     <!-- 桌面端：表格 -->
     <el-card class="desktop-table">
+      <div v-if="selectedDevices.length" class="batch-toolbar">
+        <span>已选 {{ selectedDevices.length }} 台设备</span>
+        <el-button size="small" :disabled="loading" @click="copySelectedDevices">复制资产概要</el-button>
+        <el-button size="small" link @click="deviceTable.clearSelection()">清空选择</el-button>
+      </div>
       <crm-table table-id="devices" remote :query="tableQuery" @query-change="handleTableQuery"
         ref="deviceTable"
         row-key="id"
         size="small"
         @expand-change="loadExpandedDevice"
+        @selection-change="selectedDevices = $event"
         :data="devices"
         v-loading="loading"
         :empty-text="emptyDescription"
         element-loading-text="正在加载设备"
         stripe
       >
+        <el-table-column column-key="selection" table-tools-disabled type="selection" width="40" />
         <el-table-column column-key="expand" table-tools-disabled type="expand" width="36">
           <template #default="{ row }">
             <div class="device-inline-details resource-state-grid">
@@ -97,6 +104,7 @@
         <el-table-column column-key="name" prop="name" filter-type="text" label="名称" width="110">
           <template #default="{ row }">
             <button type="button" class="resource-expand-trigger" :aria-expanded="expandedDeviceIds.includes(row.id)" :title="expandedDeviceIds.includes(row.id) ? '点击收起终端详情' : '点击展开终端详情'" @click="deviceTable.toggleRowExpansion(row)">{{ row.name }}</button>
+            <el-button class="resource-copy-action" link type="primary" @click="copyDeviceText(row.name, '设备名称')">复制名称</el-button>
           </template>
         </el-table-column>
         <el-table-column column-key="device_type" filter-type="enum" :filter-options="[{ label: '电脑', value: 'pc' }, { label: '手机', value: 'phone' }]" prop="device_type" label="类型" width="100">
@@ -245,6 +253,7 @@ import { getMembers } from '@/api/team'
 import LinkedAccountCards from '@/components/LinkedAccountCards.vue'
 import AssociationOverview from '@/components/AssociationOverview.vue'
 import ResourceActivity from '@/components/ResourceActivity.vue'
+import { copyText } from '@/utils/clipboard'
 
 const authStore = useAuthStore()
 const isSuperAdmin = computed(() => !!authStore.user?.is_super_admin)
@@ -276,8 +285,21 @@ async function loadExpandedDevice(row, expandedRows) {
   finally { expandedDeviceLoading.value[row.id] = false }
 }
 const devices = ref([])
+const selectedDevices = ref([])
 const total = ref(0)
 const loading = ref(false)
+const copyDeviceText = async (text, label) => {
+  try { await copyText(text); ElMessage.success(`已复制${label}`) }
+  catch { ElMessage.warning('复制失败，请重试或手动复制') }
+}
+const copySelectedDevices = () => {
+  const rows = [['设备名称', '类型', '所属人', '绑定节点', '绑定账号', '备注'], ...selectedDevices.value.map(row => [row.name, row.device_type === 'phone' ? '手机' : '电脑', row.owner_name, row.node_ip, (row.accounts || []).map(account => account.account || account.username).join(' / '), row.remark])]
+  const text = rows.map(row => row.map(value => {
+    const cell = String(value ?? '')
+    return /[\t\r\n"]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell
+  }).join('\t')).join('\n')
+  return copyDeviceText(text, `${selectedDevices.value.length} 台设备的资产概要（含表头）`)
+}
 
 /** 筛选查询参数 */
 const { tableQuery, queryParams, resetTableQuery } = useTableQuery('devices')
@@ -481,6 +503,9 @@ onMounted(() => {
 .resource-expand-trigger { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; line-height: inherit; overflow-wrap: anywhere; }
 .resource-expand-trigger:hover { color: var(--el-color-primary); }
 .resource-expand-trigger:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.resource-copy-action { margin-top: 2px; font-size: 12px; }
+.batch-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; font-size: 13px; }
+.batch-toolbar .el-button { margin-left: 0; }
 .resource-state-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; }
 .resource-state-grid > section { min-width: 0; }
 .state-note { margin-top: 5px; font-size: 11px; color: #909399; }

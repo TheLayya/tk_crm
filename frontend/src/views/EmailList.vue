@@ -28,6 +28,7 @@
         <span>已选 {{ selected.length }} 个邮箱</span>
         <el-button v-if="canManage" type="primary" :disabled="!selected.length || loading" @click="openBatchSale">批量售出</el-button>
         <el-button :disabled="!selected.length || loading" @click="copySelectedCredentials">复制选中资料</el-button>
+        <el-button :disabled="!selected.length || loading" @click="copySelectedEmails">复制选中邮箱</el-button>
         <el-button v-if="selected.length" link @click="tableRef.clearSelection()">清空选择</el-button>
       </div>
       <crm-table table-id="emails" remote :query="tableQuery" @query-change="handleTableQuery" class="email-table" ref="tableRef" v-loading="loading" :data="items" row-key="id" stripe @expand-change="handleExpand" @selection-change="selected = $event">
@@ -258,6 +259,7 @@ const copyCredentials = (row) => copy([
   `2FA 密钥：${row.totp_secret || ''}`,
 ].join('\n'), '登录资料')
 const copySelectedCredentials = () => copy(deliveryText(selected.value), `${selected.value.length} 个邮箱的登录资料`)
+const copySelectedEmails = () => copy(selected.value.map(row => row.email).join('\n'), `${selected.value.length} 个邮箱`)
 const copyBatchDelivery = async () => {
   try { await copyText(batchDeliveryText.value); ElMessage.success(`已复制 ${batchSaleRows.value.length} 个邮箱的交付资料`) }
   catch { ElMessage.warning('售出已保存，复制失败，请手动复制下方交付资料或重试') }

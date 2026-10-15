@@ -12,12 +12,9 @@ from typing import List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
-from app.services.account_summary_service import enrich_monitor_summaries
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.device import Device
-from app.models.proxy_node import ProxyNode
 from app.models.video import OpAccountVideo
 from app.schemas.op_account import (
     AuditLogResponse,
@@ -32,7 +29,6 @@ from app.schemas.op_account import (
 )
 from app.services import op_account_service, video_service
 from app.services.gmail_checker_service import MAX_BATCH_SIZE, apply_check_results, check_gmail_accounts
-from app.services.table_query_service import apply_table_rows, field_kind, model_table_fields, parse_table_filters
 
 from app.services.auth_service import require_permission, get_current_user_from_header
 from app.services.asset_scope_service import get_scope_usernames, require_op_account_scope, require_visible_op_account, require_account_relation_scope
@@ -71,17 +67,7 @@ def list_op_accounts(
     current_user: User = Depends(get_current_user_from_header),
     _: User = Depends(require_permission("op_account:view")),
 ) -> dict[str, object]:
-    sql_fields = model_table_fields(OpAccount, exclude=("password", "totp_secret", "email_password", "project_id", "previous_follower_count"))
-    row_fields = {name: field_kind(column) for name, column in sql_fields.items()}
-    row_fields.update({"device_name": "text", "node_ip": "text", "followers_change": "number",
-                       "yesterday_video_count": "number", "yesterday_video_plays": "number",
-                       "monitor_account_id": "number", "video_source": "enum", "sellers": "text"})
-    parsed = parse_table_filters(table_filters, row_fields)
-    parse_table_filters({name: condition for name, condition in parsed.items() if name in sql_fields}, sql_fields)
-    apply_table_rows([], row_fields, sort_by, sort_order, parsed)
-    derived_names = set(row_fields) - set(sql_fields) | {"sellers"}
-    derived = bool((set(parsed) | ({sort_by} if sort_by else set())) & derived_names)
-    items, total = op_account_service.list_op_accounts(
+    rows, total = op_account_service.query_op_account_rows(
         db,
         platform=platform,
         status=status,
@@ -89,30 +75,27 @@ def list_op_accounts(
         tags=tags,
         purchase_channel=purchase_channel,
         sale_customer=sale_customer,
-        skip=0 if derived else skip,
-        limit=None if derived else limit,
+        skip=skip,
+        limit=limit,
         current_user=current_user,
         exclude_gmail=exclude_gmail,
-        sort_by=None if derived else sort_by,
+        sort_by=sort_by,
         sort_order=sort_order,
-        table_filters=None if derived else parsed,
+        table_filters=table_filters,
     )
-    enrich_monitor_summaries(db, items, current_user)
-    for item in items:
-        device = db.query(Device).filter(Device.id == item.device_id, Device.is_deleted == False).first() if item.device_id else None
-        node = db.query(ProxyNode).filter(ProxyNode.id == item.node_id).first() if item.node_id else None
-        setattr(item, "device_name", device.name if device else None)
-        setattr(item, "node_ip", f"{node.ip}:{node.port}" if node else None)
-    rows = [OpAccountResponse.model_validate(item).model_dump() for item in items]
-    if derived:
-        # ponytail: derived queries enrich all scoped accounts; use SQL aggregates if datasets outgrow memory.
-        rows = apply_table_rows(rows, row_fields, sort_by, sort_order, parsed)
-        total = len(rows)
-        rows = rows[skip:skip + limit]
     return {
         "items": rows,
         "total": total,
     }
+
+
+@router.get("/filter-options", response_model=dict)
+def get_filter_options(
+    exclude_gmail: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("op_account:view")),
+) -> dict[str, list[dict[str, Any]]]:
+    return op_account_service.get_op_account_filter_options(db, current_user, exclude_gmail)
 
 
 @router.post("", response_model=OpAccountResponse, status_code=status.HTTP_201_CREATED)
@@ -237,6 +220,10 @@ def export_op_accounts(
     tags: Optional[str] = Query(None),
     purchase_channel: Optional[str] = Query(None),
     sale_customer: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Literal["asc", "desc"] = Query("asc"),
+    table_filters: Optional[str] = Query(None),
+    exclude_gmail: bool = Query(False),
     format: str = Query("csv"),
     localized: bool = Query(False, description="是否使用中文表头"),
     db: Session = Depends(get_db),
@@ -251,6 +238,10 @@ def export_op_accounts(
         "tags": tags,
         "purchase_channel": purchase_channel,
         "sale_customer": sale_customer,
+        "sort_by": sort_by,
+        "sort_order": sort_order,
+        "table_filters": table_filters,
+        "exclude_gmail": exclude_gmail,
     }
     data = op_account_service.export_op_accounts(db, filters=filters, format=format, localized=localized, current_user=current_user)
 

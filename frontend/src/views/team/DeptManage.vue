@@ -21,13 +21,13 @@
           <div class="tree-node">
             <span>{{ node.label }}</span>
             <div class="tree-actions">
-              <el-button v-permission="'team:dept:create'" link type="primary" size="small" @click.stop="openCreate(data)">
+              <el-button v-permission="'team:dept:create'" link type="primary" size="small" :aria-label="`新增子部门：${data.name}`" @click.stop="openCreate(data)">
                 新增子部门
               </el-button>
-              <el-button v-permission="'team:dept:edit'" link type="primary" size="small" @click.stop="openEdit(data)">
+              <el-button v-permission="'team:dept:edit'" link type="primary" size="small" :aria-label="`编辑部门：${data.name}`" @click.stop="openEdit(data)">
                 编辑
               </el-button>
-              <el-button v-permission="'team:dept:delete'" link type="danger" size="small" @click.stop="handleDelete(data)">
+              <el-button v-permission="'team:dept:delete'" link type="danger" size="small" :aria-label="`删除部门：${data.name}`" @click.stop="handleDelete(data)">
                 删除
               </el-button>
             </div>
@@ -43,7 +43,7 @@
           <el-input v-model="form.name" placeholder="请输入部门名称" />
         </el-form-item>
         <el-form-item v-if="form.parent_id !== undefined" label="上级部门">
-          <el-input :value="parentName" disabled />
+          <el-input :model-value="parentName" disabled />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -96,9 +96,20 @@ const openCreate = (parent) => {
   dialogVisible.value = true
 }
 
+const departmentPath = (id, nodes = treeData.value, path = []) => {
+  for (const node of nodes) {
+    const names = [...path, node.name]
+    if (node.id === id) return names.join(' / ')
+    const found = departmentPath(id, node.children || [], names)
+    if (found) return found
+  }
+  return ''
+}
+
 const openEdit = (data) => {
   editId.value = data.id
   form.value = { name: data.name, parent_id: data.parent_id ?? null }
+  parentName.value = data.parent_id == null ? '（顶级）' : departmentPath(data.parent_id) || '上级部门未记录'
   dialogTitle.value = '编辑部门'
   dialogVisible.value = true
 }
@@ -166,12 +177,18 @@ onUnmounted(() => {
 }
 
 .tree-actions {
-  display: none;
-}
-
-.tree-node:hover .tree-actions {
   display: flex;
   gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tree-node:hover .tree-actions,
+.tree-node:focus-within .tree-actions,
+.dept-tree :deep(.el-tree-node:focus > .el-tree-node__content) .tree-actions,
+.dept-tree :deep(.el-tree-node__content:focus-within) .tree-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 @media (max-width: 768px) {
@@ -184,8 +201,8 @@ onUnmounted(() => {
   }
 
   .tree-actions {
-    display: flex;
-    gap: 4px;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 </style>

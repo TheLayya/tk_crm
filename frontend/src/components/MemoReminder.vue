@@ -1,6 +1,6 @@
 <template>
   <el-badge :value="due.length" :hidden="!due.length" :max="99">
-    <el-button link aria-label="备忘提醒" title="备忘提醒" @click="router.push('/work-items')"><el-icon :size="19"><Bell /></el-icon></el-button>
+    <el-button link aria-label="备忘提醒" title="备忘提醒" @click="openReminder()"><el-icon :size="19"><Bell /></el-icon></el-button>
   </el-badge>
 </template>
 
@@ -12,6 +12,8 @@ import { Bell } from '@element-plus/icons-vue'
 import { getWorkItemSummary } from '@/api/work_items'
 
 const router = useRouter()
+let navigationSequence = 0
+const openReminder = (itemId) => router.push({ path: '/work-items', query: { ...(itemId ? { item_id: String(itemId) } : {}), mine: 'true', reminder: `${Date.now()}-${++navigationSequence}` } })
 const due = ref([])
 const notified = new Set()
 let timer
@@ -24,7 +26,7 @@ const refresh = async () => {
     for (const item of due.value) {
       if (notified.has(item.id)) continue
       notified.add(item.id)
-      ElNotification({ title: '备忘到期提醒', message: item.title, type: 'warning', onClick: () => router.push('/work-items') })
+      ElNotification({ title: '备忘到期提醒', message: item.title, type: 'warning', onClick: () => openReminder(item.id) })
     }
   } catch (_) {}
 }

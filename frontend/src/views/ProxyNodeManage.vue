@@ -1,6 +1,6 @@
 <template>
   <div class="proxy-node-manage">
-    <el-card style="margin-top: 16px;">
+    <el-card>
       <template #header>
         <div class="card-header">
           <span class="card-title">节点管理</span>
@@ -73,6 +73,9 @@
       <!-- 批量操作工具栏 -->
       <div v-if="selectedNodes.length > 0" class="batch-toolbar">
         <span class="batch-info">已选 {{ selectedNodes.length }} 项</span>
+        <el-button size="small" :disabled="loading" @click="copySelectedAddresses">复制地址</el-button>
+        <el-button size="small" :disabled="loading" @click="copySelectedConnections">复制连接资料</el-button>
+        <el-button size="small" link @click="nodeTable.clearSelection()">清空选择</el-button>
         <el-button type="primary" size="small" :loading="batchTesting" @click="handleBatchTest">
           <el-icon><Connection /></el-icon>
           批量测试
@@ -129,6 +132,7 @@
         <el-table-column column-key="ip" prop="ip" filter-type="text" label="IP" width="130" fixed="left">
           <template #default="{ row }">
             <button type="button" class="resource-expand-trigger" :aria-expanded="expandedNodeIds.includes(row.id)" :title="expandedNodeIds.includes(row.id) ? '点击收起节点详情' : '点击展开节点详情'" @click="nodeTable.toggleRowExpansion(row)">{{ row.ip }}</button>
+            <el-button class="resource-copy-action" link type="primary" @click="copyNodeText(nodeAddress(row), '节点地址')">复制地址</el-button>
           </template>
         </el-table-column>
         <el-table-column column-key="port" filter-type="number" prop="port" label="端口" width="80" />
@@ -629,6 +633,7 @@ import {
 } from '@element-plus/icons-vue'
 import SellerSelector from '@/components/SellerSelector.vue'
 import { saleInformationError } from '@/utils/saleValidation'
+import { copyText } from '@/utils/clipboard'
 import QRCodeDialog from '@/components/QRCodeDialog.vue'
 import LinkedAccountCards from '@/components/LinkedAccountCards.vue'
 import AssociationOverview from '@/components/AssociationOverview.vue'
@@ -819,6 +824,23 @@ const togglePasswordVisibility = (id) => {
 const selectedNodes = ref([])
 const handleSelectionChange = (selection) => {
   selectedNodes.value = selection
+}
+const nodeAddress = (row) => {
+  const host = String(row.ip ?? '')
+  return `${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${row.port ?? ''}`
+}
+const copyNodeText = async (text, label) => {
+  try { await copyText(text); ElMessage.success(`已复制${label}`) }
+  catch { ElMessage.warning('复制失败，请重试或手动复制') }
+}
+const copySelectedAddresses = () => copyNodeText(selectedNodes.value.map(nodeAddress).join('\n'), `${selectedNodes.value.length} 个节点地址`)
+const copySelectedConnections = () => {
+  const rows = [['IP', '端口', '协议', '用户名', '密码', '中转 IP', '中转端口', '中转协议'], ...selectedNodes.value.map(row => [row.ip, row.port, row.protocol, row.username, row.password, row.relay_ip, row.relay_port, row.relay_protocol])]
+  const text = rows.map(row => row.map(value => {
+    const cell = String(value ?? '')
+    return /[\t\r\n"]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell
+  }).join('\t')).join('\n')
+  return copyNodeText(text, `${selectedNodes.value.length} 个节点连接资料（含表头）`)
 }
 
 // ─── 单节点测试 ──────────────────────────────────────────────
@@ -1299,6 +1321,7 @@ onMounted(async () => {
 .resource-expand-trigger { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; line-height: inherit; overflow-wrap: anywhere; }
 .resource-expand-trigger:hover { color: var(--el-color-primary); }
 .resource-expand-trigger:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.resource-copy-action { margin-top: 2px; font-size: 12px; }
 .resource-state-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; }
 .resource-state-grid > section { min-width: 0; }
 .state-note { margin-top: 5px; font-size: 11px; color: #909399; }

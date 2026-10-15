@@ -12,17 +12,20 @@ from typing import Any, Callable, List, Optional, cast
 
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
-from app.services.table_query_service import apply_table_query, model_table_fields
+from app.services.table_query_service import apply_table_query, apply_table_rows, field_kind, model_table_fields, parse_table_filters
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.database import SessionLocal
 from app.models.op_account import OpAccount, OpAuditLog, OpCollectTask
 from app.models.device import Device
+from app.models.proxy_node import ProxyNode
 from app.models.team import User
+from app.services.account_summary_service import enrich_monitor_summaries
 from app.services.sale_validation_service import validate_sale_information
 from app.services.asset_scope_service import require_op_account_scope, scoped_op_accounts
 from app.schemas.op_account import (
     OpAccountCreate,
+    OpAccountResponse,
     OpAccountUpdate,
     OpImportResult,
 )
@@ -278,6 +281,67 @@ def list_op_accounts(
     return items, total
 
 
+def query_op_account_rows(
+    db: Session,
+    current_user: Optional[User] = None,
+    skip: int = 0,
+    limit: Optional[int] = 50,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
+    table_filters: object = None,
+    **filters: Any,
+) -> tuple[list[dict[str, Any]], int]:
+    """Apply one display query for the paginated list and complete exports."""
+    sql_fields = model_table_fields(OpAccount, exclude=("password", "totp_secret", "email_password", "project_id", "previous_follower_count"))
+    row_fields = {name: field_kind(column) for name, column in sql_fields.items()}
+    row_fields.update({"device_name": "text", "node_ip": "text", "followers_change": "number",
+                       "yesterday_video_count": "number", "yesterday_video_plays": "number",
+                       "monitor_account_id": "number", "video_source": "enum", "sellers": "text"})
+    parsed = parse_table_filters(table_filters, row_fields)
+    parse_table_filters({name: condition for name, condition in parsed.items() if name in sql_fields}, sql_fields)
+    apply_table_rows([], row_fields, sort_by, sort_order, parsed)
+    derived_names = set(row_fields) - set(sql_fields) | {"sellers"}
+    derived = bool((set(parsed) | ({sort_by} if sort_by else set())) & derived_names)
+    items, total = list_op_accounts(
+        db, **filters, current_user=current_user, skip=0 if derived else skip,
+        limit=None if derived else limit, sort_by=None if derived else sort_by,
+        sort_order=sort_order, table_filters=None if derived else parsed,
+    )
+    enrich_monitor_summaries(db, items, current_user)
+    for item in items:
+        device = db.query(Device).filter(Device.id == item.device_id, Device.is_deleted == False).first() if item.device_id else None
+        node = db.query(ProxyNode).filter(ProxyNode.id == item.node_id).first() if item.node_id else None
+        setattr(item, "device_name", device.name if device else None)
+        setattr(item, "node_ip", f"{node.ip}:{node.port}" if node else None)
+    rows = [OpAccountResponse.model_validate(item).model_dump() for item in items]
+    if derived:
+        # ponytail: derived queries enrich all scoped accounts; use SQL aggregates if datasets outgrow memory.
+        rows = apply_table_rows(rows, row_fields, sort_by, sort_order, parsed)
+        total = len(rows)
+        rows = rows[skip:skip + limit if limit is not None else None]
+    return rows, total
+
+
+def get_op_account_filter_options(db: Session, current_user: User, exclude_gmail: bool = False) -> dict[str, list[dict[str, Any]]]:
+    """Return distinct categorical values without loading accounts or credentials."""
+    query = scoped_op_accounts(db, current_user)
+    if exclude_gmail:
+        query = query.filter(OpAccount.platform != "gmail")
+    options: dict[str, list[dict[str, Any]]] = {}
+    for name in ("country", "registrant", "operator", "purchase_channel", "sale_customer"):
+        values = [value for (value,) in query.with_entities(getattr(OpAccount, name)).distinct().all()]
+        options[name] = [{"value": value, "label": "未填写" if value is None else "未填写（空白）" if not value.strip() else value}
+                         for value in sorted(values, key=lambda value: (value is None, value or ""))]
+    devices = query.outerjoin(Device, (Device.id == OpAccount.device_id) & (Device.is_deleted == False))
+    options["device_name"] = [{"value": value, "label": "未绑定" if value is None else "未填写（空白）" if not value.strip() else value}
+                              for (value,) in devices.with_entities(Device.name).distinct().order_by(Device.name).all()]
+    nodes = query.outerjoin(ProxyNode, ProxyNode.id == OpAccount.node_id)
+    options["node_ip"] = [{"value": f"{ip}:{port}" if ip is not None else None,
+                           "label": f"{ip}:{port}" if ip is not None else "未绑定"}
+                          for ip, port in nodes.with_entities(ProxyNode.ip, ProxyNode.port).distinct().order_by(ProxyNode.ip, ProxyNode.port).all()]
+    return options
+
+
 # ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
@@ -498,7 +562,7 @@ def create_import_template() -> bytes:
 
 
 def export_op_accounts(db: Session, filters: dict[str, Any], format: str = "csv", localized: bool = False, current_user: Optional[User] = None) -> bytes:
-    items, _ = list_op_accounts(db, **filters, skip=0, limit=999999, current_user=current_user)
+    rows, _ = query_op_account_rows(db, **filters, skip=0, limit=None, current_user=current_user)
     columns = [_COLUMN_LABELS.get(col, col) for col in _EXPORT_COLUMNS] if localized else _EXPORT_COLUMNS
 
     if format == "xlsx":
@@ -510,8 +574,8 @@ def export_op_accounts(db: Session, filters: dict[str, Any], format: str = "csv"
         ws = wb.active
         assert ws is not None
         ws.append(columns)
-        for acc in items:
-            ws.append([str(getattr(acc, col, "") or "") for col in _EXPORT_COLUMNS])
+        for row in rows:
+            ws.append([str(row.get(col, "") or "") for col in _EXPORT_COLUMNS])
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
@@ -520,8 +584,8 @@ def export_op_accounts(db: Session, filters: dict[str, Any], format: str = "csv"
     text_buffer = io.StringIO()
     writer = csv.writer(text_buffer)
     writer.writerow(columns)
-    for acc in items:
-        writer.writerow([str(getattr(acc, col, "") or "") for col in _EXPORT_COLUMNS])
+    for row in rows:
+        writer.writerow([str(row.get(col, "") or "") for col in _EXPORT_COLUMNS])
     return ("\ufeff" + text_buffer.getvalue()).encode("utf-8")
 
 

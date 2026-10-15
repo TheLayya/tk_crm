@@ -18,7 +18,7 @@ export function normalizeQuery(value) {
       normalized.value = filter.value
     } else if (filter.type === 'enum') {
       const choices = Array.isArray(filter.value) ? filter.value : [filter.value]
-      const values = choices.filter(item => !empty(item) && (item === null || ['string', 'number', 'boolean'].includes(typeof item)))
+      const values = choices.filter(item => item !== undefined && (item === null || ['string', 'number', 'boolean'].includes(typeof item)))
       if (!values.length) continue
       normalized.value = Array.isArray(filter.value) ? [...new Set(values)] : values[0]
     } else {

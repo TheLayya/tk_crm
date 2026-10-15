@@ -155,6 +155,15 @@ def test_lists_stats_exports_options_and_overview_share_scope(client, db, normal
     assert stats["total_purchase_cost"] == sum(account.purchase_price for account in accounts)
     assert {row["account"] for row in csv_rows(client.get("/api/op-accounts/export", headers=headers))} == account_names
     assert client.get("/api/op-accounts", headers=headers, params={"keyword": "peer"}).json()["total"] == int(scope != "self")
+    options = client.get("/api/op-accounts/filter-options", headers=headers)
+    assert options.status_code == 200, options.text
+    expected_devices = {assets["devices"][name].name for name in device_names}
+    expected_nodes = {f"{assets['nodes'][name].ip}:1080" for name in node_names
+                      if assets["nodes"][name].id in {account.node_id for account in accounts}}
+    if scope == "all":
+        expected_nodes.add(f"{assets['nodes']['deleted'].ip}:1080")
+    assert {option["value"] for option in options.json()["device_name"]} == expected_devices | {None}
+    assert {option["value"] for option in options.json()["node_ip"]} == expected_nodes | {None}
 
     response = client.get("/api/proxy-nodes", headers=headers)
     assert response.status_code == 200, response.text

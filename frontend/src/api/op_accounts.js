@@ -57,6 +57,10 @@ export function updateOpAccount(id, data) {
   })
 }
 
+export function getOpAccountFilterOptions(params) {
+  return request({ url: '/op-accounts/filter-options', method: 'get', params })
+}
+
 /**
  * Delete an op account
  */
