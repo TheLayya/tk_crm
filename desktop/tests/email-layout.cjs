@@ -97,7 +97,7 @@ async function main() {
             const footer = await button.boundingBox()
             assert(footer && footer.y >= 0 && footer.y + footer.height <= height + 1, 'Email dialog footer clipped')
           }
-          await dialog.getByRole('button', { name: 'Close this dialog', exact: true }).click()
+          await dialog.locator('.el-dialog__headerbtn').click()
           await dialog.waitFor({ state: 'hidden' })
         }
         console.log(JSON.stringify({ width, height, deviceScaleFactor, emailLayout: 'passed' }))

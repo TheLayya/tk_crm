@@ -18,6 +18,8 @@ Required tools: repository Python environment with PyInstaller/dependencies, Nod
 
 Required results: package/frontend parity, no runtime data, updater safety/lock/readiness/process/rollback tests, frozen database migration, no-toolchain smoke, business-page layout checks and Windows manifest checksum. Record publish and audit actual exit codes and logs.
 
+UI layout checks must use locale-independent selectors for Element Plus chrome (for example `.el-dialog__headerbtn`), then verify the dialog actually closes. The application uses Chinese component labels; English-only close-button names invalidate the test. A test-only follow-up commit may supply updated checks in a separate clean audit checkout against an already built runtime; retain the original build-input audits and record the audit commit and unchanged application blobs explicitly.
+
 ## Installer / online smoke
 
 ```powershell

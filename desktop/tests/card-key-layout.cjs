@@ -95,7 +95,7 @@ async function main() {
           await page.evaluate(() => window.scrollTo(0, 0))
           await page.screenshot({ path: path.join(artifactDir, 'project-dialog-683x384-dpr2.png'), fullPage: false })
         }
-        await dialog.getByRole('button', { name: 'Close this dialog', exact: true }).click()
+        await dialog.locator('.el-dialog__headerbtn').click()
         await dialog.waitFor({ state: 'hidden' })
         }
         console.log(JSON.stringify({ width, height, deviceScaleFactor, cardKeyLayout: 'passed' }))
