@@ -1,17 +1,17 @@
 {
-  "version": "1.1.22",
-  "date": "2026-10-15",
+  "version": "1.1.23",
+  "date": "2026-10-16",
   "changes": [
-    "卡密每次导入建立独立批次，支持名称、备注和批次统计",
-    "领取可指定批次，自动领取跳过暂停或归档批次",
-    "异常批次支持暂停和恢复；未流转整批删除，有历史整批归档",
-    "保留历史未分批卡密、领取归属、加密内容和完整流转记录"
+    "长卡密和链接单行预览，点击查看全文，复制保留完整原值",
+    "卡密记录按视口自适应高度并独立滚动，支持每页15至100条",
+    "成员工作量独立页签，支持今天、近7天、全部时间及成员筛选",
+    "成员汇总与完成明细独立切换，导出当前日期和成员范围的完整CSV"
   ],
-  "source_commit": "d071c909fad693070582d0abf3baed2383ae5b58",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.22/release-v1.1.22.tar.gz",
-  "sha256": "829e5d7d8407638dc4df56974c1b77cf26f32ef340d7431edb976a4e70e8dd3d",
-  "server_source_commit": "d071c909fad693070582d0abf3baed2383ae5b58",
-  "windows_source_commit": "d071c909fad693070582d0abf3baed2383ae5b58",
-  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.22/TkCRM-1.1.22-win-x64-setup.exe",
-  "windows_sha256": "6386dc798fbc6c3bc30f431bd65ff5a18392a2393ed470549983c272a3333c2a"
+  "source_commit": "bdd04dc22f9b0f28364eea0e2e84fdd4dd0ce5f5",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.23/release-v1.1.23.tar.gz",
+  "sha256": "7832f84be668a014598a4e631cbf4d70729af6e46a2d2912fd31b8bf9077569b",
+  "server_source_commit": "bdd04dc22f9b0f28364eea0e2e84fdd4dd0ce5f5",
+  "windows_source_commit": "bdd04dc22f9b0f28364eea0e2e84fdd4dd0ce5f5",
+  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.23/TkCRM-1.1.23-win-x64-setup.exe",
+  "windows_sha256": "ae2ab9a2bfef6e8288e30926001fe81e441379757f815940d1c87a94cb2cbcfb"
 }
