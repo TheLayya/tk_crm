@@ -18,6 +18,7 @@ PATH_MODULE_MAP = [
     (r"POST /api/emails/import", ("邮箱管理", "CREATE")),
     (r"POST /api/emails/check", ("邮箱管理", "UPDATE")),
     (r"POST /api/emails/batch-sale", ("邮箱管理", "UPDATE")),
+    (r"POST /api/emails/batch-status", ("邮箱管理", "UPDATE")),
     (r"PUT /api/emails/\d+", ("邮箱管理", "UPDATE")),
     (r"DELETE /api/emails/\d+", ("邮箱管理", "DELETE")),
     (r"POST /api/emails/\d+/relations", ("邮箱关联", "CREATE")),

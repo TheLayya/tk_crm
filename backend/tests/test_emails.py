@@ -1,6 +1,6 @@
 import pytest
 import json
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy import text
 from app.models.op_account import EmailAccount, EmailAccountRelation, EmailAssetRelation, OpAccount
@@ -762,3 +762,280 @@ def test_email_batch_sale_supports_500_rows_and_list_limit(client, db, super_adm
     assert response.status_code == 200, response.text
     assert response.json()["updated"] == 500
     assert db.query(EmailAccount).filter_by(management_status="已出售").count() == 500
+
+
+@pytest.mark.parametrize("status", ["闲置", "使用中", "锁定", "废弃"])
+def test_email_batch_status_only_changes_usage_and_records_operator(client, db, super_admin, status):
+    account = make_account(db)
+    emails = [EmailAccount(email=f"status-{index}@gmail.com", registrant=super_admin.username,
+                           password="original-password", totp_secret="ORIGINALKEY", recovery_email="helper@example.com",
+                           management_status="使用中", gmail_check_status="正常", gmail_check_raw_status="live",
+                           gmail_checked_at=datetime(2026, 10, 1), operator="original-operator", platform_tags='["TikTok"]',
+                           sale_customer="原客户", sale_price=Decimal("8.50"), sale_date=date(2026, 10, 1), sellers='["seller"]')
+              for index in range(2)]
+    db.add_all(emails)
+    db.flush()
+    relation = EmailAccountRelation(email_id=emails[0].id, op_account_id=account.id, operator="root")
+    db.add(relation)
+    db.commit()
+    ids = [email.id for email in emails]
+    response = client.post("/api/emails/batch-status", headers=auth_headers(super_admin),
+                           json={"email_ids": [ids[1], ids[0], ids[1]], "management_status": status})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"updated": 2, "email_ids": [ids[1], ids[0]]}
+    assert "original-password" not in response.text and "ORIGINALKEY" not in response.text
+    for email in emails:
+        db.refresh(email)
+        assert email.management_status == status
+        assert (email.password, email.totp_secret, email.recovery_email, email.operator, email.platform_tags) == (
+            "original-password", "ORIGINALKEY", "helper@example.com", "original-operator", '["TikTok"]')
+        assert (email.gmail_check_status, email.gmail_check_raw_status, email.gmail_checked_at) == (
+            "正常", "live", datetime(2026, 10, 1))
+        assert (email.sale_customer, email.sale_price, email.sale_date, email.sellers) == (
+            "原客户", Decimal("8.50"), date(2026, 10, 1), '["seller"]')
+    db.refresh(relation)
+    assert relation.unbound_at is None
+    log = db.query(OperationLog).filter_by(summary="UPDATE /api/emails/batch-status").one()
+    assert (log.module, log.action, log.username, log.result) == ("邮箱管理", "UPDATE", "root", "success")
+
+
+@pytest.mark.parametrize("status", ["正常", "封禁", "验证", "未注册", "检测失败", None])
+def test_email_batch_check_status_is_manual_and_keeps_claims_and_trade(client, db, super_admin, status):
+    email = EmailAccount(email="manual-check@example.com", registrant=super_admin.username,
+                         management_status="已出售", gmail_check_status="封禁", gmail_check_raw_status="disabled",
+                         gmail_checked_at=datetime(2026, 10, 1), claimed_by="claim-user", claimed_platform="TikTok",
+                         claimed_at=datetime(2026, 10, 2), sale_customer="原客户", sale_price=Decimal("8.50"))
+    db.add(email)
+    db.commit()
+    response = client.post("/api/emails/batch-status", headers=auth_headers(super_admin),
+                           json={"email_ids": [email.id], "gmail_check_status": status})
+    assert response.status_code == 200, response.text
+    db.refresh(email)
+    assert (email.gmail_check_status, email.gmail_check_raw_status, email.gmail_checked_at) == (
+        status, "手动标记" if status else None, None)
+    assert (email.management_status, email.claimed_by, email.claimed_platform, email.claimed_at) == (
+        "已出售", "claim-user", "TikTok", datetime(2026, 10, 2))
+    assert (email.sale_customer, email.sale_price) == ("原客户", Decimal("8.50"))
+
+
+def test_email_batch_status_requires_one_valid_field_and_bounded_ids(client, db, super_admin):
+    email = EmailAccount(email="status-validation@gmail.com", registrant=super_admin.username)
+    db.add(email)
+    db.commit()
+    headers = auth_headers(super_admin)
+    invalid_values = [
+        {}, {"management_status": None}, {"management_status": "已出售"}, {"management_status": "unknown"},
+        {"gmail_check_status": "unknown"}, {"gmail_check_status": "未检测"}, {"gmail_check_status": ""},
+        {"gmail_check_status": None, "management_status": "锁定"},
+        {"management_status": "锁定", "password": "new-password"},
+    ]
+    for values in invalid_values:
+        response = client.post("/api/emails/batch-status", headers=headers, json={"email_ids": [email.id], **values})
+        assert response.status_code == 422, (values, response.text)
+    for ids in [[], [0], [-1], [True], [str(email.id)], [1.5], [email.id] * 501]:
+        response = client.post("/api/emails/batch-status", headers=headers,
+                               json={"email_ids": ids, "management_status": "锁定"})
+        assert response.status_code == 422, (ids[:2], response.text)
+    db.refresh(email)
+    assert email.management_status == "闲置" and email.gmail_check_status is None
+
+
+@pytest.mark.parametrize("field, status", [("management_status", "锁定"), ("gmail_check_status", "正常")])
+@pytest.mark.parametrize("scope, expected", [
+    ("self", {"registrant", "operator"}),
+    ("dept", {"registrant", "operator", "peer"}),
+    ("all", {"registrant", "operator", "peer", "outside"}),
+])
+def test_email_batch_status_respects_permissions_scope_and_atomicity(client, db, normal_user, other_user,
+                                                                    super_admin, field, status, scope, expected):
+    department = Department(name="email-status-team")
+    role = Role(name=f"email-status-{scope}", data_scope=scope)
+    db.add_all([department, role])
+    db.flush()
+    normal_user.department_id = other_user.department_id = department.id
+    db.add(UserRole(user_id=normal_user.id, role_id=role.id))
+    owners = {"registrant": {"registrant": normal_user.username}, "operator": {"operator": normal_user.username},
+              "peer": {"registrant": other_user.username}, "outside": {"registrant": super_admin.username}}
+    emails = {name: EmailAccount(email=f"status-{name}@gmail.com", **owner) for name, owner in owners.items()}
+    db.add_all(emails.values())
+    db.commit()
+    payload = {"email_ids": [emails["registrant"].id], field: status}
+    headers = auth_headers(normal_user)
+    assert client.post("/api/emails/batch-status", json=payload).status_code == 401
+    assert client.post("/api/emails/batch-status", headers=headers, json=payload).status_code == 403
+    db.add(RolePermission(role_id=role.id, permission="email:manage"))
+    db.commit()
+    for other_id in [999999, *([emails["outside"].id] if scope != "all" else [])]:
+        response = client.post("/api/emails/batch-status", headers=headers,
+                               json={"email_ids": [emails["registrant"].id, other_id], field: status})
+        assert response.status_code == 404, response.text
+        db.refresh(emails["registrant"])
+        assert getattr(emails["registrant"], field) == ("闲置" if field == "management_status" else None)
+    for name, email in emails.items():
+        response = client.post("/api/emails/batch-status", headers=headers, json={"email_ids": [email.id], field: status})
+        assert response.status_code == (200 if name in expected else 404), response.text
+        db.refresh(email)
+        assert getattr(email, field) == (status if name in expected else "闲置" if field == "management_status" else None)
+
+
+@pytest.mark.parametrize("protected", ["sale", "claim"])
+def test_email_batch_usage_status_rejects_sold_and_claimed_without_partial_changes(client, db, super_admin, protected):
+    available = EmailAccount(email="status-available@gmail.com", registrant=super_admin.username)
+    other = EmailAccount(email="status-protected@gmail.com", registrant=super_admin.username)
+    if protected == "sale":
+        other.management_status, other.sale_customer = "已出售", "原客户"
+    else:
+        other.claimed_by, other.claimed_platform = "claim-user", "TikTok"
+    db.add_all([available, other])
+    db.commit()
+    response = client.post("/api/emails/batch-status", headers=auth_headers(super_admin),
+                           json={"email_ids": [available.id, other.id], "management_status": "锁定"})
+    assert response.status_code == 409, response.text
+    db.refresh(available)
+    db.refresh(other)
+    assert available.management_status == "闲置"
+    assert (other.management_status, other.sale_customer, other.claimed_by, other.claimed_platform) == (
+        ("已出售", "原客户", None, None) if protected == "sale" else ("闲置", None, "claim-user", "TikTok"))
+
+
+@pytest.mark.parametrize("concurrent_action", ["sale", "claim"])
+def test_email_batch_usage_status_rolls_back_concurrent_sale_or_claim(client, db, super_admin, monkeypatch, concurrent_action):
+    from sqlalchemy.orm import Query
+    available = EmailAccount(email="status-race-available@gmail.com", registrant=super_admin.username)
+    other = EmailAccount(email="status-race-other@gmail.com", registrant=super_admin.username)
+    db.add_all([available, other])
+    db.commit()
+    update = Query.update
+
+    def concurrent_update(query, *args, **kwargs):
+        if concurrent_action == "sale":
+            other.management_status, other.sale_customer = "已出售", "先成交客户"
+        else:
+            other.claimed_by, other.claimed_platform = "claim-user", "TikTok"
+        db.commit()
+        return update(query, *args, **kwargs)
+
+    monkeypatch.setattr(Query, "update", concurrent_update)
+    response = client.post("/api/emails/batch-status", headers=auth_headers(super_admin),
+                           json={"email_ids": [available.id, other.id], "management_status": "锁定"})
+    assert response.status_code == 409, response.text
+    db.refresh(available)
+    db.refresh(other)
+    assert available.management_status == "闲置"
+    assert (other.management_status, other.sale_customer, other.claimed_by, other.claimed_platform) == (
+        ("已出售", "先成交客户", None, None) if concurrent_action == "sale" else ("闲置", None, "claim-user", "TikTok"))
+
+
+def test_email_batch_status_supports_500_rows(client, db, super_admin):
+    emails = [EmailAccount(email=f"status-bulk-{index}@gmail.com", registrant=super_admin.username) for index in range(500)]
+    db.add_all(emails)
+    db.commit()
+    response = client.post("/api/emails/batch-status", headers=auth_headers(super_admin),
+                           json={"email_ids": [email.id for email in emails], "management_status": "锁定"})
+    assert response.status_code == 200, response.text
+    assert response.json()["updated"] == 500
+    assert db.query(EmailAccount).filter_by(management_status="锁定").count() == 500
+
+
+def test_email_manual_check_and_probe_share_lock_without_blocking_usage_changes(client, db, super_admin, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from app.api import emails as emails_api
+    from app.api.op_accounts import gmail_check_lock
+    email = EmailAccount(email="status-check-race@gmail.com", registrant=super_admin.username,
+                         gmail_check_status="封禁", gmail_check_raw_status="disabled")
+    db.add(email)
+    db.commit()
+    email_id = email.id
+    started, finish = Event(), Event()
+    headers = auth_headers(super_admin)
+    get_email = emails_api.get_email
+
+    def get_email_while_locked(*args, **kwargs):
+        assert gmail_check_lock.locked()
+        return get_email(*args, **kwargs)
+
+    def blocking_probe(addresses):
+        started.set()
+        assert finish.wait(timeout=10)
+        return [{"email": address, "status": "live"} for address in addresses]
+
+    monkeypatch.setattr(emails_api, "get_email", get_email_while_locked)
+    monkeypatch.setattr(emails_api, "check_gmail_accounts", blocking_probe)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        probe = executor.submit(client.post, "/api/emails/check", headers=headers, json={"account_ids": [email_id], "consent": True})
+        try:
+            assert started.wait(timeout=10)
+            manual = client.post("/api/emails/batch-status", headers=headers,
+                                 json={"email_ids": [email_id], "gmail_check_status": "验证"})
+            assert manual.status_code == 429, manual.text
+            usage = client.post("/api/emails/batch-status", headers=headers,
+                                json={"email_ids": [email_id], "management_status": "锁定"})
+            assert usage.status_code == 200, usage.text
+        finally:
+            finish.set()
+        response = probe.result(timeout=10)
+    assert response.status_code == 200, response.text
+    db.refresh(email)
+    assert (email.gmail_check_status, email.gmail_check_raw_status, email.management_status) == ("正常", "live", "锁定")
+    assert email.gmail_checked_at is not None
+    manual = client.post("/api/emails/batch-status", headers=headers,
+                         json={"email_ids": [email_id], "gmail_check_status": "验证"})
+    assert manual.status_code == 200, manual.text
+    db.refresh(email)
+    assert (email.gmail_check_status, email.gmail_check_raw_status, email.gmail_checked_at) == ("验证", "手动标记", None)
+    response = client.post("/api/emails/check", headers=headers, json={"account_ids": [email_id], "consent": True})
+    assert response.status_code == 200, response.text
+    db.refresh(email)
+    assert (email.gmail_check_status, email.gmail_check_raw_status) == ("正常", "live")
+    assert email.gmail_checked_at is not None and not gmail_check_lock.locked()
+
+
+@pytest.mark.parametrize("error", ["missing", "conflict", "commit"])
+def test_email_batch_manual_check_releases_lock_after_error(client, db, super_admin, monkeypatch, error):
+    from fastapi import HTTPException
+    from sqlalchemy.orm import Query
+    from app.api import emails as emails_api
+    from app.api.op_accounts import gmail_check_lock
+    email = EmailAccount(email="manual-check-error@gmail.com", registrant=super_admin.username)
+    db.add(email)
+    db.commit()
+    headers = auth_headers(super_admin)
+    with monkeypatch.context() as patch:
+        if error == "conflict":
+            patch.setattr(Query, "update", lambda *args, **kwargs: 0)
+        elif error == "commit":
+            def failed_save(session):
+                session.rollback()
+                raise HTTPException(status_code=409, detail="保存冲突")
+            patch.setattr(emails_api, "save", failed_save)
+        response = client.post("/api/emails/batch-status", headers=headers,
+                               json={"email_ids": [999999 if error == "missing" else email.id], "gmail_check_status": "正常"})
+        assert response.status_code == (404 if error == "missing" else 409), response.text
+    assert not gmail_check_lock.locked()
+    response = client.post("/api/emails/batch-status", headers=headers,
+                           json={"email_ids": [email.id], "gmail_check_status": "正常"})
+    assert response.status_code == 200, response.text
+    assert not gmail_check_lock.locked()
+
+
+@pytest.mark.parametrize("failure", ["missing", "unsupported", "service"])
+def test_email_probe_releases_lock_after_validation_or_service_error(client, db, super_admin, monkeypatch, failure):
+    from app.api import emails as emails_api
+    from app.api.op_accounts import gmail_check_lock
+    email = EmailAccount(email="probe-error@example.com" if failure == "unsupported" else "probe-error@gmail.com",
+                         registrant=super_admin.username)
+    db.add(email)
+    db.commit()
+
+    def failed_probe(addresses):
+        raise RuntimeError("synthetic probe failure")
+
+    monkeypatch.setattr(emails_api, "check_gmail_accounts", failed_probe)
+    response = client.post("/api/emails/check", headers=auth_headers(super_admin),
+                           json={"account_ids": [999999 if failure == "missing" else email.id], "consent": True})
+    assert response.status_code == {"missing": 404, "unsupported": 422, "service": 502}[failure], response.text
+    assert not gmail_check_lock.locked()
+    response = client.post("/api/emails/batch-status", headers=auth_headers(super_admin),
+                           json={"email_ids": [email.id], "gmail_check_status": "正常"})
+    assert response.status_code == 200, response.text

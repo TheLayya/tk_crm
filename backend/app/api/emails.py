@@ -1,4 +1,4 @@
-from typing import Any, Literal, overload, cast
+from typing import Annotated, Any, Literal, overload, cast
 from sqlalchemy.orm import Query as ORMQuery
 import csv
 import json
@@ -9,6 +9,7 @@ from datetime import datetime
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import String, cast as sql_cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -33,6 +34,21 @@ from app.services.totp_service import totp_code
 
 
 router = APIRouter(prefix="/emails", tags=["emails"])
+
+
+class EmailBatchStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email_ids: list[Annotated[int, Field(strict=True, gt=0)]] = Field(min_length=1, max_length=500)
+    management_status: Literal["闲置", "使用中", "锁定", "废弃"] | None = None
+    gmail_check_status: Literal["正常", "封禁", "验证", "未注册", "检测失败"] | None = None
+
+    @model_validator(mode="after")
+    def require_one_status(self) -> "EmailBatchStatusRequest":
+        fields = self.model_fields_set & {"management_status", "gmail_check_status"}
+        if len(fields) != 1 or ("management_status" in fields and self.management_status is None):
+            raise ValueError("每次请选择一种状态进行批量修改")
+        return self
 
 
 def _platform_json(row: CardKeyPlatform) -> dict[str, object]:
@@ -290,15 +306,50 @@ def batch_sell_emails(body: EmailBatchSaleRequest, db: Session = Depends(get_db)
     return {"updated": updated, "email_ids": email_ids}
 
 
+@router.post("/batch-status", response_model=None)
+def batch_update_email_status(body: EmailBatchStatusRequest, db: Session = Depends(get_db), user: User = Depends(require_permission("email:manage"))) -> dict[str, object]:
+    from app.api.op_accounts import gmail_check_lock
+    manual_check = "gmail_check_status" in body.model_fields_set
+    if manual_check and not gmail_check_lock.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="已有邮箱检测或状态修改进行中，请稍后重试")
+    try:
+        email_ids = list(dict.fromkeys(body.email_ids))
+        query = scoped_query(db, EmailAccount, user).filter(EmailAccount.id.in_(email_ids))
+        emails = query.with_entities(EmailAccount.id, EmailAccount.management_status, EmailAccount.claimed_by).all()
+        if len(emails) != len(email_ids):
+            raise HTTPException(status_code=404, detail="部分邮箱不存在或无权访问，请刷新后重试")
+        values: dict[str, object]
+        if not manual_check:
+            if any(email.management_status == "已出售" for email in emails):
+                raise HTTPException(status_code=409, detail="所选邮箱包含已出售邮箱，请刷新后重新选择")
+            if any(email.claimed_by is not None for email in emails):
+                raise HTTPException(status_code=409, detail="所选邮箱包含领取中的邮箱，请先完成注册或归还后再修改使用状态")
+            query = query.filter(EmailAccount.management_status != "已出售", EmailAccount.claimed_by.is_(None))
+            values = {"management_status": body.management_status}
+        else:
+            values = {"gmail_check_status": body.gmail_check_status,
+                      "gmail_check_raw_status": "手动标记" if body.gmail_check_status else None,
+                      "gmail_checked_at": None}
+        updated = query.update({getattr(EmailAccount, field): value for field, value in values.items()}, synchronize_session=False)
+        if updated != len(email_ids):
+            db.rollback()
+            raise HTTPException(status_code=409, detail="所选邮箱的状态已变化，请刷新后重新选择")
+        save(db)
+        return {"updated": updated, "email_ids": email_ids}
+    finally:
+        if manual_check:
+            gmail_check_lock.release()
+
+
 @router.post("/check", response_model=None)
 def check_emails(body: GmailCheckRequest, db: Session = Depends(get_db), user: User = Depends(require_permission("email:check"))) -> dict[str, object]:
     from app.api.op_accounts import gmail_check_lock
-    emails = [get_email(db, email_id, user) for email_id in dict.fromkeys(body.account_ids)]
-    if any(not email.email.endswith("@gmail.com") for email in emails):
-        raise HTTPException(status_code=422, detail="当前仅支持 Gmail 检测")
     if not gmail_check_lock.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="已有 Gmail 检测进行中，请稍后重试")
     try:
+        emails = [get_email(db, email_id, user) for email_id in dict.fromkeys(body.account_ids)]
+        if any(not email.email.endswith("@gmail.com") for email in emails):
+            raise HTTPException(status_code=422, detail="当前仅支持 Gmail 检测")
         results = {row["email"].lower(): row for row in check_gmail_accounts([email.email for email in emails])}
         now = datetime.utcnow()
         for email in emails:

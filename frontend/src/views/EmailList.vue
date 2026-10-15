@@ -27,6 +27,8 @@
       <div class="batch-actions">
         <span>已选 {{ selected.length }} 个邮箱</span>
         <el-button v-if="canManage" type="primary" :disabled="!selected.length || loading" @click="openBatchSale">批量售出</el-button>
+        <el-button v-if="canManage" :disabled="!selected.length || loading || batchStatusSaving" @click="openBatchStatus('management')">批量修改使用状态</el-button>
+        <el-button v-if="canManage" :disabled="!selected.length || loading || batchStatusSaving" @click="openBatchStatus('check')">批量修改检测状态</el-button>
         <el-button :disabled="!selected.length || loading" @click="copySelectedCredentials">复制选中资料</el-button>
         <el-button :disabled="!selected.length || loading" @click="copySelectedEmails">复制选中邮箱</el-button>
         <el-button v-if="selected.length" link @click="tableRef.clearSelection()">清空选择</el-button>
@@ -41,7 +43,7 @@
                 <span class="credential-field"><b>辅助邮箱</b><span class="credential-value">{{ row.recovery_email || '—' }}</span><el-button v-if="row.recovery_email" link type="primary" @click="copy(row.recovery_email, '辅助邮箱')">复制辅助邮箱</el-button></span>
                 <span class="credential-field"><b>2FA 密钥</b><span class="credential-value">{{ row.showTotp ? row.totp_secret : mask(row.totp_secret) }}</span><span v-if="row.totp_secret" class="credential-actions"><el-button link @click="row.showTotp = !row.showTotp">{{ row.showTotp ? '隐藏密钥' : '显示密钥' }}</el-button><el-button link type="primary" @click="copy(row.totp_secret, '2FA 密钥')">复制 2FA 密钥</el-button></span><EmailTotp v-if="row.totp_secret" :key="row.id" :email-id="row.id" @copy="value => copy(value, '2FA 验证码')" /></span>
                 <span><b>注册</b>{{ row.account_created_at || row.account_created_year || '—' }}</span>
-                <span><b>检测</b>{{ row.gmail_check_status || '未检测' }}</span>
+                <span><b>检测</b>{{ row.gmail_check_status || '未检测' }}<span v-if="row.gmail_check_raw_status === '手动标记'" class="manual-check-note">（人工标记，未实际检测）</span></span>
                 <span><b>添加人</b>{{ row.registrant || '—' }}</span>
                 <span><b>使用人</b>{{ row.operator || '—' }}</span>
                 <span><b>采购</b>{{ row.purchase_channel || '—' }} · {{ money(row.purchase_price) }} · {{ row.purchase_date || '—' }}</span>
@@ -81,8 +83,8 @@
         </el-table-column>
         <el-table-column column-key="country" filter-type="text" prop="country" label="国家" width="110" />
         <el-table-column column-key="platform_tags" prop="platform_tags" filter-type="text" :table-fields="[{ prop: 'platform_tags', label: '已注册平台', type: 'text' }, { prop: 'claimed_by', label: '领取人', type: 'text' }, { prop: 'claimed_platform', label: '领取平台', type: 'text' }]" label="平台注册 / 领取" min-width="220"><template #default="{ row }"><el-tag v-for="tag in row.platform_tags" :key="tag" size="small" style="margin:2px">{{ tag }}<span v-if="row.platform_registrants?.[tag]"> · {{ row.platform_registrants[tag] }}</span></el-tag><span v-if="!row.platform_tags?.length">未标记</span><div v-if="row.claimed_by" class="remark">{{ row.claimed_by }} 正在注册 {{ row.claimed_platform }}</div></template></el-table-column>
-        <el-table-column column-key="gmail_check_status" prop="gmail_check_status" filter-type="text" label="检测状态" width="120">
-          <template #default="{ row }"><el-tag size="small" :type="checkTag(row.gmail_check_status)">{{ row.gmail_check_status || '未检测' }}</el-tag></template>
+        <el-table-column column-key="gmail_check_status" prop="gmail_check_status" filter-type="text" label="检测状态" width="145">
+          <template #default="{ row }"><el-tag size="small" :type="checkTag(row.gmail_check_status)">{{ row.gmail_check_status || '未检测' }}</el-tag><el-tag v-if="row.gmail_check_raw_status === '手动标记'" class="manual-check-tag" size="small" type="info" title="人工标记状态，未实际检测">手动</el-tag></template>
         </el-table-column>
         <el-table-column column-key="current_relation_count" prop="current_relation_count" filter-type="number" label="当前关联" width="110" align="center">
           <template #default="{ row }"><span class="count">{{ row.current_relation_count }}</span> 个账号</template>
@@ -104,6 +106,21 @@
       </crm-table>
       <div class="pager"><span>共 {{ total }} 条</span><el-pagination v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[50, 100, 200, 500]" layout="sizes, prev, pager, next" :total="total" @current-change="load" @size-change="page = 1; load()" /></div>
     </el-card>
+
+    <el-dialog v-model="batchStatusVisible" :title="batchStatusTitle" width="min(560px, 94vw)" :close-on-click-modal="false" :close-on-press-escape="!batchStatusSaving" :show-close="!batchStatusSaving" :before-close="closeBatchStatus" @closed="batchStatusRows = []">
+      <p>本次修改 {{ batchStatusRows.length }} 个邮箱的{{ batchStatusKind === 'management' ? '使用状态' : '检测状态' }}。</p>
+      <p class="import-tip">{{ batchStatusKind === 'management' ? '统一更新使用状态。出售邮箱请使用“批量售出”登记交易资料；已出售或领取中的邮箱请先处理后再选择。' : '手动标记检测状态，不会发起 Gmail 检测；会清除原检测时间，检测状态旁显示“手动”。选择“未检测”将清空原标记。' }}</p>
+      <el-alert v-if="batchStatusError" class="batch-status-error" :title="batchStatusError" type="error" :closable="false" show-icon />
+      <el-form label-width="100px" :disabled="batchStatusSaving">
+        <el-form-item label="目标状态" required>
+          <el-select v-model="batchStatusValue" placeholder="请选择目标状态" aria-label="目标状态" style="width:100%">
+            <el-option v-for="option in batchStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <details class="sale-email-list"><summary>查看本次修改的邮箱（{{ batchStatusRows.length }} 个）</summary><div v-for="row in batchStatusRows" :key="row.id">{{ row.email }}</div></details>
+      <template #footer><el-button :disabled="batchStatusSaving" @click="batchStatusVisible = false">取消</el-button><el-button type="primary" :loading="batchStatusSaving" :disabled="batchStatusSaving" @click="submitBatchStatus">确认修改</el-button></template>
+    </el-dialog>
 
     <el-dialog v-model="batchSaleVisible" title="批量售出邮箱" width="min(620px, 94vw)" :close-on-click-modal="false" :close-on-press-escape="!batchSelling" :show-close="!batchSelling" @closed="batchSaleRows = []">
       <template v-if="!batchSaleCompleted">
@@ -202,7 +219,7 @@
 import { useTableQuery } from '@/composables/useTableQuery'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listEmails, createEmail, updateEmail, batchSellEmails, deleteEmail, importEmails, checkEmails, getEmailRelations, getEmailAccountOptions, bindEmailAccount, unbindEmailAccount, getEmailPlatforms } from '@/api/emails'
+import { listEmails, createEmail, updateEmail, batchSellEmails, batchUpdateEmailStatus, deleteEmail, importEmails, checkEmails, getEmailRelations, getEmailAccountOptions, bindEmailAccount, unbindEmailAccount, getEmailPlatforms } from '@/api/emails'
 import { useAuthStore } from '@/stores/auth'
 import request from '@/api/request'
 import { getDevices } from '@/api/devices'
@@ -241,6 +258,10 @@ const form = reactive({ email: '', password: '', recovery_email: '', totp_secret
 const importVisible = ref(false); const importText = ref(''); const importFormat = ref('auto'); const importDelimiter = ref('auto'); const importPurchaseChannel = ref(''); const importPurchasePrice = ref(null); const importResult = ref(null); const importing = ref(false); const checkingImport = ref(false); const importCheckResult = ref(null)
 const bindVisible = ref(false); const binding = ref(false); const bindEmail = ref(null); const bindAccountId = ref(null); const bindRemark = ref(''); const accountOptions = ref([])
 const batchSaleVisible = ref(false); const batchSelling = ref(false); const batchSaleCompleted = ref(false); const batchSaleRows = ref([])
+const batchStatusVisible = ref(false); const batchStatusSaving = ref(false); const batchStatusRows = ref([])
+const batchStatusKind = ref('management'); const batchStatusValue = ref(''); const batchStatusError = ref('')
+const batchStatusTitle = computed(() => batchStatusKind.value === 'management' ? '批量修改使用状态' : '批量修改检测状态')
+const batchStatusOptions = computed(() => (batchStatusKind.value === 'management' ? ['闲置', '使用中', '锁定', '废弃'] : ['正常', '封禁', '验证', '未注册', '检测失败', '未检测']).map(value => ({ value, label: value === '未检测' ? '未检测（清空标记）' : value })))
 const batchSale = reactive({ sale_customer: '', sale_price: null, sale_date: '', sellers: [] })
 const batchSaleTotal = computed(() => batchSale.sale_price == null ? null : Math.round(batchSale.sale_price * 100) * batchSaleRows.value.length / 100)
 const deliveryText = (rows) => rows.map(row => [row.email, row.password || '', row.recovery_email || '', row.totp_secret || ''].join('----')).join('\n')
@@ -263,6 +284,40 @@ const copySelectedEmails = () => copy(selected.value.map(row => row.email).join(
 const copyBatchDelivery = async () => {
   try { await copyText(batchDeliveryText.value); ElMessage.success(`已复制 ${batchSaleRows.value.length} 个邮箱的交付资料`) }
   catch { ElMessage.warning('售出已保存，复制失败，请手动复制下方交付资料或重试') }
+}
+const openBatchStatus = (kind) => {
+  if (!canManage.value || !selected.value.length || batchStatusSaving.value) return
+  if (selected.value.length > 500) return ElMessage.warning('每次最多修改 500 个邮箱')
+  if (kind === 'management' && selected.value.some(row => row.management_status === '已出售')) return ElMessage.warning('选中邮箱包含已出售记录，请取消选择后重试')
+  if (kind === 'management' && selected.value.some(row => row.claimed_by)) return ElMessage.warning('选中邮箱正在被领取使用，请先完成注册或归还后再修改使用状态')
+  batchStatusKind.value = kind
+  batchStatusValue.value = ''
+  batchStatusError.value = ''
+  batchStatusRows.value = selected.value.map(({ id, email }) => ({ id, email }))
+  batchStatusVisible.value = true
+}
+const closeBatchStatus = (done) => { if (!batchStatusSaving.value) done() }
+const submitBatchStatus = async () => {
+  if (!canManage.value || batchStatusSaving.value || !batchStatusRows.value.length) return
+  if (!batchStatusOptions.value.some(option => option.value === batchStatusValue.value)) return ElMessage.warning('请选择目标状态')
+  const field = batchStatusKind.value === 'management' ? 'management_status' : 'gmail_check_status'
+  const count = batchStatusRows.value.length
+  batchStatusSaving.value = true
+  batchStatusError.value = ''
+  try {
+    try { await batchUpdateEmailStatus({ email_ids: batchStatusRows.value.map(row => row.id), [field]: batchStatusValue.value === '未检测' ? null : batchStatusValue.value }) }
+    catch (error) {
+      const detail = error?.response?.data?.detail
+      batchStatusError.value = typeof detail === 'string' ? detail : '修改失败，请重试'
+      return
+    }
+    tableRef.value?.clearSelection()
+    selected.value = []
+    batchStatusVisible.value = false
+    ElMessage.success(`已修改 ${count} 个邮箱的${batchStatusKind.value === 'management' ? '使用状态' : '检测状态'}`)
+    try { await load() }
+    catch { ElMessage.warning('状态已保存，列表刷新失败，请稍后刷新') }
+  } finally { batchStatusSaving.value = false }
 }
 const openBatchSale = () => {
   if (!selected.value.length || !canManage.value) return
@@ -372,6 +427,9 @@ onMounted(async () => { platforms.value = await getEmailPlatforms(); await load(
 .batch-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
 .batch-actions > span { color:#606266; font-size:13px; margin-right:4px; }
 .batch-actions .el-button { margin-left:0; }
+.batch-status-error { margin-bottom:14px; }
+.manual-check-tag { margin-left:4px; }
+.manual-check-note { color:var(--el-text-color-secondary); font-size:12px; }
 .sale-total { font-weight:600; }
 .sale-email-list { margin-top:12px; color:#606266; overflow-wrap:anywhere; }
 .sale-email-list > div { padding-top:6px; }

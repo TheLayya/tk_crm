@@ -4,6 +4,7 @@ export const listEmails = (params) => request({ url: '/emails', method: 'get', p
 export const createEmail = (data) => request({ url: '/emails', method: 'post', data })
 export const updateEmail = (id, data) => request({ url: `/emails/${id}`, method: 'put', data })
 export const batchSellEmails = (data) => request({ url: '/emails/batch-sale', method: 'post', data })
+export const batchUpdateEmailStatus = (data) => request({ url: '/emails/batch-status', method: 'post', data })
 export const deleteEmail = (id) => request({ url: `/emails/${id}`, method: 'delete' })
 export const importEmails = (text, trade, options = {}) => request({ url: '/emails/import', method: 'post', data: { text, ...trade, ...options } })
 export const checkEmails = (ids) => request({ url: '/emails/check', method: 'post', data: { account_ids: ids, consent: true }, timeout: 90000 })
