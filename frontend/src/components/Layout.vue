@@ -157,13 +157,13 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.21'
+const APP_VERSION = '1.1.22'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
     date: '2026-10-15',
-    items: ['统一内部工作台视觉与中文控件，表格支持密度记忆和批量展开', '账号、邮箱、节点、设备和备忘补齐单条与批量复制', '邮箱支持批量修改使用状态和手动标记检测状态', '提醒直达备忘，成员筛选与部门层级更清晰，运营账号查询与导出一致']
+    items: ['卡密导入支持批次名称和备注，领取可指定批次', '异常批次支持暂停、恢复、删除或保留历史归档', '统一内部工作台视觉与中文控件，邮箱支持批量状态修改']
   },
   {
     version: '1.1.20',
