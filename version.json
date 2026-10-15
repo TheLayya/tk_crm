@@ -1,16 +1,16 @@
 {
-  "version": "1.1.19",
-  "date": "2026-10-12",
+  "version": "1.1.20",
+  "date": "2026-10-15",
   "changes": [
-    "邮箱支持批量售出，一次登记客户、单价、售卖人和日期",
-    "售出后自动复制整批交付资料，支持复制失败重试",
-    "邮箱详情显示 2FA 验证码，每页最多显示 500 条"
+    "邮箱批量导入逐行识别混合三至六项格式",
+    "支持国家字段、空列和错列或重复的 2FA 密钥",
+    "新增英文/中文逗号、Tab 分隔，错误行独立提示"
   ],
-  "source_commit": "75474c44cb5de1e431c87298a235e5ba786a8a5f",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.19/release-v1.1.19.tar.gz",
-  "sha256": "7b490b96d133f5078b625e9b751927bb43f64bed62db6f2748870101161d098a",
-  "server_source_commit": "75474c44cb5de1e431c87298a235e5ba786a8a5f",
-  "windows_source_commit": "75474c44cb5de1e431c87298a235e5ba786a8a5f",
-  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.19/TkCRM-1.1.19-win-x64-setup.exe",
-  "windows_sha256": "bab76f46a0f24d44f71f8f3cc7ed69643319f4788af3b2fa029700db2188f7d6"
+  "source_commit": "2ce46df6524d6d34246ccb98b6371081dad9d84d",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.20/release-v1.1.20.tar.gz",
+  "sha256": "2307d6a946dde39c70d95d6893db78e7311f68c4a6eef10048bae75d10a8d6ba",
+  "server_source_commit": "2ce46df6524d6d34246ccb98b6371081dad9d84d",
+  "windows_source_commit": "2ce46df6524d6d34246ccb98b6371081dad9d84d",
+  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.20/TkCRM-1.1.20-win-x64-setup.exe",
+  "windows_sha256": "484cb615f873e616735dde35e160099edd6c0ebbc7e36470e2c33e673f4eaad8"
 }
