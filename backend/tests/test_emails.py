@@ -148,6 +148,132 @@ def test_email_import_selected_full_format_keeps_iso_time(client, db, super_admi
     assert email.recovery_email is None
 
 
+def test_email_import_realistic_mixed_country_rows_and_duplicates(client, db, super_admin):
+    key = "jbsw y3dp ehpk 3pxp jbsw y3dp ehpk 3pxp"
+    fields = [
+        ["helper-only@example.invalid", "pass-one", "helper@example.invalid", "", "ch"],
+        ["third-key@example.invalid", "pass-two", key, "", "ch"],
+        ["repeated-key@example.invalid", "pass-three", key, key.upper().replace(" ", ""), "cg"],
+        ["opaque-key@example.invalid", "pass-four", "helper@example.invalid", "opaque-key-123", "br"],
+        ["country-four@example.invalid", "pass-five", "helper@example.invalid", "ca"],
+        ["key-country-four@example.invalid", "pass-six", key, "br"],
+        ["legacy-three@example.invalid", "pass-seven", "LEGACYKEY"],
+        ["legacy-four@example.invalid", "pass-eight", "helper@example.invalid", "LEGACYKEY"],
+        ["full-six@example.invalid", "pass-nine", "helper@example.invalid", "FULLKEY", "2024", "France"],
+        ["helper-three@example.invalid", "pass-ten", "helper@example.invalid"],
+    ]
+    lines = ["----".join(row) for row in fields]
+    conflicting = "----".join(["conflict@example.invalid", "hidden-password", key, "A" * 32, "us"])
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": "\n".join([*lines, *lines, conflicting]), "purchase_channel": "供应商", "purchase_price": "2.50",
+    })
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert (result["total"], result["success"], result["duplicates"], result["failed"]) == (21, 10, 10, 1)
+    expected = [
+        ("helper@example.invalid", None, "ch"), (None, key, "ch"),
+        (None, key.upper().replace(" ", ""), "cg"), ("helper@example.invalid", "opaque-key-123", "br"),
+        ("helper@example.invalid", None, "ca"), (None, key, "br"),
+        (None, "LEGACYKEY", None), ("helper@example.invalid", "LEGACYKEY", None),
+        ("helper@example.invalid", "FULLKEY", "France"),
+        ("helper@example.invalid", None, None),
+    ]
+    for source, trade in zip(fields, expected):
+        email = db.query(EmailAccount).filter_by(email=source[0]).one()
+        assert (email.recovery_email, email.totp_secret, email.country) == trade
+        assert email.password == source[1] and email.purchase_price == Decimal("2.50")
+    assert result["rows"][-1]["_reason"] == "辅助邮箱列与2FA列包含不同密钥，请核对这两列"
+    for secret in [key, "hidden-password", "opaque-key-123", *[row[1] for row in fields]]:
+        assert secret not in response.text
+    assert db.query(EmailAccount).filter_by(email="conflict@example.invalid").count() == 0
+
+
+@pytest.mark.parametrize("delimiter", ["----", "|", ":", ",", "，", "\t"])
+def test_email_import_country_formats_and_delimiters(client, db, super_admin, delimiter):
+    import csv
+    import io
+    fields = ["country@example.invalid", "pass:with|punctuation", "helper@example.invalid", "ch"]
+    if delimiter == "----":
+        line = delimiter.join(fields)
+    else:
+        output = io.StringIO()
+        csv.writer(output, delimiter=delimiter).writerow(fields)
+        line = output.getvalue().rstrip("\r\n")
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": line, "purchase_channel": "供应商", "purchase_price": 0,
+    })
+    assert response.status_code == 200 and response.json()["success"] == 1, response.text
+    email = db.query(EmailAccount).one()
+    assert (email.password, email.recovery_email, email.totp_secret, email.country) == (fields[1], fields[2], None, "ch")
+
+
+@pytest.mark.parametrize("format, last, expected_country, expected_key", [
+    ("auto", "美国", "美国", None), ("auto", "United States", "United States", None),
+    ("auto", "US", "US", None), ("auto", "ZX", None, "ZX"), ("credentials_4", "US", None, "US"),
+    ("country_4", "Custom Country", "Custom Country", None),
+])
+def test_email_import_fourth_field_country_or_explicit_key(client, db, super_admin, format, last, expected_country, expected_key):
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": f"explicit@example.invalid----password----helper@example.invalid----{last}",
+        "purchase_channel": "供应商", "purchase_price": 0, "import_format": format,
+    })
+    assert response.status_code == 200 and response.json()["success"] == 1, response.text
+    email = db.query(EmailAccount).one()
+    assert (email.country, email.totp_secret) == (expected_country, expected_key)
+
+
+def test_email_import_explicit_five_fields_quoted_password_and_isolated_failures(client, db, super_admin):
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": 'quoted@example.invalid,"  secret,with:colon|and，comma  ",null,opaqueKEY,ch\nwrong@example.invalid,password,helper@example.invalid,ch',
+        "import_format": "country_5", "delimiter": ",", "purchase_channel": "供应商", "purchase_price": 0,
+    })
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert (result["success"], result["failed"]) == (1, 1)
+    email = db.query(EmailAccount).one()
+    assert (email.password, email.recovery_email, email.totp_secret, email.country) == ("  secret,with:colon|and，comma  ", None, "opaqueKEY", "ch")
+    assert result["rows"][1]["_reason"] == "当前格式需要五项：邮箱、密码、辅助邮箱或2FA、2FA、国家"
+    assert "opaqueKEY" not in response.text and "secret,with" not in response.text
+
+
+def test_email_import_invalid_date_error_never_echoes_fields(client, super_admin):
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": "date@example.invalid----password----helper@example.invalid----KEY----private-field----us",
+        "purchase_channel": "供应商", "purchase_price": 0,
+    })
+    assert response.status_code == 200
+    assert response.json()["rows"][0]["_reason"] == "注册时间格式无效"
+    assert "private-field" not in response.text and "password" not in response.text
+
+
+def test_email_import_explicit_formats_preserve_legacy_columns(client, db, super_admin):
+    key = "JBSWY3DPEHPK3PXP"
+    for format, fields in [
+        ("auto", ["legacy-six-auto@example.invalid", "secret", key, "opaque", "2024", "ch"]),
+        ("credentials_3", ["legacy-three@example.invalid", "secret", "helper@example.invalid"]),
+        ("credentials_4", ["legacy-four@example.invalid", "secret", key, "opaque"]),
+        ("full_6", ["legacy-six@example.invalid", "secret", key, "opaque", "2024", "ch"]),
+    ]:
+        response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+            "text": "----".join(fields), "import_format": format, "purchase_channel": "供应商", "purchase_price": 0,
+        })
+        assert response.status_code == 200 and response.json()["success"] == 1, response.text
+        email = db.query(EmailAccount).filter_by(email=fields[0]).one()
+        assert email.totp_secret == fields[2 if format == "credentials_3" else 3]
+        assert email.recovery_email == (None if format == "credentials_3" else key)
+
+
+def test_email_import_third_non_key_is_preserved_without_guessing(client, db, super_admin):
+    invalid_key = "A" * 17
+    response = client.post("/api/emails/import", headers=auth_headers(super_admin), json={
+        "text": f"unrecognized@example.invalid----secret----{invalid_key}----opaque----cg",
+        "purchase_channel": "供应商", "purchase_price": 0,
+    })
+    assert response.status_code == 200 and response.json()["success"] == 1, response.text
+    email = db.query(EmailAccount).one()
+    assert (email.recovery_email, email.totp_secret, email.country) == (invalid_key, "opaque", "cg")
+
+
 def test_email_create_import_and_secret_round_trip(client, db, super_admin):
     headers = auth_headers(super_admin)
     created = client.post("/api/emails", headers=headers, json={

@@ -291,8 +291,8 @@ class EmailImportRequest(BaseModel):
     text: str
     purchase_channel: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
     purchase_price: Decimal = Field(ge=0)
-    import_format: Literal["auto", "credentials_3", "credentials_4", "full_6"] = "auto"
-    delimiter: Literal["auto", "----", "|", ":"] = "auto"
+    import_format: Literal["auto", "credentials_3", "credentials_4", "country_4", "country_5", "full_6"] = "auto"
+    delimiter: Literal["auto", "----", "|", ":", ",", "，", "\t"] = "auto"
 
 
 class EmailBatchSaleRequest(BaseModel):

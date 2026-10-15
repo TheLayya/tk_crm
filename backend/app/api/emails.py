@@ -244,9 +244,18 @@ def import_emails(body: EmailImportRequest, db: Session = Depends(get_db), user:
                 db.add(email)
                 db.commit()
                 result.update(_result="success", _id=email.id)
-        except (ValueError, csv.Error):
+        except csv.Error:
             db.rollback()
-            result.update(_result="failed", _reason="无法识别邮箱、字段数量或注册时间；请检查所选格式、分隔符和时间")
+            result.update(_result="failed", _reason="分隔符或引号格式有误，请检查此行")
+        except ValueError as exc:
+            db.rollback()
+            reason = str(exc) if str(exc) in {
+                "未找到邮箱字段分隔符", "邮箱地址无效", "注册年份无效", "注册时间格式无效", "需要三、四、五或六个邮箱字段",
+                "当前格式需要三项：邮箱、密码、2FA", "当前格式需要四项：邮箱、密码、辅助邮箱、2FA",
+                "当前格式需要四项：邮箱、密码、辅助邮箱或2FA、国家", "当前格式需要五项：邮箱、密码、辅助邮箱或2FA、2FA、国家",
+                "当前格式需要六项：邮箱、密码、辅助邮箱、2FA、注册时间、国家", "辅助邮箱列与2FA列包含不同密钥，请核对这两列",
+            } else "邮箱、字段数量或注册时间有误，请检查此行"
+            result.update(_result="failed", _reason=reason)
         except IntegrityError:
             db.rollback()
             result["_result"] = "duplicate"

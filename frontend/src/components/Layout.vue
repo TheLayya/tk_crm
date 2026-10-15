@@ -155,11 +155,16 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.19'
+const APP_VERSION = '1.1.20'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
+    date: '2026-10-15',
+    items: ['邮箱导入逐行识别混合三至六项格式', '支持带国家格式、空列和错列 2FA 密钥', '增加逗号和 Tab 分隔，重复邮箱自动跳过']
+  },
+  {
+    version: '1.1.19',
     date: '2026-10-12',
     items: ['邮箱支持批量售出，一次登记客户与单价', '售出后自动复制整批交付资料，支持失败重试', '邮箱详情显示 2FA 验证码，支持每页 500 条']
   },

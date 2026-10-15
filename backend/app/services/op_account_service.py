@@ -1,3 +1,5 @@
+import base64
+import binascii
 import csv
 import io
 import json
@@ -540,8 +542,40 @@ def _optional_import_value(value: str) -> Optional[str]:
     return None if value.lower() in {"", "null", "none", "nil", "无", "空", "-"} else value
 
 
+def _email_import_totp_key(value: str) -> str | None:
+    normalized = re.sub(r"[\s-]", "", value).upper().rstrip("=")
+    if not re.fullmatch(r"[A-Z2-7]{16,}", normalized):
+        return None
+    try:
+        base64.b32decode(normalized + "=" * (-len(normalized) % 8))
+    except (ValueError, binascii.Error):
+        return None
+    return normalized
+
+
+def _email_import_country(value: str) -> bool:
+    value = value.strip()
+    codes = (
+        "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ "
+        "CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR "
+        "GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP "
+        "KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ "
+        "NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ "
+        "TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UK UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW"
+    ).split()
+    return value.upper() in codes or value.casefold() in {
+        "中国", "美国", "英国", "日本", "韩国", "台湾", "香港", "新加坡", "马来西亚", "泰国", "越南", "印度尼西亚", "菲律宾",
+        "印度", "巴基斯坦", "孟加拉国", "斯里兰卡", "法国", "德国", "意大利", "西班牙", "葡萄牙", "瑞士", "俄罗斯",
+        "加拿大", "巴西", "墨西哥", "阿根廷", "澳大利亚", "新西兰", "刚果", "尼日利亚", "南非",
+        "united states", "usa", "united kingdom", "china", "japan", "korea", "south korea", "taiwan", "hong kong",
+        "singapore", "malaysia", "thailand", "vietnam", "indonesia", "philippines", "india", "pakistan",
+        "bangladesh", "sri lanka", "france", "germany", "italy", "spain", "portugal", "switzerland", "russia",
+        "canada", "brazil", "mexico", "argentina", "australia", "new zealand", "congo", "nigeria", "south africa",
+    }
+
+
 def parse_email_import_line(line: str, import_format: str = "auto", delimiter: str = "auto") -> dict[str, Any]:
-    pattern = {"----": r"----", "|": r"\|", ":": r":"}.get(delimiter, r"----|\||:")
+    pattern = re.escape(delimiter) if delimiter != "auto" else r"----|\||:|,|，|\t"
     separator = re.search(pattern, line)
     if not separator:
         raise ValueError("未找到邮箱字段分隔符")
@@ -554,21 +588,41 @@ def parse_email_import_line(line: str, import_format: str = "auto", delimiter: s
         raise ValueError("当前格式需要三项：邮箱、密码、2FA")
     if import_format == "credentials_4" and len(values) != 4:
         raise ValueError("当前格式需要四项：邮箱、密码、辅助邮箱、2FA")
+    if import_format == "country_4" and len(values) != 4:
+        raise ValueError("当前格式需要四项：邮箱、密码、辅助邮箱或2FA、国家")
+    if import_format == "country_5" and len(values) != 5:
+        raise ValueError("当前格式需要五项：邮箱、密码、辅助邮箱或2FA、2FA、国家")
     if import_format == "full_6" and (len(values) < 6 or (delimiter != ":" and len(values) != 6)):
         raise ValueError("当前格式需要六项：邮箱、密码、辅助邮箱、2FA、注册时间、国家")
     if len(values) == 3:
         account, password, totp_secret = values
         recovery_email = ""
+        if import_format == "auto" and re.fullmatch(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", totp_secret.strip()):
+            recovery_email, totp_secret = totp_secret, ""
         registered = country = ""
     elif len(values) == 4:
-        account, password, recovery_email, totp_secret = values
-        registered = country = ""
+        account, password, recovery_email, last = values
+        registered = ""
+        if import_format == "country_4" or (import_format == "auto" and _email_import_country(last)):
+            country, totp_secret = last.strip(), ""
+        else:
+            country, totp_secret = "", last
+    elif len(values) == 5:
+        account, password, recovery_email, totp_secret, country = values
+        registered = ""
+        country = country.strip()
     else:
         if len(values) < 6 or (delimiter != ":" and len(values) != 6):
-            raise ValueError("需要三、四或六个邮箱字段")
+            raise ValueError("需要三、四、五或六个邮箱字段")
         account, password, recovery_email, totp_secret = values[:4]
         registered = ":".join(values[4:-1]).strip()
         country = values[-1].strip()
+    recovery_key = _email_import_totp_key(recovery_email) if len(values) in {4, 5} and import_format in {"auto", "country_4", "country_5"} else None
+    if recovery_key:
+        if totp_secret.strip() and _email_import_totp_key(totp_secret) != recovery_key:
+            raise ValueError("辅助邮箱列与2FA列包含不同密钥，请核对这两列")
+        totp_secret = totp_secret.strip() or recovery_email.strip()
+        recovery_email = ""
     account = account.strip().lower()
     if not re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}", account):
         raise ValueError("邮箱地址无效")
@@ -581,7 +635,10 @@ def parse_email_import_line(line: str, import_format: str = "auto", delimiter: s
                 raise ValueError("注册年份无效")
             registered_value = None
         else:
-            registered_value = datetime.fromisoformat(registered)
+            try:
+                registered_value = datetime.fromisoformat(registered)
+            except ValueError:
+                raise ValueError("注册时间格式无效") from None
     return dict(account=account, password=password or None,
                 recovery_email=_optional_import_value(recovery_email), totp_secret=totp_secret.strip() or None,
                 account_created_at=registered_value or None, account_created_year=registered_year, country=country or None)
@@ -611,7 +668,7 @@ def import_gmail_text(db: Session, content: str, actor: str | None = None) -> Op
                 success += 1
         except (ValueError, csv.Error):
             db.rollback()
-            result.update(_result="failed", _reason="无法识别此行：支持 |、----、: 分隔三、四或六字段；注册时间可只填年份。请检查字段数量、邮箱或时间是否有效。")
+            result.update(_result="failed", _reason="此行格式有误：支持 |、----、:、逗号或制表符分隔三至六项；注册时间可只填年份，请检查字段和时间。")
             failed += 1
         except Exception:
             db.rollback()

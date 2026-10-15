@@ -162,13 +162,26 @@
 
     <el-dialog v-model="importVisible" title="批量导入邮箱" width="620px">
       <el-upload :auto-upload="false" :show-file-list="false" accept=".txt" :on-change="readImportFile"><el-button size="small">读取 TXT 文件</el-button></el-upload>
-      <el-input v-model="importText" type="textarea" :rows="8" placeholder="邮箱----密码----辅助邮箱----2FA&#10;邮箱----密码----2FA（无辅助邮箱）&#10;也支持 |、: 分隔；null/空表示无辅助邮箱" />
-      <el-row :gutter="12" class="import-trade-fields"><el-col :span="12"><el-form-item label="字段格式"><el-select v-model="importFormat" style="width:100%"><el-option label="自动识别三/四/六项" value="auto" /><el-option label="三项：邮箱/密码/2FA" value="credentials_3" /><el-option label="四项：邮箱/密码/辅助邮箱/2FA" value="credentials_4" /><el-option label="六项：再加注册时间/国家" value="full_6" /></el-select></el-form-item></el-col><el-col :span="12"><el-form-item label="分隔符"><el-select v-model="importDelimiter" style="width:100%"><el-option label="自动识别" value="auto" /><el-option label="----" value="----" /><el-option label="竖线 |" value="|" /><el-option label="冒号 :" value=":" /></el-select></el-form-item></el-col></el-row>
+      <el-input v-model="importText" type="textarea" :rows="8" placeholder="邮箱----密码----辅助邮箱----2FA&#10;邮箱----密码----2FA----国家&#10;邮箱----密码----辅助邮箱----2FA----国家&#10;三至六项可混合粘贴；保留连续分隔符中的空字段" />
+      <el-row :gutter="12" class="import-trade-fields">
+        <el-col :span="12"><el-form-item label="字段格式"><el-select v-model="importFormat" style="width:100%">
+          <el-option label="逐行识别混合格式" value="auto" />
+          <el-option label="三项：邮箱/密码/2FA" value="credentials_3" />
+          <el-option label="四项：邮箱/密码/辅助邮箱/2FA（强制）" value="credentials_4" />
+          <el-option label="四项：邮箱/密码/辅助邮箱或2FA/国家" value="country_4" />
+          <el-option label="五项：邮箱/密码/辅助邮箱或2FA/2FA/国家" value="country_5" />
+          <el-option label="六项：再加注册时间/国家" value="full_6" />
+        </el-select></el-form-item></el-col>
+        <el-col :span="12"><el-form-item label="分隔符"><el-select v-model="importDelimiter" style="width:100%">
+          <el-option label="自动识别" value="auto" /><el-option label="----" value="----" /><el-option label="竖线 |" value="|" /><el-option label="冒号 :" value=":" />
+          <el-option label="英文逗号 ," value="," /><el-option label="中文逗号 ，" value="，" /><el-option label="制表符 Tab" :value="'\t'" />
+        </el-select></el-form-item></el-col>
+      </el-row>
       <el-row :gutter="12" class="import-trade-fields">
         <el-col :span="12"><el-form-item label="采购渠道" required><el-input v-model="importPurchaseChannel" placeholder="例如：供应商" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item label="采购成本（每个）" required><el-input-number v-model="importPurchasePrice" :min="0" :precision="2" placeholder="单个邮箱成本" controls-position="right" style="width:100%" /></el-form-item></el-col>
       </el-row>
-      <div class="import-tip">每行自动识别 |、---- 或 : 分隔，支持三项（邮箱/密码/2FA）、四项（邮箱/密码/辅助邮箱/2FA）或六项（再加注册时间/国家）；辅助邮箱可填 null 或留空。采购渠道和单个邮箱成本必填，免费来源请填写 0。</div>
+      <div class="import-tip">自动模式逐行识别三至六项和 ----、|、:、英文/中文逗号、Tab，可混合粘贴。第三项可为辅助邮箱或 2FA；四项末列若为明确国家代码或名称，自动按国家处理。需要固定第四项为 2FA 时选择强制格式。连续 ---- 中的空字段会保留，辅助邮箱可填 null 或留空；密码按原文保存。国家支持代码或名称，重复邮箱自动跳过。采购渠道和单个邮箱成本必填，免费来源请填写 0。</div>
       <div v-if="importResult" class="import-result">成功 {{ importResult.success }} · 重复 {{ importResult.duplicates }} · 失败 {{ importResult.failed }}{{ checkingImport ? ' · 正在检测新 Gmail…' : (importCheckResult ? ` · 已检测 ${importCheckResult.checked} 个` : '') }}</div>
       <div v-for="result in importResult?.rows?.filter(row => row._result === 'failed') || []" :key="result.line" class="import-result">第 {{ result.line }} 行：{{ result._reason }}</div>
       <template #footer><el-button @click="importVisible = false">取消</el-button><el-button type="primary" :loading="importing" @click="importData">导入</el-button></template>
