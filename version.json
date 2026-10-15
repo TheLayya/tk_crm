@@ -1,18 +1,17 @@
 {
-  "version": "1.1.21",
+  "version": "1.1.22",
   "date": "2026-10-15",
   "changes": [
-    "统一内部工作台视觉与中文控件，表格支持密度记忆和批量展开",
-    "账号、邮箱、节点、设备和备忘支持直接与批量复制，完整资料可粘贴表格",
-    "邮箱支持批量修改使用状态、手动标记检测状态及清空未检测，保留自动检测入口",
-    "备忘提醒直达并支持重复定位，成员筛选、部门层级与角色说明更清晰",
-    "运营账号筛选、排序和完整导出使用相同查询，候选按可见范围提供"
+    "卡密每次导入建立独立批次，支持名称、备注和批次统计",
+    "领取可指定批次，自动领取跳过暂停或归档批次",
+    "异常批次支持暂停和恢复；未流转整批删除，有历史整批归档",
+    "保留历史未分批卡密、领取归属、加密内容和完整流转记录"
   ],
-  "source_commit": "e8bce4fb738fc3f9e9c070af6f6390338ad7000d",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.21/release-v1.1.21.tar.gz",
-  "sha256": "39bafe3b78077592a60787fd8a896e31818ab3c9498055555b0d63d8de324243",
-  "server_source_commit": "e8bce4fb738fc3f9e9c070af6f6390338ad7000d",
-  "windows_source_commit": "e8bce4fb738fc3f9e9c070af6f6390338ad7000d",
-  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.21/TkCRM-1.1.21-win-x64-setup.exe",
-  "windows_sha256": "4a211526cfbe507702b421d66b4edbedcaa6b8d3f4e88fa0a45194e5b8f97d8e"
+  "source_commit": "d071c909fad693070582d0abf3baed2383ae5b58",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.22/release-v1.1.22.tar.gz",
+  "sha256": "829e5d7d8407638dc4df56974c1b77cf26f32ef340d7431edb976a4e70e8dd3d",
+  "server_source_commit": "d071c909fad693070582d0abf3baed2383ae5b58",
+  "windows_source_commit": "d071c909fad693070582d0abf3baed2383ae5b58",
+  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.22/TkCRM-1.1.22-win-x64-setup.exe",
+  "windows_sha256": "6386dc798fbc6c3bc30f431bd65ff5a18392a2393ed470549983c272a3333c2a"
 }
