@@ -1,19 +1,21 @@
 from fastapi.responses import JSONResponse
-from typing import Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict, cast
 
 
 import hashlib
 import json
 import time
+from uuid import uuid4
 from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, case, func, or_, update
+from sqlalchemy import and_, case, exists, func, or_, update
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.database import get_db
-from app.models.card_key import CardKey, CardKeyEmailUsage, CardKeyPlatform, CardKeyProject
+from app.models.card_key import CardKey, CardKeyBatch, CardKeyEmailUsage, CardKeyPlatform, CardKeyProject
 from app.models.op_account import EmailAccount, EmailAccountRelation, OpAccount
 from app.models.team import User
 from app.services.auth_service import require_permission, _get_user_permissions
@@ -47,6 +49,15 @@ class ProjectBody(BaseModel):
 
 class ImportBody(BaseModel):
     content: str = Field(min_length=1, max_length=10000000)
+    batch_name: str = Field(default="", max_length=200)
+    remark: str = Field(default="", max_length=2000)
+
+
+class BatchBody(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    remark: str | None = Field(default=None, max_length=2000)
+    status: Literal["active", "paused"] | None = None
+    pause_reason: str | None = Field(default=None, max_length=2000)
 
 
 class PlatformBody(BaseModel):
@@ -66,10 +77,21 @@ def _allowed(project: CardKeyProject, user: User, db: Session) -> bool:
     return _manager(user, db) or "__all__" in _members(project) or user.username in _members(project)
 
 
+def _active_batch() -> ColumnElement[bool]:
+    return or_(CardKey.batch_id.is_(None), exists().where(
+        CardKeyBatch.id == CardKey.batch_id, CardKeyBatch.status == "active"))
+
+
+def _untouched_key() -> ColumnElement[bool]:
+    return and_(CardKey.status == "available", CardKey.claimed_by.is_(None),
+                CardKey.claimed_at.is_(None), CardKey.consumed_at.is_(None),
+                CardKey.pending_owner.is_(None), CardKey.history == [])
+
+
 def _project_json(project: CardKeyProject, db: Session, user: User | None = None) -> dict[str, object]:
     total, available, claimed, consumed = db.query(
         func.count(CardKey.id),
-        func.sum(case((CardKey.status == "available", 1), else_=0)),
+        func.sum(case((and_(CardKey.status == "available", _active_batch()), 1), else_=0)),
         func.sum(case((CardKey.status == "claimed", 1), else_=0)),
         func.sum(case((CardKey.status == "consumed", 1), else_=0)),
     ).filter(CardKey.project_id == project.id).one()
@@ -116,9 +138,31 @@ def _platform_json(platform: CardKeyPlatform) -> dict[str, object]:
 
 
 def _key_json(key: CardKey) -> dict[str, object]:
+    batch = key.batch
     return {"id": key.id, "content": key.content, "status": key.status,
+            "batch_id": key.batch_id, "batch_no": batch.batch_no if batch else "",
+            "batch_name": batch.name if batch else "历史未分批",
+            "batch_status": batch.status if batch else "active", "batch_remark": batch.remark or "" if batch else "",
+            "batch_pause_reason": batch.pause_reason or "" if batch else "",
             "claimed_by": key.claimed_by, "claimed_at": _time_json(key.claimed_at),
             "consumed_at": _time_json(key.consumed_at), "history": key.history or [], "remark": key.remark}
+
+
+def _batch_json(batch: CardKeyBatch | None, project_id: int, db: Session, owner: str | None = None) -> dict[str, object]:
+    query = db.query(CardKey).filter(CardKey.project_id == project_id,
+                                     CardKey.batch_id == batch.id if batch else CardKey.batch_id.is_(None))
+    if owner:
+        query = query.filter(CardKey.claimed_by == owner)
+    counts: dict[str, int] = {status: count for status, count in query.with_entities(CardKey.status, func.count(CardKey.id)).group_by(CardKey.status).all()}
+    return {"id": batch.id if batch else 0, "project_id": project_id,
+            "batch_no": batch.batch_no if batch else "", "name": batch.name if batch else "历史未分批",
+            "remark": (batch.remark or "") if batch else "", "status": batch.status if batch else "active",
+            "pause_reason": (batch.pause_reason or "") if batch else "", "history": (batch.history or []) if batch else [],
+            "created_by": batch.created_by if batch else "", "created_at": _time_json(batch.created_at) if batch else None,
+            "updated_at": _time_json(batch.updated_at) if batch else None,
+            "total": sum(counts.values()), **{status: counts.get(status, 0) for status in ("available", "claimed", "consumed", "invalid")},
+            "can_delete": bool(batch and batch.status != "archived" and not query.filter(~_untouched_key()).first()),
+            "has_history": bool(query.filter(~_untouched_key()).first())}
 
 
 def _email_json(email: EmailAccount) -> dict[str, object]:
@@ -237,11 +281,16 @@ def delete_project(project_id: int, db: Session = Depends(get_db), _: User = Dep
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
-    if db.query(CardKey).filter(CardKey.project_id == project_id, CardKey.status != "available").first() or db.query(CardKeyEmailUsage).filter_by(project_id=project_id).first():
+    # Take the SQLite write transaction before checking history so a concurrent claim is either observed or excluded.
+    db.execute(update(CardKeyProject).where(CardKeyProject.id == project_id).values(is_active=False))
+    if db.query(CardKey).filter(CardKey.project_id == project_id, ~_untouched_key()).first() or db.query(CardKeyEmailUsage).filter_by(project_id=project_id).first():
+        db.rollback()
         raise HTTPException(409, "项目已有领取或完成记录，请结束项目以保留历史")
     if project.target_platform and db.query(EmailAccount).filter(EmailAccount.claimed_platform == project.target_platform, EmailAccount.claimed_by.isnot(None)).first():
+        db.rollback()
         raise HTTPException(409, "该平台有领取中的邮箱，请先完成注册或归还")
     db.query(CardKey).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(CardKeyBatch).filter_by(project_id=project_id).delete(synchronize_session=False)
     db.delete(project)
     db.commit()
     return {"deleted": True}
@@ -257,6 +306,15 @@ def import_keys(project_id: int, body: ImportBody, db: Session = Depends(get_db)
     values = [line.strip() for line in body.content.splitlines() if line.strip()]
     if not values or len(values) > 10000 or any(len(value) > 8192 for value in values):
         raise HTTPException(422, "每次导入1至10000行，每行最多8192字符")
+    batch = CardKeyBatch(project_id=project_id,
+                         batch_no=f"B{datetime.utcnow():%Y%m%d%H%M%S}-{uuid4().hex[:6].upper()}",
+                         name=body.batch_name.strip() or "导入批次", remark=body.remark.strip() or None,
+                         created_by=user.username)
+    if not body.batch_name.strip():
+        batch.name = batch.batch_no
+    batch.history = [{"action": "import", "username": user.username, "time": _time_json(datetime.utcnow()), "remark": body.remark.strip()}]
+    db.add(batch)
+    db.flush()
     project.updated_at = datetime.utcnow()
     db.flush()
     added, duplicates = 0, 0
@@ -264,26 +322,117 @@ def import_keys(project_id: int, body: ImportBody, db: Session = Depends(get_db)
         fingerprint = hashlib.sha256(value.encode("utf-8")).hexdigest()
         try:
             with db.begin_nested():
-                db.add(CardKey(project_id=project_id, content=value, fingerprint=fingerprint, created_by=user.username))
+                db.add(CardKey(project_id=project_id, batch_id=batch.id, content=value, fingerprint=fingerprint, created_by=user.username))
                 db.flush()
             added += 1
         except IntegrityError:
             duplicates += 1
     db.commit()
-    return {"added": added, "duplicates": duplicates}
+    db.refresh(batch)
+    return {"added": added, "duplicates": duplicates, "batch": _batch_json(batch, project_id, db)}
+
+
+@router.get("/{project_id}/batches", response_model=None)
+def list_batches(project_id: int, include_archived: bool = False, db: Session = Depends(get_db),
+                 user: User = Depends(require_permission("card_key:view"))) -> list[dict[str, object]]:
+    project = db.get(CardKeyProject, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    allowed = _allowed(project, user, db)
+    own_keys = db.query(CardKey).filter(CardKey.project_id == project_id, CardKey.claimed_by == user.username)
+    if not allowed and not own_keys.first():
+        raise HTTPException(403, "你不是该项目协助成员")
+    rows = []
+    visible_keys = db.query(CardKey).filter(CardKey.project_id == project_id) if allowed else own_keys
+    owner = None if allowed else user.username
+    if visible_keys.filter(CardKey.batch_id.is_(None)).first():
+        rows.append(_batch_json(None, project_id, db, owner))
+    query = db.query(CardKeyBatch).filter(CardKeyBatch.project_id == project_id)
+    if not allowed:
+        query = query.filter(CardKeyBatch.id.in_(own_keys.with_entities(CardKey.batch_id)))
+    if not include_archived:
+        query = query.filter(CardKeyBatch.status != "archived")
+    rows.extend(_batch_json(batch, project_id, db, owner) for batch in query.order_by(CardKeyBatch.created_at.desc()).all())
+    return rows
+
+
+@router.put("/{project_id}/batches/{batch_id}", response_model=None)
+def update_batch(project_id: int, batch_id: int, body: BatchBody, db: Session = Depends(get_db),
+                 user: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
+    batch = db.query(CardKeyBatch).filter_by(id=batch_id, project_id=project_id).first()
+    if not batch:
+        raise HTTPException(404, "批次不存在")
+    if batch.status == "archived":
+        raise HTTPException(409, "已归档批次不能恢复或修改状态")
+    if body.name is not None and not body.name.strip():
+        raise HTTPException(422, "请填写批次名称")
+    values: dict[str, Any] = {"updated_at": datetime.utcnow()}
+    if body.name is not None:
+        values["name"] = body.name.strip()
+    if body.remark is not None:
+        values["remark"] = body.remark.strip() or None
+    if body.status is not None:
+        values["status"] = body.status
+        values["pause_reason"] = ((body.pause_reason or "").strip() or None) if body.status == "paused" else None
+    elif body.pause_reason is not None:
+        values["pause_reason"] = body.pause_reason.strip() or None
+    values["history"] = [*(batch.history or []), {"action": "update", "username": user.username,
+                         "time": _time_json(values["updated_at"]), **{name: value for name, value in values.items() if name != "updated_at"}}]
+    changed = db.execute(update(CardKeyBatch).where(CardKeyBatch.id == batch.id,
+                         CardKeyBatch.status != "archived", CardKeyBatch.history == (batch.history or [])).values(**values)).rowcount
+    if changed != 1:
+        db.rollback()
+        raise HTTPException(409, "批次状态已变化，请刷新后重试")
+    db.commit()
+    db.refresh(batch)
+    return _batch_json(batch, project_id, db)
+
+
+@router.delete("/{project_id}/batches/{batch_id}", response_model=None)
+def delete_batch(project_id: int, batch_id: int, db: Session = Depends(get_db),
+                 user: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
+    batch = db.query(CardKeyBatch).filter_by(id=batch_id, project_id=project_id).first()
+    if not batch:
+        raise HTTPException(404, "批次不存在")
+    if batch.status == "archived":
+        return {"deleted": False, "archived": True, "id": batch.id}
+    # Claim/pause and delete share this write transaction; the status update prevents a new claim crossing this point.
+    now = datetime.utcnow()
+    changed = db.execute(update(CardKeyBatch).where(CardKeyBatch.id == batch.id,
+                         CardKeyBatch.status != "archived", CardKeyBatch.history == (batch.history or [])).values(
+        status="archived", pause_reason="批次已归档", updated_at=now,
+        history=[*(batch.history or []), {"action": "archive", "username": user.username, "time": _time_json(now)}])).rowcount
+    if changed != 1:
+        db.rollback()
+        raise HTTPException(409, "批次状态已变化，请刷新后重试")
+    keys = db.query(CardKey).filter(CardKey.project_id == project_id, CardKey.batch_id == batch_id).all()
+    if all((
+            key.status == "available" and key.claimed_by is None and key.claimed_at is None and
+            key.consumed_at is None and key.pending_owner is None and not (key.history or [])) for key in keys):
+        count = len(keys)
+        for key in keys:
+            db.delete(key)
+        db.delete(batch)
+        db.commit()
+        return {"deleted": True, "deleted_keys": count, "id": batch_id}
+    db.commit()
+    db.refresh(batch)
+    return {"deleted": False, "archived": True, "id": batch.id, "batch": _batch_json(batch, project_id, db)}
 
 
 @router.get("/{project_id}/keys", response_model=None)
 def list_keys(project_id: int, page: int = Query(1, ge=1), page_size: int = Query(30, ge=1, le=100),
               status: str = "", mine: bool = False, keyword: str = "",
               sort_by: str | None = None, sort_order: Literal["asc", "desc"] = "asc",
-              table_filters: str | None = None,
+              table_filters: str | None = None, batch_id: int | None = Query(default=None, ge=0),
               db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
     manager = _manager(user, db)
     query = db.query(CardKey).filter(CardKey.project_id == project_id)
+    if batch_id is not None:
+        query = query.filter(CardKey.batch_id == batch_id if batch_id else CardKey.batch_id.is_(None))
     if not manager or mine:
         query = query.filter(CardKey.claimed_by == user.username)
     if not _allowed(project, user, db) and not db.query(CardKey.id).filter(
@@ -313,31 +462,53 @@ def list_keys(project_id: int, page: int = Query(1, ge=1), page_size: int = Quer
 
 
 @router.post("/{project_id}/claim", response_model=None)
-def claim_key(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> dict[str, object]:
+def claim_key(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view")),
+              batch_id: int | None = None) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
     if not _allowed(project, user, db):
         raise HTTPException(403, "你不是该项目协助成员")
+    if batch_id is not None and batch_id < 0:
+        raise HTTPException(422, "无效批次")
     pending = db.query(CardKey).filter(CardKey.project_id == project_id, CardKey.pending_owner == user.username).first()
     if pending:
+        pending_batch_id = pending.batch_id or 0
+        requested_batch_id = batch_id if batch_id is not None else pending_batch_id
+        if requested_batch_id != pending_batch_id:
+            raise HTTPException(409, f"你已有批次 {pending_batch_id or '历史未分批'} 的待处理卡密，请先完成或归还")
         return _key_json(pending)
     if not project.is_active:
         raise HTTPException(409, "项目已结束，不能领取")
-    key = db.query(CardKey).filter(CardKey.project_id == project_id, CardKey.status == "available").order_by(CardKey.id).first()
+    if batch_id:
+        batch = db.query(CardKeyBatch).filter_by(id=batch_id, project_id=project_id).first()
+        if not batch:
+            raise HTTPException(404, "批次不存在")
+        if batch.status != "active":
+            raise HTTPException(409, "该批次已暂停或归档，请选择其他批次")
+    key_query = db.query(CardKey).filter(CardKey.project_id == project_id, CardKey.status == "available")
+    if batch_id is not None:
+        key_query = key_query.filter(CardKey.batch_id == batch_id if batch_id else CardKey.batch_id.is_(None))
+    else:
+        key_query = key_query.filter(_active_batch())
+    key = key_query.order_by(CardKey.id).first()
     if not key:
         raise HTTPException(409, "卡密已领完")
     now = datetime.utcnow()
     try:
-        changed = db.execute(update(CardKey).where(and_(
-            CardKey.id == key.id, CardKey.status == "available", CardKey.history == (key.history or []),
-        )).values(
+        predicate = [CardKey.id == key.id, CardKey.status == "available", CardKey.history == (key.history or []),
+                     exists().where(CardKeyProject.id == project_id, CardKeyProject.is_active.is_(True))]
+        if key.batch_id is not None:
+            predicate.append(exists().where(CardKeyBatch.id == key.batch_id, CardKeyBatch.status == "active"))
+        changed = db.execute(update(CardKey).where(and_(*predicate)).values(
             status="claimed", claimed_by=user.username, pending_owner=user.username, claimed_at=now,
             history=_history(key, "claim", user.username, now))).rowcount
         if changed != 1:
             db.rollback()
             pending = db.query(CardKey).filter(CardKey.project_id == project_id, CardKey.pending_owner == user.username).first()
             if pending:
+                if batch_id is not None and batch_id != (pending.batch_id or 0):
+                    raise HTTPException(409, "你已有其他批次的待处理卡密，请先完成或归还")
                 return _key_json(pending)
             raise HTTPException(409, "卡密已被其他成员领取，请重试")
         db.commit()
@@ -345,6 +516,8 @@ def claim_key(project_id: int, db: Session = Depends(get_db), user: User = Depen
         db.rollback()
         pending = db.query(CardKey).filter(CardKey.project_id == project_id, CardKey.pending_owner == user.username).first()
         if pending:
+            if batch_id is not None and batch_id != (pending.batch_id or 0):
+                raise HTTPException(409, "你已有其他批次的待处理卡密，请先完成或归还")
             return _key_json(pending)
         raise HTTPException(409, "领取冲突，请重试")
     db.refresh(key)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, JSON
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.services.encryption_service import EncryptedType
@@ -44,11 +44,29 @@ class CardKeyEmailUsage(Base):
     completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
 
+class CardKeyBatch(Base):
+    __tablename__ = "card_key_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("card_key_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
+    pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    history: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class CardKey(Base):
     __tablename__ = "card_keys"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("card_key_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("card_key_batches.id", ondelete="RESTRICT"), nullable=True, index=True)
+    batch: Mapped[CardKeyBatch | None] = relationship(lazy="joined")
     content: Mapped[str] = mapped_column(EncryptedType(), nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     pending_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)

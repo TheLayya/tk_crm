@@ -43,6 +43,7 @@ async function main() {
           '/api/card-keys/platforms': [{ id: 1, name: 'gemini pro', is_active: true }],
           '/api/card-keys/members': [{ username: 'layout-test' }],
           '/api/card-keys/1/keys': { items: [key], total: 1 },
+          '/api/card-keys/1/batches': [{ id: 0, project_id: 1, name: '历史未分批', remark: '', status: 'active', available: 50, claimed: 1, consumed: 2, invalid: 0, total: 53 }],
           '/api/card-keys/1/email': {
             id: 1, email: 'long-registration-mail-address-for-layout-check@gmail.com',
             password: 'fixture-only', recovery_email: 'recovery@example.invalid', totp_secret: 'fixture-only',

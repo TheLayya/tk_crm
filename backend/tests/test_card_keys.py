@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from threading import Barrier
 
+import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -9,9 +10,200 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.api.card_keys import claim_key, consume_key, release_key, import_keys, ImportBody, fail_email, EmailFailureBody
 from app.api.card_keys import _totp_code
 from app.core.security import create_access_token
-from app.models.card_key import CardKey, CardKeyEmailUsage, CardKeyProject
+from app.models.card_key import CardKey, CardKeyBatch, CardKeyEmailUsage, CardKeyProject
 from app.models.op_account import EmailAccount, EmailAccountRelation, OpAccount
 from app.models.team import Role, RolePermission, User, UserRole
+
+
+def test_batch_import_filter_and_duplicate_ownership(client, db, super_admin):
+    admin_headers = headers(super_admin)
+    first_project = project(client, super_admin, ['__all__'])
+    base = f'/api/card-keys/{first_project}'
+    first = client.post(base + '/import', headers=admin_headers, json={
+        'content': 'first\nsecond\nfirst', 'batch_name': '10月采购', 'remark': '供应商 A'}).json()
+    assert (first['added'], first['duplicates']) == (2, 1)
+    batch = first['batch']
+    assert batch['name'] == '10月采购'
+    assert batch['remark'] == '供应商 A'
+    assert batch['status'] == 'active'
+    assert batch['total'] == batch['available'] == 2
+    assert batch['can_delete'] is True
+    second = client.post(base + '/import', headers=admin_headers, json={
+        'content': 'second\nthird'}).json()
+    assert second['batch']['name'] == second['batch']['batch_no']
+    assert second['batch']['id'] != batch['id']
+    assert (second['added'], second['duplicates']) == (1, 1)
+    items = client.get(base + f"/keys?batch_id={batch['id']}", headers=admin_headers).json()
+    assert items['total'] == 2
+    assert all(item['batch_name'] == '10月采购' and item['batch_remark'] == '供应商 A' for item in items['items'])
+    assert db.query(CardKey).filter_by(project_id=first_project, batch_id=batch['id']).count() == 2
+    other_project = project(client, super_admin, ['__all__'])
+    duplicate = client.post(f'/api/card-keys/{other_project}/import', headers=admin_headers, json={
+        'content': 'first'}).json()
+    assert duplicate['added'] == 0 and duplicate['duplicates'] == 1
+    assert db.query(CardKey).filter_by(project_id=first_project, batch_id=batch['id']).count() == 2
+    assert client.get(base + '/batches', headers=admin_headers).json()[0]['id'] == second['batch']['id']
+
+
+def test_batch_claim_pause_and_existing_pending(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    admin_headers, member_headers = headers(super_admin), headers(normal_user)
+    project_id = project(client, super_admin, ['alice'])
+    base = f'/api/card-keys/{project_id}'
+    batch_ids = [client.post(base + '/import', headers=admin_headers, json={
+        'content': f'{name}-one\n{name}-two', 'batch_name': name}).json()['batch']['id'] for name in ['A', 'B']]
+    first, second = batch_ids
+    paused = client.put(base + f'/batches/{first}', headers=admin_headers,
+                        json={'status': 'paused', 'pause_reason': '供应商排查'}).json()
+    assert paused['pause_reason'] == '供应商排查'
+    assert client.get('/api/card-keys', headers=member_headers).json()[0]['available'] == 2
+    assert client.post(base + f'/claim?batch_id={first}', headers=member_headers).status_code == 409
+    claimed = client.post(base + f'/claim?batch_id={second}', headers=member_headers).json()
+    assert claimed['batch_id'] == second
+    assert client.post(base + f'/claim?batch_id={first}', headers=member_headers).status_code == 409
+    assert client.put(base + f'/batches/{second}', headers=admin_headers,
+                      json={'status': 'paused', 'pause_reason': '临时停发'}).status_code == 200
+    assert client.post(base + '/claim', headers=member_headers).json()['id'] == claimed['id']
+    assert client.post(base + f'/claim?batch_id={second}', headers=member_headers).json()['id'] == claimed['id']
+    assert client.post(base + f"/keys/{claimed['id']}/consume", headers=member_headers).status_code == 200
+    assert client.post(base + '/claim', headers=member_headers).status_code == 409
+    resumed = client.put(base + f'/batches/{first}', headers=admin_headers, json={'status': 'active'}).json()
+    assert resumed['pause_reason'] == ''
+    assert client.post(base + '/claim', headers=member_headers).json()['batch_id'] == first
+    assert client.put(base + f'/batches/{first}', headers=member_headers, json={'status': 'paused'}).status_code == 403
+
+
+def test_batch_delete_unused_and_archive_used_keys(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    admin_headers, member_headers = headers(super_admin), headers(normal_user)
+    project_id = project(client, super_admin, ['alice'])
+    base = f'/api/card-keys/{project_id}'
+    unused = client.post(base + '/import', headers=admin_headers, json={'content': 'unused'}).json()['batch']['id']
+    assert client.delete(base + f'/batches/{unused}', headers=member_headers).status_code == 403
+    deleted = client.delete(base + f'/batches/{unused}', headers=admin_headers).json()
+    assert deleted['deleted'] is True and deleted['deleted_keys'] == 1
+    assert db.get(CardKeyBatch, unused) is None
+    used = client.post(base + '/import', headers=admin_headers, json={'content': 'unused\nretained'}).json()['batch']['id']
+    claimed = client.post(base + f'/claim?batch_id={used}', headers=member_headers).json()
+    assert client.post(base + f"/keys/{claimed['id']}/release", headers=member_headers).status_code == 200
+    assert client.get(base + '/batches', headers=admin_headers).json()[0]['can_delete'] is False
+    archived = client.delete(base + f'/batches/{used}', headers=admin_headers).json()
+    assert archived['deleted'] is False and archived['archived'] is True
+    assert db.query(CardKey).filter_by(batch_id=used).count() == 2
+    assert client.get(base + '/batches', headers=admin_headers).json() == []
+    history = client.get(base + '/batches?include_archived=true', headers=admin_headers).json()[0]
+    assert history['status'] == 'archived'
+    assert history['history'][-1]['action'] == 'archive'
+    assert client.get(base + f'/keys?batch_id={used}', headers=admin_headers).json()['total'] == 2
+    assert client.post(base + f'/claim?batch_id={used}', headers=member_headers).status_code == 409
+    assert client.put(base + f'/batches/{used}', headers=admin_headers, json={'status': 'active'}).status_code == 409
+    assert client.delete(base, headers=admin_headers).status_code == 409
+
+
+def test_batch_legacy_unbatched_and_member_scope(client, db, super_admin, normal_user, other_user):
+    import hashlib
+    grant(db, normal_user, 'card_key:view')
+    grant(db, other_user, 'card_key:view')
+    admin_headers, member_headers = headers(super_admin), headers(normal_user)
+    project_id = project(client, super_admin, ['alice'])
+    base = f'/api/card-keys/{project_id}'
+    legacy = CardKey(project_id=project_id, content='legacy-key', fingerprint=hashlib.sha256(b'legacy-key').hexdigest(), created_by='root')
+    db.add(legacy)
+    db.commit()
+    batch = client.post(base + '/import', headers=admin_headers, json={'content': 'new-key'}).json()['batch']
+    assert client.get(base + '/keys?batch_id=0', headers=admin_headers).json()['total'] == 1
+    assert client.get(base + '/batches', headers=member_headers).json()[0]['id'] == 0
+    assert client.get(base + '/batches', headers=headers(other_user)).status_code == 403
+    result = client.post(base + '/claim?batch_id=0', headers=member_headers).json()
+    assert result['batch_id'] is None and result['batch_name'] == '历史未分批'
+    assert client.post(base + f"/claim?batch_id={batch['id']}", headers=member_headers).status_code == 409
+    assert client.put(base, headers=admin_headers, json={'name': '移除成员', 'members': ['root']}).status_code == 200
+    remaining = client.get(base + '/batches', headers=member_headers)
+    assert remaining.status_code == 200 and [row['id'] for row in remaining.json()] == [0]
+    assert client.post(base + '/claim', headers=member_headers).status_code == 403
+    assert client.post(base + f"/keys/{result['id']}/release", headers=member_headers).status_code == 200
+
+
+def test_stale_claim_after_batch_pause_is_rejected(tmp_path):
+    from app.api.card_keys import BatchBody, update_batch
+    engine = create_engine(f"sqlite:///{tmp_path / 'pause-race.db'}", connect_args={'timeout': 15})
+    CardKeyProject.__table__.create(engine)
+    CardKeyBatch.__table__.create(engine)
+    CardKey.__table__.create(engine)
+    sessions = sessionmaker(bind=engine)
+    user = User(username='root', is_super_admin=True)
+    with sessions() as session:
+        item = CardKeyProject(name='暂停竞态', member_usernames='root', created_by='root')
+        session.add(item)
+        session.commit()
+        project_id = item.id
+        batch_id = import_keys(project_id, ImportBody(content='pause-key'), session, user)['batch']['id']
+
+    class PausedSession(Session):
+        def execute(self, statement, *args, **kwargs):
+            if getattr(statement, 'is_update', False):
+                with sessions() as current:
+                    update_batch(project_id, batch_id, BatchBody(status='paused', pause_reason='排查'), current, user)
+            return super().execute(statement, *args, **kwargs)
+
+    with PausedSession(bind=engine) as stale:
+        try:
+            claim_key(project_id, stale, user)
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError('Claim must check batch status again in the write statement')
+    with sessions() as session:
+        assert session.query(CardKey).one().status == 'available'
+        assert session.get(CardKeyBatch, batch_id).status == 'paused'
+    engine.dispose()
+
+
+@pytest.mark.parametrize('scope,claim_first', [('batch', True), ('project', True), ('batch', False), ('project', False)])
+def test_delete_and_claim_preserve_flow_history(tmp_path, scope, claim_first):
+    from app.api.card_keys import delete_batch, delete_project
+    engine = create_engine(f"sqlite:///{tmp_path / (scope + str(claim_first) + '.db')}", connect_args={'timeout': 15})
+    for table in (CardKeyProject.__table__, CardKeyBatch.__table__, CardKey.__table__, CardKeyEmailUsage.__table__):
+        table.create(engine)
+    sessions = sessionmaker(bind=engine)
+    user = User(username='root', is_super_admin=True)
+    with sessions() as session:
+        item = CardKeyProject(name='删除竞态', member_usernames='root', created_by='root')
+        session.add(item)
+        session.commit()
+        project_id = item.id
+        batch_id = import_keys(project_id, ImportBody(content='delete-race'), session, user)['batch']['id']
+
+    def remove(session):
+        return delete_batch(project_id, batch_id, session, user) if scope == 'batch' else delete_project(project_id, session, user)
+
+    class RacingSession(Session):
+        def execute(self, statement, *args, **kwargs):
+            if getattr(statement, 'is_update', False):
+                with sessions() as current:
+                    if claim_first:
+                        claim_key(project_id, current, user)
+                    else:
+                        remove(current)
+            return super().execute(statement, *args, **kwargs)
+
+    with RacingSession(bind=engine) as stale:
+        if claim_first and scope == 'batch':
+            assert remove(stale)['archived'] is True
+        else:
+            with pytest.raises(HTTPException) as exc:
+                remove(stale) if claim_first else claim_key(project_id, stale, user)
+            assert exc.value.status_code == 409
+    with sessions() as session:
+        if claim_first:
+            key = session.query(CardKey).one()
+            assert key.status == 'claimed'
+            assert [event['action'] for event in key.history] == ['claim']
+            assert session.get(CardKeyBatch, batch_id).status == ('archived' if scope == 'batch' else 'active')
+        else:
+            assert session.query(CardKey).count() == 0
+            assert session.get(CardKeyBatch, batch_id) is None
+    engine.dispose()
 
 
 def headers(user):
@@ -256,7 +448,8 @@ def test_import_counts_deduplication_and_encryption(client, db, super_admin):
     project_id = project(client, super_admin, ['root'])
     path = f'/api/card-keys/{project_id}/import'
     result = client.post(path, headers=headers(super_admin), json={'content': ' key-A \n\nhttps://example.test/key-B\nkey-A\nkey-C'}).json()
-    assert result == {'added': 3, 'duplicates': 1}
+    assert result['added'] == 3 and result['duplicates'] == 1
+    assert result['batch']['total'] == 3
     assert client.post(path, headers=headers(super_admin), json={'content': 'key-A'}).json()['duplicates'] == 1
     another = project(client, super_admin, ['root'])
     assert client.post(f'/api/card-keys/{another}/import', headers=headers(super_admin), json={'content': 'key-A'}).json()['duplicates'] == 1
@@ -440,6 +633,7 @@ def test_removed_member_can_return_claimed_key_but_cannot_claim_again(client, db
 def test_release_and_consume_race_has_one_winner(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'returns.db'}", connect_args={'check_same_thread': False, 'timeout': 15})
     CardKeyProject.__table__.create(engine)
+    CardKeyBatch.__table__.create(engine)
     CardKey.__table__.create(engine)
     sessions = sessionmaker(bind=engine)
     user = User(username='root', is_super_admin=True)
@@ -482,6 +676,7 @@ def test_release_and_consume_race_has_one_winner(tmp_path):
 def test_stale_claim_cannot_erase_release_history(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'stale-claim.db'}", connect_args={'timeout': 15})
     CardKeyProject.__table__.create(engine)
+    CardKeyBatch.__table__.create(engine)
     CardKey.__table__.create(engine)
     sessions = sessionmaker(bind=engine)
     user = User(username='root', is_super_admin=True)
@@ -519,6 +714,7 @@ def test_stale_claim_cannot_erase_release_history(tmp_path):
 def test_concurrent_claims_and_imports(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'claims.db'}", connect_args={'check_same_thread': False, 'timeout': 15})
     CardKeyProject.__table__.create(engine)
+    CardKeyBatch.__table__.create(engine)
     CardKey.__table__.create(engine)
     sessions = sessionmaker(bind=engine)
     with sessions() as session:

@@ -9,11 +9,14 @@ from app.models.team import OperationLog
 # Path → (module, action) mapping
 PATH_MODULE_MAP = [
     (r"POST /api/card-keys/\d+/import", ("卡密管理", "IMPORT")),
+    (r"PUT /api/card-keys/\d+/batches/\d+", ("卡密批次", "UPDATE")),
+    (r"DELETE /api/card-keys/\d+/batches/\d+", ("卡密批次", "DELETE")),
     (r"POST /api/card-keys/\d+/claim", ("卡密管理", "CLAIM")),
     (r"POST /api/card-keys/\d+/keys/\d+/consume", ("卡密管理", "CONSUME")),
     (r"POST /api/card-keys/\d+/keys/\d+/release", ("卡密管理", "RELEASE")),
     (r"POST /api/card-keys", ("卡密管理", "CREATE")),
     (r"PUT /api/card-keys/\d+", ("卡密管理", "UPDATE")),
+    (r"DELETE /api/card-keys/\d+", ("卡密管理", "DELETE")),
     (r"POST /api/emails", ("邮箱管理", "CREATE")),
     (r"POST /api/emails/import", ("邮箱管理", "CREATE")),
     (r"POST /api/emails/check", ("邮箱管理", "UPDATE")),
