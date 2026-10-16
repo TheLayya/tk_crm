@@ -68,12 +68,14 @@
                 </div>
               </div>
               <div v-if="row.remark" class="remark">备注：{{ row.remark }}</div>
+              <el-button v-if="row.failure_report_count" class="failure-report-badge" type="danger" plain size="small" @click="viewFailures(row)">查看失败记录与售后凭证（{{ row.failure_report_count }}）</el-button>
             </div>
           </template>
         </el-table-column>
         <el-table-column column-key="email" prop="email" filter-type="text" label="邮箱" min-width="250">
           <template #default="{ row }">
             <el-button class="email-name" link @click="tableRef.toggleRowExpansion(row)">{{ row.email }}</el-button>
+            <div v-if="row.failure_report_count" class="email-failure-summary"><el-button class="failure-report-badge" type="danger" plain size="small" :aria-label="`查看邮箱失败凭证：${row.email}`" @click="viewFailures(row)">失败 {{ row.failure_report_count }} · 截图 {{ row.screenshot_count || 0 }}</el-button><span v-if="row.latest_failure_remark" class="failure-latest-remark" :title="row.latest_failure_remark">{{ row.latest_failure_remark }}</span></div>
             <div class="email-copy-actions">
               <el-button link type="primary" @click="copy(row.email, '邮箱')">复制邮箱</el-button>
               <el-button v-if="row.password" link type="primary" @click="copy(row.password, '邮箱密码')">复制密码</el-button>
@@ -121,6 +123,7 @@
       <details class="sale-email-list"><summary>查看本次修改的邮箱（{{ batchStatusRows.length }} 个）</summary><div v-for="row in batchStatusRows" :key="row.id">{{ row.email }}</div></details>
       <template #footer><el-button :disabled="batchStatusSaving" @click="batchStatusVisible = false">取消</el-button><el-button type="primary" :loading="batchStatusSaving" :disabled="batchStatusSaving" @click="submitBatchStatus">确认修改</el-button></template>
     </el-dialog>
+    <FailureReportHistory v-model="failureHistoryVisible" :source="failureHistorySource" :target-label="failureHistoryLabel" />
 
     <el-dialog v-model="batchSaleVisible" title="批量售出邮箱" width="min(620px, 94vw)" :close-on-click-modal="false" :close-on-press-escape="!batchSelling" :show-close="!batchSelling" @closed="batchSaleRows = []">
       <template v-if="!batchSaleCompleted">
@@ -228,6 +231,7 @@ import SellerSelector from '@/components/SellerSelector.vue'
 import { copyText } from '@/utils/clipboard'
 import { saleInformationError } from '@/utils/saleValidation'
 import EmailTotp from '@/components/EmailTotp.vue'
+import FailureReportHistory from '@/components/FailureReportHistory.vue'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('email:manage'))
@@ -237,6 +241,10 @@ const canLink = computed(() => canManage.value && auth.hasPermission('op_account
 const selected = ref([])
 const checking = ref(false)
 const tableRef = ref(null)
+const failureHistoryVisible = ref(false)
+const failureHistorySource = ref(null)
+const failureHistoryLabel = ref('')
+const viewFailures = row => { failureHistorySource.value = { kind: 'email', emailId: row.id }; failureHistoryLabel.value = row.email; failureHistoryVisible.value = true }
 const statuses = ['闲置', '使用中', '锁定', '已出售', '废弃']
 const platforms = ref([])
 const devices = ref([])
@@ -419,6 +427,9 @@ onMounted(async () => { platforms.value = await getEmailPlatforms(); await load(
 </script>
 
 <style scoped>
+.email-failure-summary { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:5px 0; }
+.failure-report-badge { margin-left:0; font-size:12px; }
+.failure-latest-remark { display:block; flex:1 1 140px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#b91c1c; font-size:12px; }
 .email-page { padding: 12px 16px 28px; }
 .page-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
 .page-heading h2 { margin:0 0 5px; color:#1f2937; font-size:22px; }

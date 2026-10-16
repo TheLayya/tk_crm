@@ -14,6 +14,8 @@ PATH_MODULE_MAP = [
     (r"POST /api/card-keys/\d+/claim", ("卡密管理", "CLAIM")),
     (r"POST /api/card-keys/\d+/keys/\d+/consume", ("卡密管理", "CONSUME")),
     (r"POST /api/card-keys/\d+/keys/\d+/release", ("卡密管理", "RELEASE")),
+    (r"POST /api/card-keys/\d+/keys/\d+/invalid", ("卡密售后", "REPORT_FAILURE")),
+    (r"POST /api/card-keys/\d+/email/fail", ("邮箱售后", "REPORT_FAILURE")),
     (r"POST /api/card-keys", ("卡密管理", "CREATE")),
     (r"PUT /api/card-keys/\d+", ("卡密管理", "UPDATE")),
     (r"DELETE /api/card-keys/\d+", ("卡密管理", "DELETE")),

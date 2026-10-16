@@ -258,6 +258,9 @@ class EmailAccountResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     current_relation_count: int = 0
+    failure_report_count: int = 0
+    screenshot_count: int = 0
+    latest_failure_remark: str = ""
 
     class Config:
         from_attributes = True

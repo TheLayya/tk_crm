@@ -1,4 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
+import base64
+import struct
+import zlib
 from datetime import datetime
 from threading import Barrier
 
@@ -11,8 +14,16 @@ from app.api.card_keys import claim_key, consume_key, release_key, import_keys, 
 from app.api.card_keys import _totp_code
 from app.core.security import create_access_token
 from app.models.card_key import CardKey, CardKeyBatch, CardKeyEmailUsage, CardKeyProject
+from app.models.failure_report import FailureReport
 from app.models.op_account import EmailAccount, EmailAccountRelation, OpAccount
 from app.models.team import Role, RolePermission, User, UserRole
+
+
+def failure_screenshot():
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(b'\x00\xff\x00\x00\xff')) + chunk(b'IEND', b'')
+    return {'name': 'failure.png', 'content_type': 'image/png', 'data': base64.b64encode(png).decode()}
 
 
 def test_batch_import_filter_and_duplicate_ownership(client, db, super_admin):
@@ -163,7 +174,7 @@ def test_stale_claim_after_batch_pause_is_rejected(tmp_path):
 def test_delete_and_claim_preserve_flow_history(tmp_path, scope, claim_first):
     from app.api.card_keys import delete_batch, delete_project
     engine = create_engine(f"sqlite:///{tmp_path / (scope + str(claim_first) + '.db')}", connect_args={'timeout': 15})
-    for table in (CardKeyProject.__table__, CardKeyBatch.__table__, CardKey.__table__, CardKeyEmailUsage.__table__):
+    for table in (CardKeyProject.__table__, CardKeyBatch.__table__, CardKey.__table__, CardKeyEmailUsage.__table__, EmailAccount.__table__, FailureReport.__table__):
         table.create(engine)
     sessions = sessionmaker(bind=engine)
     user = User(username='root', is_super_admin=True)
@@ -348,7 +359,7 @@ def test_project_email_claim_failure_discards_email_with_remark(client, db, supe
     claimed = client.post(path + '/claim', headers=headers_)
     assert claimed.status_code == 200
 
-    failed = client.post(path + '/fail', headers=headers_, json={'remark': '收不到注册验证码'})
+    failed = client.post(path + '/fail', headers=headers_, json={'remark': '收不到注册验证码', 'screenshots': [failure_screenshot()]})
     assert failed.status_code == 200, failed.text
     assert failed.json()['management_status'] == '废弃'
     assert failed.json()['remark'] == '收不到注册验证码'
@@ -361,7 +372,7 @@ def test_project_email_claim_failure_discards_email_with_remark(client, db, supe
     assert email.remark == '收不到注册验证码'
 
 
-def test_project_email_claim_failure_rejects_blank_remark(client, db, super_admin, normal_user):
+def test_project_email_claim_failure_requires_screenshot(client, db, super_admin, normal_user):
     grant(db, normal_user, 'card_key:view')
     project_id = project(client, super_admin, [normal_user.username])
     db.query(CardKeyProject).filter_by(id=project_id).update({'target_platform': 'TikTok'})
@@ -370,7 +381,7 @@ def test_project_email_claim_failure_rejects_blank_remark(client, db, super_admi
     path = f'/api/card-keys/{project_id}/email'
     headers_ = headers(normal_user)
     assert client.post(path + '/claim', headers=headers_).status_code == 200
-    response = client.post(path + '/fail', headers=headers_, json={'remark': '   '})
+    response = client.post(path + '/fail', headers=headers_, json={'remark': '没有截图的反馈'})
     assert response.status_code == 422
     email = db.query(EmailAccount).filter_by(email='blank-failure@gmail.com').one()
     assert email.management_status == '闲置'
@@ -402,7 +413,7 @@ def test_stale_email_failure_cannot_discard_new_claim(tmp_path):
 
     with StaleSession(bind=engine) as stale:
         try:
-            fail_email(project_id, EmailFailureBody(remark='旧请求'), stale, user)
+            fail_email(project_id, EmailFailureBody.model_validate({'remark': '旧请求', 'screenshots': [failure_screenshot()]}), stale, user)
         except HTTPException as exc:
             assert exc.status_code == 409
         else:
@@ -422,7 +433,7 @@ def test_card_key_search_and_invalid_after_sales_note(client, db, super_admin):
     assert found.status_code == 200
     assert found.json()['total'] == 1
     assert found.json()['items'][0]['content'] == 'supplier-order-abc'
-    invalid = client.post(base + f"/keys/{found.json()['items'][0]['id']}/invalid", headers=headers(super_admin), json={'remark': '兑换失败，已提交上游售后'})
+    invalid = client.post(base + f"/keys/{found.json()['items'][0]['id']}/invalid", headers=headers(super_admin), json={'remark': '兑换失败，已提交上游售后', 'screenshots': [failure_screenshot()]})
     assert invalid.status_code == 200, invalid.text
     assert invalid.json()['status'] == 'invalid'
     assert invalid.json()['remark'] == '兑换失败，已提交上游售后'

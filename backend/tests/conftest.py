@@ -12,6 +12,7 @@ from app.models.device import Device, DeviceLog  # noqa: F401  确保建表
 from app.models.proxy_node import ProxyNode
 from app.models.work_item import WorkItem, WorkItemCategorySettings
 from app.models.card_key import CardKey, CardKeyBatch, CardKeyEmailUsage, CardKeyProject
+from app.models.failure_report import FailureReport
 from app.models.op_account import EmailAccount, EmailAccountRelation, EmailAssetRelation
 from app.models.team import (
     Department, LoginLog, OperationLog, RefreshToken, Role, RolePermission, User, UserRole,
@@ -61,7 +62,7 @@ def clean_tables(db):
     """每个测试后清空业务表，保证用例隔离。"""
     yield
     for model in (
-        CardKeyEmailUsage, CardKey, CardKeyBatch, CardKeyProject,
+        FailureReport, CardKeyEmailUsage, CardKey, CardKeyBatch, CardKeyProject,
         WorkItem,
         WorkItemCategorySettings,
         EmailAssetRelation, EmailAccountRelation, EmailAccount,

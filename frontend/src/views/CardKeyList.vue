@@ -60,7 +60,7 @@
       <crm-table table-id="card-key-records" remote :query="tableQuery" @query-change="handleTableQuery" v-if="selected" v-loading="loading" :data="keys" :max-height="tableHeights['card-key-records']" size="small" empty-text="暂无记录，领取后在这里找回">
         <el-table-column column-key="content" prop="content" filter-type="text" label="卡密 / 链接" min-width="320"><template #default="{ row }"><button v-if="row.content" class="key-content-preview" type="button" aria-label="查看完整卡密" title="点击查看全文，可一键复制" @click="contentRow = row"><code>{{ row.content }}</code></button><span v-else class="muted">领取后可见</span></template></el-table-column>
         <el-table-column column-key="batch_name" prop="batch_name" table-tools-disabled label="批次" min-width="180"><template #default="{ row }"><span class="batch-row-name" :title="row.batch_name || '历史未分批'">{{ row.batch_name || '历史未分批' }}</span><el-tag v-if="row.batch_status && row.batch_status !== 'active'" class="batch-state-tag" size="small" :type="batchStatusType(row.batch_status)">{{ batchStatusLabel(row.batch_status) }}</el-tag><div v-if="row.batch_remark" class="batch-row-remark" :title="row.batch_remark">{{ row.batch_remark }}</div></template></el-table-column>
-        <el-table-column column-key="status" prop="status" filter-type="enum" :filter-options="[{ label: '可领取', value: 'available' }, { label: '待消耗', value: 'claimed' }, { label: '已消耗', value: 'consumed' }, { label: '无效售后', value: 'invalid' }]" label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag><div v-if="row.remark" class="key-remark" :title="row.remark">{{ row.remark }}</div></template></el-table-column>
+        <el-table-column column-key="status" prop="status" filter-type="enum" :filter-options="[{ label: '可领取', value: 'available' }, { label: '待消耗', value: 'claimed' }, { label: '已消耗', value: 'consumed' }, { label: '无效售后', value: 'invalid' }]" label="状态" width="150"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag><el-button v-if="row.failure_report_count" class="failure-report-badge" link type="danger" @click="viewKeyFailures(row)">失败 {{ row.failure_report_count }} · 截图 {{ row.screenshot_count || 0 }}</el-button><div v-if="row.remark" class="key-remark" :title="row.remark">{{ row.remark }}</div></template></el-table-column>
         <el-table-column column-key="claimed_by" filter-type="text" label="领取人" prop="claimed_by" width="130" />
         <el-table-column column-key="claimed_at" prop="claimed_at" filter-type="date" label="领取时间" width="180"><template #default="{ row }">{{ formatDate(row.claimed_at) }}</template></el-table-column>
         <el-table-column column-key="consumed_at" prop="consumed_at" filter-type="date" label="消耗时间" width="180"><template #default="{ row }">{{ formatDate(row.consumed_at) }}</template></el-table-column>
@@ -80,8 +80,11 @@
       <template #footer><el-button @click="contentRow = null">关闭</el-button><el-button type="primary" @click="copy(contentRow.content)">复制完整内容</el-button></template>
     </el-dialog>
     <el-dialog :model-value="!!historyRow" title="卡密流转记录" width="min(800px, 94vw)" @close="historyRow = null">
+      <el-button v-if="historyRow?.failure_report_count" class="history-failure-link" type="danger" plain @click="viewKeyFailures(historyRow)">查看失败记录与售后凭证（{{ historyRow.failure_report_count }}）</el-button>
       <crm-table table-id="card-key-flow-history" :data="historyRow?.history || []" size="small"><el-table-column column-key="action" prop="action" filter-type="text" label="操作" width="85"><template #default="{ row }">{{ { claim: '领取', release: '归还', consume: '消耗', invalid: '无效售后', remark: '更新备注' }[row.action] }}</template></el-table-column><el-table-column column-key="username" filter-type="text" prop="username" label="操作人" /><el-table-column column-key="time" prop="time" filter-type="date" label="时间" width="190"><template #default="{ row }">{{ formatDate(row.time) }}</template></el-table-column><el-table-column column-key="remark" filter-type="text" prop="remark" label="备注" min-width="180" /></crm-table>
     </el-dialog>
+    <FailureReportDialog v-model="failureVisible" :title="failureTarget?.kind === 'email' ? '报告邮箱注册失败' : '报告卡密无效'" :target-label="failureTarget?.label || ''" :busy="failureSaving" :error="failureError" @submit="submitFailure" />
+    <FailureReportHistory v-model="failureHistoryVisible" :source="failureHistorySource" :target-label="failureHistoryLabel" />
     <el-dialog v-model="projectVisible" :title="editing ? '编辑项目' : '新建项目'" width="min(600px, 94vw)">
       <el-form label-width="90px"><el-form-item label="项目名称" required><el-input v-model="projectForm.name" /></el-form-item><el-form-item label="项目备注"><el-input v-model="projectForm.description" type="textarea" :rows="3" placeholder="任务说明、上游联系方式、采购批次与售后说明" /></el-form-item><el-form-item label="目标平台"><el-select v-model="projectForm.target_platform" filterable clearable placeholder="选择目标平台" style="width:100%"><el-option v-for="platform in activePlatforms" :key="platform.id" :label="platform.name" :value="platform.name" /></el-select><div class="form-hint">没有合适的平台？关闭此窗口后点击“平台管理”创建。</div></el-form-item><el-form-item label="协助成员" required><el-select v-model="projectForm.members" multiple filterable style="width:100%" @change="normalizeMembers"><el-option label="全员" value="__all__" /><el-option v-for="member in members" :key="member.username" :label="member.real_name ? `${member.username}（${member.real_name}）` : member.username" :value="member.username" /></el-select></el-form-item><el-form-item label="项目状态"><el-switch v-model="projectForm.is_active" active-text="进行中" inactive-text="已结束" /></el-form-item></el-form>
       <template #footer><el-button @click="projectVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveProject">保存</el-button></template>
@@ -115,6 +118,8 @@ import { useViewportTableHeight } from '@/composables/useViewportTableHeight'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import CardKeyWorkReport from '@/components/CardKeyWorkReport.vue'
+import FailureReportDialog from '@/components/FailureReportDialog.vue'
+import FailureReportHistory from '@/components/FailureReportHistory.vue'
 import { copyText } from '@/utils/clipboard'
 import { updateCardKeyRemark, getCardKeyBatches, updateCardKeyBatch, deleteCardKeyBatch } from '@/api/card_keys'
 import { getCardKeyProjects, getCardKeyMembers, createCardKeyProject, updateCardKeyProject, deleteCardKeyProject, importCardKeys, getCardKeys, claimCardKey, consumeCardKey, releaseCardKey, markCardKeyInvalid, getClaimedEmail, getClaimedEmailTotp, claimEmail, releaseEmail, failEmail, completeEmail, getCardKeyPlatforms, createCardKeyPlatform, updateCardKeyPlatform } from '@/api/card_keys'
@@ -140,6 +145,14 @@ const completeTarget = reactive({ id: null, platform: '' })
 const activePlatforms = computed(() => platforms.value.filter(platform => platform.is_active))
 const consuming = ref(false)
 const historyRow = ref(null)
+const failureVisible = ref(false)
+const failureSaving = ref(false)
+const failureError = ref('')
+const failureTarget = ref(null)
+const failureHistoryVisible = ref(false)
+const failureHistorySource = ref(null)
+const failureHistoryLabel = ref('')
+const viewKeyFailures = row => { failureHistorySource.value = { kind: 'card_key', projectId: selectedId.value, keyId: row.id }; failureHistoryLabel.value = `${selected.value?.name || ''} · ${row.batch_name || '历史未分批'}`; failureHistoryVisible.value = true }
 const contentRow = ref(null)
 const activeWorkspace = ref('records')
 const projectCard = ref(null)
@@ -254,6 +267,7 @@ const refreshTotp = async () => {
 }
 const reloadKeys = () => { filters.page = 1; keys.value = []; total.value = 0; historyRow.value = null; return loadKeys() }
 const changeProject = () => {
+  failureHistoryVisible.value = false
   contentRow.value = null
   selectedBatchId.value = -1
   batches.value = []
@@ -306,13 +320,10 @@ const releaseEmailAction = async () => {
 }
 const failEmailAction = async () => {
   if (emailUpdating.value) return
-  const projectId = selectedId.value
-  let value
-  try {
-    ({ value } = await ElMessageBox.prompt('邮箱无法完成注册时，请填写失败原因；标记后邮箱将进入废弃状态，不再被领取。', '标记邮箱注册失败', { inputType: 'textarea', inputPlaceholder: '例如：邮箱收不到验证码、密码错误、账号已被限制', inputValidator: text => text?.trim() ? true : '请填写失败原因', confirmButtonText: '确认标记失败' }))
-  } catch { return }
-  await runEmailTransition(projectId, () => failEmail(projectId, value))
-  ElMessage.success('邮箱已标记为注册失败并移出可领取池')
+  if (!pendingEmail.value || failureSaving.value) return
+  failureTarget.value = { kind: 'email', projectId: selectedId.value, emailId: pendingEmail.value.id, label: `${selected.value?.name || ''} · ${pendingEmail.value.email}` }
+  failureError.value = ''
+  failureVisible.value = true
 }
 const completeEmailAction = async () => {
   if (emailUpdating.value) return
@@ -422,7 +433,23 @@ const release = async (row) => {
   try { await releaseCardKey(projectId, row.id); await load(); ElMessage.success(inactiveBatch ? '已归还，所属批次继续停止新领取' : '已归还，卡密重新可领取') }
   finally { consuming.value = false }
 }
-const invalid = async (row) => { let value; try { ({ value } = await ElMessageBox.prompt('填写无效原因或上游售后信息', '标记卡密无效', { inputPlaceholder: '例如：兑换失败，已提交供应商售后', inputValidator: value => value?.trim() ? true : '请填写原因', confirmButtonText: '确认标记' })) } catch { return }; await markCardKeyInvalid(selectedId.value, row.id, value); await load(); ElMessage.success('已标记无效') }
+const invalid = row => { if (failureSaving.value) return; failureTarget.value = { kind: 'card_key', projectId: selectedId.value, keyId: row.id, label: `${selected.value?.name || ''} · ${row.batch_name || '历史未分批'}` }; failureError.value = ''; failureVisible.value = true }
+const submitFailure = async ({ remark, screenshots }) => {
+  if (failureSaving.value || !failureTarget.value) return
+  const target = { ...failureTarget.value }
+  failureSaving.value = true
+  failureError.value = ''
+  try {
+    if (target.kind === 'email') {
+      await failEmail(target.projectId, remark, screenshots, target.emailId)
+      if (selectedId.value === target.projectId && pendingEmail.value?.id === target.emailId) { pendingEmail.value = null; totp.value = null }
+    } else await markCardKeyInvalid(target.projectId, target.keyId, remark, screenshots)
+    failureVisible.value = false
+    await load()
+    ElMessage.success(target.kind === 'email' ? '已记录邮箱注册失败和售后凭证' : '已标记卡密无效并保存售后凭证')
+  } catch (error) { const detail = error.response?.data?.detail; failureError.value = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map(item => item.msg || '请检查填写内容').join('；') : '失败记录保存失败，请重试' }
+  finally { failureSaving.value = false }
+}
 const editKeyRemark = async (row) => {
   let value
   try { ({ value } = await ElMessageBox.prompt('记录供应商售后进度、补发情况或其他备注；修改历史会保留。', '卡密备注', { inputValue: row.remark || '', inputType: 'textarea', inputValidator: value => (value || '').length <= 2000 || '备注最多 2000 字' })) } catch { return }
@@ -443,6 +470,8 @@ onBeforeUnmount(() => { if (totpTimer) window.clearInterval(totpTimer) })
 </script>
 
 <style scoped>
+.failure-report-badge { display:block; height:auto; margin-top:5px; font-size:12px; white-space:nowrap; }
+.history-failure-link { margin-bottom:12px; }
 .workspace-tabs { min-width:0; }
 .workspace-tabs :deep(.el-tabs__header) { margin-bottom:12px; }
 .key-content-preview { display:block; width:100%; min-width:0; padding:0; border:0; background:transparent; text-align:left; cursor:pointer; }

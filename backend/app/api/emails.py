@@ -8,7 +8,7 @@ from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import String, cast as sql_cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.op_account import EmailAccount, EmailAccountRelation, EmailAssetRelation, OpAccount
 from app.models.card_key import CardKeyEmailUsage, CardKeyPlatform
+from app.models.failure_report import FailureReport
 from app.models.device import Device
 from app.models.proxy_node import ProxyNode
 from app.models.team import User
@@ -31,6 +32,7 @@ from app.services.op_account_service import parse_email_import_line
 from app.services.sale_validation_service import validate_sale_information
 from app.services.table_query_service import apply_table_query, model_table_fields
 from app.services.totp_service import totp_code
+from app.services.failure_report_store import empty_summary, failure_summaries, image_response, report_metadata
 
 
 router = APIRouter(prefix="/emails", tags=["emails"])
@@ -110,7 +112,7 @@ def save(db: Session) -> None:
         raise HTTPException(status_code=409, detail="邮箱已存在") from None
 
 
-def email_response(email: EmailAccount, count: int=0, db: Session | None = None, platform_registrants: dict[str, str] | None = None) -> EmailAccountResponse:
+def email_response(email: EmailAccount, count: int=0, db: Session | None = None, platform_registrants: dict[str, str] | None = None, failure_summary: dict[str, object] | None = None) -> EmailAccountResponse:
     result = EmailAccountResponse.model_validate(email)
     try:
         result.platform_tags = json.loads(email.platform_tags or "[]")
@@ -118,6 +120,11 @@ def email_response(email: EmailAccount, count: int=0, db: Session | None = None,
         result.platform_tags = []
     result.current_relation_count = count
     result.platform_registrants = platform_registrants or {}
+    summary = failure_summary if failure_summary is not None else (failure_summaries(db, "email", [email.id]).get(email.id) if db else None)
+    summary = summary or empty_summary()
+    result.failure_report_count = int(cast(int, summary["failure_report_count"]))
+    result.screenshot_count = int(cast(int, summary["screenshot_count"]))
+    result.latest_failure_remark = str(summary["latest_failure_remark"])
     if db:
         device = db.get(Device, email.device_id) if email.device_id else None
         node = db.get(ProxyNode, email.node_id) if email.node_id else None
@@ -214,7 +221,8 @@ def list_emails(keyword: str | None = None, management_status: str | None = None
     if email_ids:
         for email_id, platform_name, username in db.query(CardKeyEmailUsage.email_id, CardKeyEmailUsage.platform, CardKeyEmailUsage.username).filter(CardKeyEmailUsage.email_id.in_(email_ids)).order_by(CardKeyEmailUsage.completed_at.desc()).all():
             registrations.setdefault(email_id, {}).setdefault(platform_name, username)
-    return {"total": total, "items": [email_response(email, counts.get(email.id, 0), db, registrations.get(email.id)) for email in emails]}
+    failure_totals = failure_summaries(db, "email", email_ids)
+    return {"total": total, "items": [email_response(email, counts.get(email.id, 0), db, registrations.get(email.id), failure_totals.get(email.id, empty_summary())) for email in emails]}
 
 
 @router.post("", response_model=EmailAccountResponse)
@@ -419,11 +427,27 @@ def get_email_totp(email_id: int, db: Session = Depends(get_db), user: User = De
 @router.delete("/{email_id}", response_model=None)
 def delete_email(email_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("email:manage"))) -> dict[str, object]:
     email = get_email(db, email_id, user)
+    if db.query(FailureReport.id).filter_by(email_id=email_id).first():
+        raise HTTPException(status_code=409, detail="邮箱已有售后记录，请设为废弃以保留历史和截图")
     if db.query(EmailAccountRelation).filter_by(email_id=email_id).first() or db.query(EmailAssetRelation).filter_by(email_id=email_id).first():
         raise HTTPException(status_code=409, detail="邮箱已有绑定历史，请设为废弃以保留追溯记录")
     db.delete(email)
     db.commit()
     return {"deleted": True}
+
+
+@router.get("/{email_id}/failure-reports", response_model=None)
+def email_failure_reports(email_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("email:view"))) -> JSONResponse:
+    get_email(db, email_id, user)
+    rows = db.query(FailureReport).filter_by(email_id=email_id).order_by(FailureReport.created_at.desc(), FailureReport.id.desc()).all()
+    base = f"/emails/{email_id}/failure-reports"
+    return JSONResponse([report_metadata(row, base) for row in rows], headers={"Cache-Control": "no-store"})
+
+
+@router.get("/{email_id}/failure-reports/{report_id}/screenshots/{index}", response_model=None)
+def email_failure_image(email_id: int, report_id: int, index: int, db: Session = Depends(get_db), user: User = Depends(require_permission("email:view"))) -> Response:
+    get_email(db, email_id, user)
+    return image_response(db, report_id, index, email_id=email_id)
 
 
 @router.get("/{email_id}/asset-history", response_model=None)

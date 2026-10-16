@@ -25,6 +25,7 @@ from app.models.op_account import OpAccount, OpCollectTask, OpAuditLog, EmailAcc
 from app.models.team import User, Department, Role, RolePermission, UserRole, RefreshToken, OperationToken, LoginLog, OperationLog  # noqa: F401
 from app.models.work_item import WorkItem, WorkItemCategorySettings  # noqa: F401
 from app.models.card_key import CardKeyBatch, CardKeyEmailUsage, CardKeyPlatform, CardKeyProject, CardKey  # noqa: F401
+from app.models.failure_report import FailureReport  # noqa: F401
 from app.models.device import Device, DeviceLog  # noqa: F401
 from app.models.proxy_node import ProxyNode  # noqa: F401
 from app.services.encryption_service import EncryptedType

@@ -1,4 +1,5 @@
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from typing import Any, Literal, TypedDict, cast
 
 
@@ -16,11 +17,14 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.database import get_db
 from app.models.card_key import CardKey, CardKeyBatch, CardKeyEmailUsage, CardKeyPlatform, CardKeyProject
+from app.models.failure_report import FailureReport
 from app.models.op_account import EmailAccount, EmailAccountRelation, OpAccount
 from app.models.team import User
 from app.services.auth_service import require_permission, _get_user_permissions
 from app.services.table_query_service import apply_table_query, apply_table_rows, model_table_fields, parse_table_filters
 from app.services.totp_service import totp_code
+from app.services.failure_report_service import FailureBody
+from app.services.failure_report_store import create_report, empty_summary, failure_summaries, image_response, report_metadata
 
 router = APIRouter(prefix="/card-keys", tags=["Card keys"])
 
@@ -137,7 +141,7 @@ def _platform_json(platform: CardKeyPlatform) -> dict[str, object]:
     return {"id": platform.id, "name": platform.name, "is_active": platform.is_active}
 
 
-def _key_json(key: CardKey) -> dict[str, object]:
+def _key_json(key: CardKey, summary: dict[str, object] | None = None) -> dict[str, object]:
     batch = key.batch
     return {"id": key.id, "content": key.content, "status": key.status,
             "batch_id": key.batch_id, "batch_no": batch.batch_no if batch else "",
@@ -145,7 +149,13 @@ def _key_json(key: CardKey) -> dict[str, object]:
             "batch_status": batch.status if batch else "active", "batch_remark": batch.remark or "" if batch else "",
             "batch_pause_reason": batch.pause_reason or "" if batch else "",
             "claimed_by": key.claimed_by, "claimed_at": _time_json(key.claimed_at),
-            "consumed_at": _time_json(key.consumed_at), "history": key.history or [], "remark": key.remark}
+            "consumed_at": _time_json(key.consumed_at), "history": key.history or [], "remark": key.remark,
+            **(summary or empty_summary())}
+
+
+def _key_rows_json(rows: list[CardKey], db: Session) -> list[dict[str, object]]:
+    summaries = failure_summaries(db, "key", [key.id for key in rows])
+    return [_key_json(key, summaries.get(key.id)) for key in rows]
 
 
 def _batch_json(batch: CardKeyBatch | None, project_id: int, db: Session, owner: str | None = None) -> dict[str, object]:
@@ -283,7 +293,7 @@ def delete_project(project_id: int, db: Session = Depends(get_db), _: User = Dep
         raise HTTPException(404, "项目不存在")
     # Take the SQLite write transaction before checking history so a concurrent claim is either observed or excluded.
     db.execute(update(CardKeyProject).where(CardKeyProject.id == project_id).values(is_active=False))
-    if db.query(CardKey).filter(CardKey.project_id == project_id, ~_untouched_key()).first() or db.query(CardKeyEmailUsage).filter_by(project_id=project_id).first():
+    if db.query(CardKey).filter(CardKey.project_id == project_id, ~_untouched_key()).first() or db.query(CardKeyEmailUsage).filter_by(project_id=project_id).first() or db.query(FailureReport.id).filter_by(project_id=project_id).first():
         db.rollback()
         raise HTTPException(409, "项目已有领取或完成记录，请结束项目以保留历史")
     if project.target_platform and db.query(EmailAccount).filter(EmailAccount.claimed_platform == project.target_platform, EmailAccount.claimed_by.isnot(None)).first():
@@ -449,10 +459,10 @@ def list_keys(project_id: int, page: int = Query(1, ge=1), page_size: int = Quer
         query = apply_table_query(query, model_table_fields(CardKey, names=[name for name in fields if name != "content"]),
                                   sort_by, sort_order, filters, stable_column=CardKey.id,
                                   default_sort=(CardKey.id, "desc"))
-        return {"items": [_key_json(key) for key in query.offset((page - 1) * page_size).limit(page_size)],
+        return {"items": _key_rows_json(query.offset((page - 1) * page_size).limit(page_size).all(), db),
                 "total": query.count()}
     # ponytail: encrypted content must be decrypted before matching; add a search index if projects become large.
-    rows = [_key_json(key) for key in query.order_by(CardKey.id.desc()).all()]
+    rows = _key_rows_json(query.order_by(CardKey.id.desc()).all(), db)
     if keyword.strip():
         needle = keyword.strip().casefold()
         rows = [key for key in rows if needle in (str(key.get("content") or "")).casefold()]
@@ -571,8 +581,8 @@ def release_key(project_id: int, key_id: int, db: Session = Depends(get_db), use
     return {"id": key.id, "status": "available"}
 
 
-class InvalidKeyBody(BaseModel):
-    remark: str = Field(min_length=1, max_length=2000)
+class InvalidKeyBody(FailureBody):
+    pass
 
 
 @router.post("/{project_id}/keys/{key_id}/invalid", response_model=None)
@@ -582,22 +592,47 @@ def mark_key_invalid(project_id: int, key_id: int, body: InvalidKeyBody, db: Ses
         raise HTTPException(404, "卡密不存在")
     if not _manager(user, db) and (key.status != "claimed" or key.claimed_by != user.username):
         raise HTTPException(403, "只能报告自己领取的卡密")
-    if not body.remark.strip():
-        raise HTTPException(422, "请填写无效原因")
     if key.status == "invalid":
-        return _key_json(key)
+        return _key_json(key, failure_summaries(db, "key", [key.id]).get(key.id))
     if key.status not in {"available", "claimed"}:
         raise HTTPException(409, "已消耗卡密不能标记无效")
     now = datetime.utcnow()
+    project = db.get(CardKeyProject, project_id)
+    if project is None:
+        raise HTTPException(404, "项目不存在")
+    report = create_report(db, project, username=user.username, remark=body.remark.strip(), screenshots=body.verified_screenshots, key_id=key.id, now=now)
     history = _history(key, "invalid", user.username, now)
     history[-1]["remark"] = body.remark.strip()
+    history[-1]["failure_report_id"] = report.id
+    history[-1]["image_count"] = report.image_count
     changed = db.execute(update(CardKey).where(CardKey.id == key.id, CardKey.status == key.status, CardKey.history == (key.history or [])).values(status="invalid", pending_owner=None, remark=body.remark.strip(), history=history)).rowcount
     if changed != 1:
         db.rollback()
         raise HTTPException(409, "卡密状态已变化，请刷新后重试")
     db.commit()
     db.refresh(key)
-    return _key_json(key)
+    return _key_json(key, failure_summaries(db, "key", [key.id]).get(key.id))
+
+
+def _failure_key(project_id: int, key_id: int, db: Session, user: User) -> CardKey:
+    key = db.query(CardKey).filter_by(id=key_id, project_id=project_id).first()
+    if not key or (not _manager(user, db) and key.claimed_by != user.username):
+        raise HTTPException(404, "卡密不存在或无权查看售后记录")
+    return key
+
+
+@router.get("/{project_id}/keys/{key_id}/failure-reports", response_model=None)
+def key_failure_reports(project_id: int, key_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> JSONResponse:
+    _failure_key(project_id, key_id, db, user)
+    rows = db.query(FailureReport).filter_by(project_id=project_id, key_id=key_id).order_by(FailureReport.created_at.desc(), FailureReport.id.desc()).all()
+    base = f"/card-keys/{project_id}/keys/{key_id}/failure-reports"
+    return JSONResponse([report_metadata(row, base) for row in rows], headers={"Cache-Control": "no-store"})
+
+
+@router.get("/{project_id}/keys/{key_id}/failure-reports/{report_id}/screenshots/{index}", response_model=None)
+def key_failure_image(project_id: int, key_id: int, report_id: int, index: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> Response:
+    _failure_key(project_id, key_id, db, user)
+    return image_response(db, report_id, index, key_id=key_id)
 
 
 class KeyRemarkBody(BaseModel):
@@ -732,8 +767,8 @@ def release_email(project_id: int, db: Session = Depends(get_db), user: User = D
     return {"released": True}
 
 
-class EmailFailureBody(BaseModel):
-    remark: str = Field(min_length=1, max_length=2000)
+class EmailFailureBody(FailureBody):
+    expected_email_id: int | None = Field(default=None, gt=0)
 
 
 @router.post("/{project_id}/email/fail", response_model=None)
@@ -750,9 +785,9 @@ def fail_email(project_id: int, body: EmailFailureBody, db: Session = Depends(ge
     ).first()
     if not email:
         raise HTTPException(404, "没有找到你领取的邮箱")
+    if body.expected_email_id is not None and body.expected_email_id != email.id:
+        raise HTTPException(409, "当前领取邮箱已变化，请刷新后重新提交")
     remark = body.remark.strip()
-    if not remark:
-        raise HTTPException(422, "请填写失败原因")
     changed = db.execute(update(EmailAccount).where(
         EmailAccount.id == email.id,
         EmailAccount.management_status == email.management_status,
@@ -767,9 +802,11 @@ def fail_email(project_id: int, body: EmailFailureBody, db: Session = Depends(ge
     if changed != 1:
         db.rollback()
         raise HTTPException(409, "邮箱领取状态已变化，请刷新后重试")
+    report = create_report(db, project, username=user.username, remark=remark, screenshots=body.verified_screenshots, email_id=email.id)
     db.commit()
     db.refresh(email)
-    return {"failed": True, "email_id": email.id, "management_status": email.management_status, "remark": email.remark}
+    return {"failed": True, "email_id": email.id, "management_status": email.management_status, "remark": email.remark,
+            "failure_report_id": report.id, **failure_summaries(db, "email", [email.id]).get(email.id, empty_summary())}
 
 
 class CompleteEmailBody(BaseModel):
