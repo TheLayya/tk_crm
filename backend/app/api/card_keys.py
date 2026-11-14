@@ -182,7 +182,7 @@ def _email_json(email: EmailAccount) -> dict[str, object]:
     except (TypeError, ValueError):
         platform_tags = []
     return {"id": email.id, "email": email.email, "password": email.password,
-            "recovery_email": email.recovery_email, "totp_secret": email.totp_secret,
+            "recovery_email": email.recovery_email, "totp_secret": email.totp_secret, "ck": email.ck,
             "platform_tags": platform_tags,
             "claimed_by": email.claimed_by, "claimed_at": _time_json(email.claimed_at),
             "claimed_platform": email.claimed_platform}
@@ -839,6 +839,7 @@ class CompleteEmailBody(BaseModel):
     account: str | None = Field(default=None, max_length=255)
     password: str | None = Field(default=None, max_length=255)
     totp_secret: str | None = Field(default=None, max_length=255)
+    ck: str | None = None
 
 
 @router.post("/{project_id}/email/complete", response_model=None)
@@ -866,11 +867,18 @@ def complete_email(project_id: int, body: CompleteEmailBody, db: Session = Depen
     tags = cast(list[str], _email_json(email)["platform_tags"])
     if platform.casefold() not in {tag.casefold() for tag in tags}:
         tags.append(platform)
+    values: dict[str, object] = {
+        "platform_tags": json.dumps(tags, ensure_ascii=False), "claimed_by": None, "claimed_at": None,
+        "claimed_platform": None, "operator": user.username,
+    }
+    if body.ck is not None:
+        # None/omitted keeps the current CK; an explicit empty value clears it.
+        values["ck"] = body.ck.strip() or None
     changed = db.execute(update(EmailAccount).where(
         EmailAccount.id == email.id, EmailAccount.claimed_by == user.username,
         EmailAccount.claimed_platform == platform, EmailAccount.claimed_at == email.claimed_at,
         EmailAccount.platform_tags == email.platform_tags,
-    ).values(platform_tags=json.dumps(tags, ensure_ascii=False), claimed_by=None, claimed_at=None, claimed_platform=None, operator=user.username)).rowcount
+    ).values(**values)).rowcount
     if changed != 1:
         db.rollback()
         raise HTTPException(409, "邮箱领取状态已变化，请刷新后重试")

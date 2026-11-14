@@ -169,13 +169,13 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.24'
+const APP_VERSION = '1.1.25'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
     date: '2026-11-14',
-    items: ['邮箱新增独立 CK 栏目并支持 Flow 加号提取', '管理员可批量控制邮箱是否允许卡密领取', 'Gmail 检测移除，项目历史支持安全归档']
+    items: ['卡密注册完成支持可选 CK 回填', '邮箱新增独立 CK 栏目并支持 Flow 加号提取', '管理员可批量控制邮箱是否允许卡密领取']
   },
   {
     version: '1.1.22',

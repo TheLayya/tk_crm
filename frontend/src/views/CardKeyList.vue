@@ -96,7 +96,7 @@
       <crm-table table-id="card-key-platforms" :data="platforms" size="small" empty-text="还没有平台配置"><el-table-column column-key="name" filter-type="text" prop="name" label="平台" /><el-table-column column-key="is_active" prop="is_active" filter-type="enum" :filter-options="[{ label: '启用', value: true }, { label: '禁用', value: false }]" label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? '启用' : '停用' }}</el-tag></template></el-table-column><el-table-column column-key="actions" table-tools-disabled fixed="right" label="操作" width="180"><template #default="{ row }"><el-button link type="primary" @click="editPlatform(row)">编辑</el-button><el-button link :type="row.is_active ? 'warning' : 'success'" @click="togglePlatform(row)">{{ row.is_active ? '停用' : '启用' }}</el-button></template></el-table-column></crm-table>
       <template #footer><el-button @click="platformVisible=false">关闭</el-button></template>
     </el-dialog>
-    <el-dialog v-model="completeVisible" title="注册完成并创建运营账号" width="min(520px, 94vw)"><el-form label-width="100px"><el-form-item label="注册邮箱"><span>{{ pendingEmail?.email }}</span></el-form-item><el-form-item label="平台账号" required><el-input v-model="completeForm.account" placeholder="填写刚注册的平台用户名" /></el-form-item><el-form-item label="账号密码"><el-input v-model="completeForm.password" type="password" show-password /></el-form-item><el-form-item label="账号 2FA"><el-input v-model="completeForm.totp_secret" placeholder="没有可留空" /></el-form-item><p class="form-hint">确认后自动创建运营账号、关联当前邮箱、添加平台标签并释放邮箱。</p></el-form><template #footer><el-button @click="completeVisible=false">取消</el-button><el-button type="primary" :loading="completing" @click="submitCompleteEmail">确认完成</el-button></template></el-dialog>
+    <el-dialog v-model="completeVisible" :title="completeTarget.createsAccount ? '注册完成并创建运营账号' : '注册完成'" width="min(560px, 94vw)"><el-form label-width="100px"><el-form-item label="注册邮箱"><span>{{ pendingEmail?.email }}</span></el-form-item><el-form-item v-if="completeTarget.createsAccount" label="平台账号" required><el-input v-model="completeForm.account" placeholder="填写刚注册的平台用户名" /></el-form-item><el-form-item v-if="completeTarget.createsAccount" label="账号密码"><el-input v-model="completeForm.password" type="password" show-password /></el-form-item><el-form-item v-if="completeTarget.createsAccount" label="账号 2FA"><el-input v-model="completeForm.totp_secret" placeholder="没有可留空" /></el-form-item><el-form-item label="CK (Cookie)"><el-input v-model="completeForm.ck" type="textarea" :rows="4" placeholder="可粘贴 Cookie JSON 或 Cookie Header；留空保留邮箱已有 CK，填写后随注册完成保存" /></el-form-item><p class="form-hint">{{ completeTarget.createsAccount ? '确认后自动创建运营账号、关联当前邮箱、添加平台标签并释放邮箱。' : '确认后添加平台标签并释放邮箱，不创建运营账号。' }} CK 留空保留原值，填写后覆盖；如需清空请在邮箱管理中编辑。</p></el-form><template #footer><el-button @click="completeVisible=false">取消</el-button><el-button type="primary" :loading="completing" @click="submitCompleteEmail">确认完成</el-button></template></el-dialog>
       <el-dialog v-model="importVisible" title="批量导入卡密" width="min(680px, 94vw)" :close-on-click-modal="!importing" :close-on-press-escape="!importing" :show-close="!importing"><p>导入项目：<strong>{{ importTarget.name }}</strong></p><el-form label-width="80px" :disabled="importing"><el-form-item label="批次名称"><el-input v-model="importBatch.name" maxlength="200" placeholder="例如 10月15日 · 供应商 A；留空自动生成" /></el-form-item><el-form-item label="批次备注"><el-input v-model="importBatch.remark" type="textarea" :rows="2" maxlength="2000" show-word-limit placeholder="供应商、采购日期、有效期、使用要求或售后联系方式" /></el-form-item></el-form><p class="hint">每次导入建立一个批次，一行一份；重复内容自动跳过并保留原批次。</p><el-input v-model="importText" :disabled="importing" type="textarea" :rows="10" placeholder="每行粘贴一份卡密或链接" /><template #footer><el-button :disabled="importing" @click="importVisible=false">取消</el-button><el-button type="primary" :loading="importing" @click="saveImport">导入并建立批次</el-button></template></el-dialog>
     <el-dialog v-model="batchVisible" :title="`批次管理 · ${batchTarget.name}`" width="min(1040px, 96vw)" :close-on-click-modal="!batchSaving" :close-on-press-escape="!batchSaving" :show-close="!batchSaving">
       <div class="batch-manager-toolbar"><span class="hint">异常批次先暂停，处理后可恢复；删除时有流转记录的批次会归档保留。</span><el-checkbox v-model="showArchivedBatches" :disabled="batchSaving">显示归档批次</el-checkbox></div>
@@ -142,8 +142,8 @@ let totpTimer = null
 const claimingEmail = ref(false)
 const emailUpdating = ref(false)
 const platforms = ref([]); const platformVisible = ref(false); const platformSaving = ref(false); const platformDraft = reactive({ id: null, name: '' })
-const completeVisible = ref(false); const completing = ref(false); const completeForm = reactive({ account: '', password: '', totp_secret: '' })
-const completeTarget = reactive({ id: null, platform: '' })
+const completeVisible = ref(false); const completing = ref(false); const completeForm = reactive({ account: '', password: '', totp_secret: '', ck: '' })
+const completeTarget = reactive({ id: null, platform: '', createsAccount: false })
 const activePlatforms = computed(() => platforms.value.filter(platform => platform.is_active))
 const consuming = ref(false)
 const historyRow = ref(null)
@@ -341,15 +341,26 @@ const completeEmailAction = async () => {
   if (emailUpdating.value) return
   const projectId = selectedId.value
   const platform = selected.value.target_platform
-  if (!['tiktok', 'youtube', 'instagram', 'facebook'].includes(platform.toLowerCase())) {
-    try { await ElMessageBox.confirm('确认已注册完成？将添加平台标签并释放邮箱。', '注册完成', { type: 'warning' }) } catch { return }
-    await runEmailTransition(projectId, () => completeEmail(projectId, { platform })); ElMessage.success('已标记注册完成并释放邮箱'); return
-  }
-  if (!auth.hasPermission('op_account:create')) return ElMessage.warning('请联系管理员授予创建运营账号权限')
-  Object.assign(completeTarget, { id: projectId, platform })
-  Object.assign(completeForm, { account: '', password: '', totp_secret: '' }); completeVisible.value = true
+  const createsAccount = ['tiktok', 'youtube', 'instagram', 'facebook'].includes(platform.toLowerCase())
+  if (createsAccount && !auth.hasPermission('op_account:create')) return ElMessage.warning('请联系管理员授予创建运营账号权限')
+  Object.assign(completeTarget, { id: projectId, platform, createsAccount })
+  Object.assign(completeForm, { account: '', password: '', totp_secret: '', ck: '' })
+  completeVisible.value = true
 }
-const submitCompleteEmail = async () => { if (emailUpdating.value) return; if (!completeForm.account.trim()) return ElMessage.warning('请填写平台账号'); completing.value = true; try { const result = await runEmailTransition(completeTarget.id, () => completeEmail(completeTarget.id, { platform: completeTarget.platform, ...completeForm })); completeVisible.value = false; ElMessage.success(`已创建运营账号 ${result.op_account}，邮箱已关联并释放`) } finally { completing.value = false } }
+const submitCompleteEmail = async () => {
+  if (emailUpdating.value) return
+  if (completeTarget.createsAccount && !completeForm.account.trim()) return ElMessage.warning('请填写平台账号')
+  completing.value = true
+  try {
+    const data = { platform: completeTarget.platform }
+    if (completeForm.ck.trim()) data.ck = completeForm.ck
+    if (completeTarget.createsAccount) Object.assign(data, { account: completeForm.account, password: completeForm.password, totp_secret: completeForm.totp_secret })
+    const result = await runEmailTransition(completeTarget.id, () => completeEmail(completeTarget.id, data))
+    completeVisible.value = false
+    const message = completeTarget.createsAccount ? `已创建运营账号 ${result.op_account}，邮箱已关联并释放` : '已标记注册完成并释放邮箱'
+    ElMessage.success(data.ck ? `${message}，CK 已回填` : message)
+  } finally { completing.value = false }
+}
 const openImport = () => { if (!selected.value) return; Object.assign(importTarget, { id: selected.value.id, name: selected.value.name }); Object.assign(importBatch, { name: '', remark: '' }); importText.value = ''; importVisible.value = true }
 const saveImport = async () => {
   if (importing.value) return

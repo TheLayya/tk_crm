@@ -898,3 +898,99 @@ def test_card_key_email_claim_requires_explicit_admin_switch(client, db, super_a
     claimed = client.post(base + '/email/claim', headers=headers(normal_user))
     assert claimed.status_code == 200, claimed.text
     assert claimed.json()['email'] == 'default-disabled@gmail.com'
+
+
+def test_complete_email_backfills_ck_for_unsupported_platform(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    project = client.post('/api/card-keys', headers=headers(super_admin), json={
+        'name': '自定义平台完成', 'members': [normal_user.username], 'target_platform': 'CustomFlow'})
+    project_id = project.json()['id']
+    email = EmailAccount(email='custom-ck@example.invalid', password='secret', allow_card_key_claim=True)
+    db.add(email)
+    db.commit()
+    email_id = email.id
+    member_headers = headers(normal_user)
+    assert client.post(f'/api/card-keys/{project_id}/email/claim', headers=member_headers).status_code == 200
+    ck = 'Cookie: __Secure-1PSID=fixture-psid; SID=fixture-sid; OSID=fixture-osid'
+    response = client.post(f'/api/card-keys/{project_id}/email/complete', headers=member_headers,
+                           json={'platform': 'CustomFlow', 'ck': ck})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['ck'] == ck
+    assert body['op_account_id'] is None
+    assert body['platform_tags'] == ['CustomFlow']
+    assert body['claimed_by'] is None
+    db.expire_all()
+    stored = db.get(EmailAccount, email_id)
+    assert stored.ck == ck
+    raw = db.execute(text('SELECT ck FROM email_accounts WHERE id=:id'), {'id': email_id}).scalar_one()
+    assert raw != ck and ck not in raw
+
+
+def test_complete_email_backfills_ck_and_creates_op_account(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view', 'op_account:create')
+    project = client.post('/api/card-keys', headers=headers(super_admin), json={
+        'name': '支持平台完成', 'members': [normal_user.username], 'target_platform': 'TikTok'})
+    project_id = project.json()['id']
+    email = EmailAccount(email='supported-ck@example.invalid', allow_card_key_claim=True)
+    db.add(email)
+    db.commit()
+    email_id = email.id
+    member_headers = headers(normal_user)
+    assert client.post(f'/api/card-keys/{project_id}/email/claim', headers=member_headers).status_code == 200
+    ck = 'Cookie: __Secure-1PSID=fixture-psid; SID=fixture-sid; OSID=fixture-osid'
+    response = client.post(f'/api/card-keys/{project_id}/email/complete', headers=member_headers,
+                           json={'platform': 'TikTok', 'account': 'new-tiktok-user',
+                                 'password': 'account-password', 'ck': ck})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['ck'] == ck and body['op_account'] == 'new-tiktok-user'
+    db.expire_all()
+    assert db.get(EmailAccount, email_id).ck == ck
+    assert db.query(OpAccount).filter_by(platform='tiktok', account='new-tiktok-user').count() == 1
+    assert db.query(EmailAccountRelation).filter_by(email_id=email_id).count() == 1
+
+
+def test_complete_email_ck_none_preserves_and_empty_clears(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    project = client.post('/api/card-keys', headers=headers(super_admin), json={
+        'name': 'CK 保留清空', 'members': [normal_user.username], 'target_platform': 'CustomFlow'})
+    project_id = project.json()['id']
+    keep = EmailAccount(email='keep-ck@example.invalid', ck='existing-ck', allow_card_key_claim=True)
+    clear = EmailAccount(email='clear-ck@example.invalid', ck='clear-me', allow_card_key_claim=True)
+    db.add_all([keep, clear])
+    db.commit()
+    keep_id, clear_id = keep.id, clear.id
+    member_headers = headers(normal_user)
+    path = f'/api/card-keys/{project_id}/email'
+    assert client.post(path + '/claim', headers=member_headers).json()['id'] == keep_id
+    preserved = client.post(path + '/complete', headers=member_headers, json={'platform': 'CustomFlow'})
+    assert preserved.status_code == 200, preserved.text
+    assert preserved.json()['ck'] == 'existing-ck'
+    assert client.post(path + '/claim', headers=member_headers).json()['id'] == clear_id
+    cleared = client.post(path + '/complete', headers=member_headers, json={'platform': 'CustomFlow', 'ck': ''})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()['ck'] is None
+    db.expire_all()
+    assert db.get(EmailAccount, keep_id).ck == 'existing-ck'
+    assert db.get(EmailAccount, clear_id).ck is None
+
+
+def test_complete_email_supported_platform_requires_op_account_permission(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    project = client.post('/api/card-keys', headers=headers(super_admin), json={
+        'name': '无建号权限', 'members': [normal_user.username], 'target_platform': 'TikTok'})
+    project_id = project.json()['id']
+    email = EmailAccount(email='no-account-permission@example.invalid', allow_card_key_claim=True)
+    db.add(email)
+    db.commit()
+    email_id = email.id
+    member_headers = headers(normal_user)
+    assert client.post(f'/api/card-keys/{project_id}/email/claim', headers=member_headers).status_code == 200
+    response = client.post(f'/api/card-keys/{project_id}/email/complete', headers=member_headers,
+                           json={'platform': 'TikTok', 'account': 'should-not-create', 'ck': 'fixture-cookie'})
+    assert response.status_code == 403
+    db.expire_all()
+    stored = db.get(EmailAccount, email_id)
+    assert stored.claimed_by == normal_user.username and stored.ck is None
+    assert db.query(OpAccount).filter_by(account='should-not-create').count() == 0
