@@ -1,14 +1,12 @@
 {
-  "version": "1.1.24",
-  "date": "2026-11-14",
-  "changes": [
-    "邮箱新增独立 CK Cookie 栏目，支持 Flow 加号提取与复制",
-    "管理员可批量控制邮箱是否允许卡密项目领取，默认关闭",
-    "卡密项目领取仅使用明确允许的闲置邮箱，项目历史支持归档删除",
-    "移除 Gmail 检测能力并保留历史数据库列兼容"
-  ],
-  "source_commit": "b5890034235a019daf763592c6012456437c91be",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.24/release-v1.1.24.tar.gz",
-  "sha256": "6a7a43440955191b9ed17e79bae964f857fd6c948e5e6c9b123f551e5658e6d6",
-  "server_source_commit": "b5890034235a019daf763592c6012456437c91be"
+    "version":  "1.1.25",
+    "date":  "2026-11-14",
+    "changes":  [
+                    "卡密注册完成支持可选 CK 回填，留空保留原值",
+                    "所有目标平台注册完成流程均可回填 CK，支持平台仍按权限创建运营账号"
+                ],
+    "source_commit":  "ee9c34d5a148cce04513a9673c79fcbd8808710d",
+    "package_url":  "https://github.com/TheLayya/tk_crm/releases/download/v1.1.25/release-v1.1.25.tar.gz",
+    "sha256":  "bded43becda282c2c9beb72c5e35ace0e90d0099f34f34e3861a7dbc9ff5a255",
+    "server_source_commit":  "ee9c34d5a148cce04513a9673c79fcbd8808710d"
 }
