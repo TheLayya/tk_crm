@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Dict, List, Literal, Optional
-from pydantic import ValidationInfo, BaseModel, Field, PositiveInt, StringConstraints, field_validator
+from pydantic import ValidationInfo, BaseModel, ConfigDict, Field, PositiveInt, StringConstraints, field_validator
 
 
 class OpAccountCreate(BaseModel):
@@ -166,9 +166,6 @@ class OpAccountResponse(BaseModel):
     last_attempt_at: Optional[datetime] = None
     next_attempt_at: Optional[datetime] = None
     collect_retry_count: int = 0
-    gmail_check_status: Optional[str] = None
-    gmail_check_raw_status: Optional[str] = None
-    gmail_checked_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -181,6 +178,7 @@ class EmailAccountCreate(BaseModel):
     password: Optional[str] = None
     recovery_email: Optional[str] = None
     totp_secret: Optional[str] = None
+    ck: Optional[str] = None
     account_created_at: Optional[datetime] = None
     account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
     country: Optional[str] = None
@@ -205,6 +203,7 @@ class EmailAccountUpdate(BaseModel):
     password: Optional[str] = None
     recovery_email: Optional[str] = None
     totp_secret: Optional[str] = None
+    ck: Optional[str] = None
     account_created_at: Optional[datetime] = None
     account_created_year: Optional[int] = Field(default=None, ge=1, le=9999)
     country: Optional[str] = None
@@ -229,6 +228,7 @@ class EmailAccountResponse(BaseModel):
     password: Optional[str] = None
     recovery_email: Optional[str] = None
     totp_secret: Optional[str] = None
+    ck: Optional[str] = None
     account_created_at: Optional[datetime] = None
     account_created_year: Optional[int] = None
     country: Optional[str] = None
@@ -237,6 +237,7 @@ class EmailAccountResponse(BaseModel):
     claimed_by: Optional[str] = None
     claimed_at: Optional[datetime] = None
     claimed_platform: Optional[str] = None
+    allow_card_key_claim: bool = False
     device_id: Optional[int] = None
     node_id: Optional[int] = None
     device_name: Optional[str] = None
@@ -249,9 +250,6 @@ class EmailAccountResponse(BaseModel):
     sale_date: Optional[date] = None
     sellers: List[str] = []
     management_status: str
-    gmail_check_status: Optional[str] = None
-    gmail_check_raw_status: Optional[str] = None
-    gmail_checked_at: Optional[datetime] = None
     registrant: Optional[str] = None
     operator: Optional[str] = None
     remark: Optional[str] = None
@@ -296,6 +294,13 @@ class EmailImportRequest(BaseModel):
     purchase_price: Decimal = Field(ge=0)
     import_format: Literal["auto", "credentials_3", "credentials_4", "country_4", "country_5", "full_6"] = "auto"
     delimiter: Literal["auto", "----", "|", ":", ",", "，", "\t"] = "auto"
+
+
+class EmailBatchClaimAvailabilityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email_ids: list[Annotated[int, Field(strict=True, gt=0)]] = Field(min_length=1, max_length=500)
+    allow_card_key_claim: bool
 
 
 class EmailBatchSaleRequest(BaseModel):
@@ -352,11 +357,6 @@ class BatchStatusUpdate(BaseModel):
     sale_price: Optional[Decimal] = None
     sale_date: Optional[date] = None
     sellers: Optional[List[str]] = None  # 出售人 username 列表
-
-
-class GmailCheckRequest(BaseModel):
-    account_ids: List[PositiveInt] = Field(min_length=1, max_length=50)
-    consent: Literal[True]
 
 
 class BatchAssignOperator(BaseModel):

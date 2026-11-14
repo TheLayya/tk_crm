@@ -108,7 +108,12 @@ def test_batch_delete_unused_and_archive_used_keys(client, db, super_admin, norm
     assert client.get(base + f'/keys?batch_id={used}', headers=admin_headers).json()['total'] == 2
     assert client.post(base + f'/claim?batch_id={used}', headers=member_headers).status_code == 409
     assert client.put(base + f'/batches/{used}', headers=admin_headers, json={'status': 'active'}).status_code == 409
-    assert client.delete(base, headers=admin_headers).status_code == 409
+    project_result = client.delete(base, headers=admin_headers).json()
+    assert project_result['deleted'] is False and project_result['archived'] is True
+    assert db.get(CardKeyProject, project_id).archived_at is not None
+    assert client.get('/api/card-keys', headers=admin_headers).json() == []
+    listed = client.get('/api/card-keys?include_archived=true', headers=admin_headers).json()
+    assert listed[0]['archived'] is True and listed[0]['archived_by'] == 'root'
 
 
 def test_batch_legacy_unbatched_and_member_scope(client, db, super_admin, normal_user, other_user):
@@ -199,11 +204,11 @@ def test_delete_and_claim_preserve_flow_history(tmp_path, scope, claim_first):
             return super().execute(statement, *args, **kwargs)
 
     with RacingSession(bind=engine) as stale:
-        if claim_first and scope == 'batch':
+        if claim_first:
             assert remove(stale)['archived'] is True
         else:
             with pytest.raises(HTTPException) as exc:
-                remove(stale) if claim_first else claim_key(project_id, stale, user)
+                claim_key(project_id, stale, user)
             assert exc.value.status_code == 409
     with sessions() as session:
         if claim_first:
@@ -211,6 +216,8 @@ def test_delete_and_claim_preserve_flow_history(tmp_path, scope, claim_first):
             assert key.status == 'claimed'
             assert [event['action'] for event in key.history] == ['claim']
             assert session.get(CardKeyBatch, batch_id).status == ('archived' if scope == 'batch' else 'active')
+            if scope == 'project':
+                assert session.get(CardKeyProject, project_id).archived_at is not None
         else:
             assert session.query(CardKey).count() == 0
             assert session.get(CardKeyBatch, batch_id) is None
@@ -280,9 +287,7 @@ def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_
     db.add_all([
         EmailAccount(email='registered@gmail.com', platform_tags='["tiktok"]'),
         EmailAccount(email='locked@gmail.com', management_status='锁定'),
-        EmailAccount(email='available@gmail.com', password='secret', totp_secret='TESTKEY', gmail_check_status='正常'),
-        EmailAccount(email='unchecked@gmail.com', gmail_check_status=None),
-        EmailAccount(email='blocked@gmail.com', gmail_check_status='封禁'),
+        EmailAccount(email='available@gmail.com', password='secret', totp_secret='TESTKEY', allow_card_key_claim=True),
     ])
     db.commit()
     path = f'/api/card-keys/{project_id}/email'
@@ -334,25 +339,23 @@ def test_project_email_claim_complete_and_reuse(client, db, super_admin, normal_
     assert db.query(EmailAccount).filter_by(email='available@gmail.com').one().platform_tags == '["TikTok"]'
 
 
-def test_project_email_claim_requires_normal_gmail_check(client, db, super_admin, normal_user):
+def test_project_email_claim_ignores_legacy_gmail_check_columns(client, db, super_admin, normal_user):
     grant(db, normal_user, 'card_key:view')
     response = client.post('/api/card-keys', headers=headers(super_admin), json={
-        'name': '仅领取正常邮箱', 'members': [normal_user.username], 'target_platform': 'TikTok'})
+        'name': '领取不依赖历史检测', 'members': [normal_user.username], 'target_platform': 'TikTok'})
     project_id = response.json()['id']
-    db.add_all([
-        EmailAccount(email='unchecked-only@gmail.com'),
-        EmailAccount(email='blocked-only@gmail.com', gmail_check_status='封禁'),
-    ])
+    db.add(EmailAccount(email='legacy-blocked@gmail.com', gmail_check_status='封禁', allow_card_key_claim=True))
     db.commit()
     result = client.post(f'/api/card-keys/{project_id}/email/claim', headers=headers(normal_user))
-    assert result.status_code == 409
+    assert result.status_code == 200, result.text
+    assert result.json()['email'] == 'legacy-blocked@gmail.com'
 
 
 def test_project_email_claim_failure_discards_email_with_remark(client, db, super_admin, normal_user):
     grant(db, normal_user, 'card_key:view')
     project_id = project(client, super_admin, [normal_user.username])
     db.query(CardKeyProject).filter_by(id=project_id).update({'target_platform': 'TikTok'})
-    db.add(EmailAccount(email='failed-registration@gmail.com', password='secret', gmail_check_status='正常'))
+    db.add(EmailAccount(email='failed-registration@gmail.com', password='secret', allow_card_key_claim=True))
     db.commit()
     headers_ = headers(normal_user)
     path = f'/api/card-keys/{project_id}/email'
@@ -376,7 +379,7 @@ def test_project_email_claim_failure_requires_screenshot(client, db, super_admin
     grant(db, normal_user, 'card_key:view')
     project_id = project(client, super_admin, [normal_user.username])
     db.query(CardKeyProject).filter_by(id=project_id).update({'target_platform': 'TikTok'})
-    db.add(EmailAccount(email='blank-failure@gmail.com', gmail_check_status='正常'))
+    db.add(EmailAccount(email='blank-failure@gmail.com', allow_card_key_claim=True))
     db.commit()
     path = f'/api/card-keys/{project_id}/email'
     headers_ = headers(normal_user)
@@ -396,7 +399,7 @@ def test_stale_email_failure_cannot_discard_new_claim(tmp_path):
     user = User(username='alice', is_super_admin=True)
     with sessions() as session:
         project_row = CardKeyProject(name='邮箱竞态', target_platform='TikTok', member_usernames='alice', created_by='root')
-        email = EmailAccount(email='stale-failure@gmail.com', gmail_check_status='正常', claimed_by='alice',
+        email = EmailAccount(email='stale-failure@gmail.com', claimed_by='alice',
                              claimed_platform='TikTok')
         session.add_all([project_row, email])
         session.commit()
@@ -769,3 +772,129 @@ def test_concurrent_claims_and_imports(tmp_path):
     assert sum(value['added'] for value in results) == 1
     assert sum(value['duplicates'] for value in results) == 1
     engine.dispose()
+
+
+def test_card_key_email_claim_requires_switch_and_updates_stats(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    item = CardKeyProject(name='邮箱开关', target_platform='TikTok', member_usernames='alice', created_by='root')
+    db.add(item)
+    db.flush()
+    emails = [
+        EmailAccount(email='switch-disabled@gmail.com', allow_card_key_claim=False),
+        EmailAccount(email='switch-eligible@gmail.com', allow_card_key_claim=True),
+        EmailAccount(email='switch-tagged@gmail.com', allow_card_key_claim=True, platform_tags='["TikTok"]'),
+        EmailAccount(email='switch-used@gmail.com', allow_card_key_claim=True, management_status='使用中'),
+        EmailAccount(email='switch-claimed@gmail.com', allow_card_key_claim=True, claimed_by='bob', claimed_platform='TikTok'),
+    ]
+    db.add_all(emails)
+    db.commit()
+    base = f'/api/card-keys/{item.id}'
+    stats = next(project for project in client.get('/api/card-keys', headers=headers(super_admin)).json()
+                 if project['id'] == item.id)
+    assert stats['email_available'] == 1
+    assert stats['email_claimed'] == 1
+    claimed = client.post(base + '/email/claim', headers=headers(normal_user))
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()['email'] == 'switch-eligible@gmail.com'
+    assert client.post(base + '/email/release', headers=headers(normal_user)).status_code == 200
+    admin_headers = headers(super_admin)
+    assert client.post('/api/emails/batch-claim-availability', headers=admin_headers,
+                       json={'email_ids': [emails[1].id], 'allow_card_key_claim': False}).status_code == 200
+    assert client.post('/api/emails/batch-claim-availability', headers=admin_headers,
+                       json={'email_ids': [emails[0].id], 'allow_card_key_claim': True}).status_code == 200
+    stats = next(project for project in client.get('/api/card-keys', headers=headers(super_admin)).json()
+                 if project['id'] == item.id)
+    assert stats['email_available'] == 1
+    claimed = client.post(base + '/email/claim', headers=headers(normal_user))
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()['email'] == 'switch-disabled@gmail.com'
+    client.post(base + '/email/release', headers=headers(normal_user))
+    assert client.post('/api/emails/batch-claim-availability', headers=admin_headers,
+                       json={'email_ids': [emails[0].id], 'allow_card_key_claim': False}).status_code == 200
+    assert client.post(base + '/email/claim', headers=headers(normal_user)).status_code == 409
+
+
+def test_project_delete_hard_deletes_clean_project_despite_unrelated_claimed_email(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    item = CardKeyProject(name='干净项目', target_platform='TikTok', member_usernames='alice', created_by='root')
+    db.add(item)
+    db.flush()
+    project_id = item.id
+    db.add(EmailAccount(email='unrelated-claimed@gmail.com', claimed_by='bob', claimed_platform='TikTok'))
+    db.commit()
+    base = f'/api/card-keys/{project_id}'
+    client.post(base + '/import', headers=headers(super_admin), json={'content': 'clean-key'})
+    assert client.delete(base, headers=headers(normal_user)).status_code == 403
+    result = client.delete(base, headers=headers(super_admin)).json()
+    assert result == {'deleted': True, 'archived': False, 'id': project_id}
+    db.expire_all()
+    assert db.query(CardKeyProject).filter_by(id=project_id).first() is None
+    assert db.query(CardKey).filter_by(project_id=project_id).count() == 0
+    assert db.query(CardKeyBatch).filter_by(project_id=project_id).count() == 0
+
+
+def test_project_delete_archives_history_and_preserves_records(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    item = CardKeyProject(name='历史项目', target_platform='TikTok', member_usernames='alice', created_by='root')
+    db.add(item)
+    db.commit()
+    base = f'/api/card-keys/{item.id}'
+    client.post(base + '/import', headers=headers(super_admin), json={'content': 'history-key'})
+    claimed = client.post(base + '/claim', headers=headers(normal_user)).json()
+    assert client.post(base + f"/keys/{claimed['id']}/release", headers=headers(normal_user)).status_code == 200
+    result = client.delete(base, headers=headers(super_admin)).json()
+    assert result['deleted'] is False and result['archived'] is True
+    db.expire_all()
+    archived = db.get(CardKeyProject, item.id)
+    assert archived.archived_at is not None and archived.archived_by == 'root' and archived.is_active is False
+    assert db.query(CardKey).filter_by(project_id=item.id).count() == 1
+    assert db.query(CardKeyBatch).filter_by(project_id=item.id).count() == 1
+    assert client.get('/api/card-keys', headers=headers(super_admin)).json() == []
+    listed = client.get('/api/card-keys?include_archived=true', headers=headers(super_admin)).json()
+    assert listed[0]['archived'] is True and listed[0]['archived_by'] == 'root' and listed[0]['can_claim'] is False
+    assert client.post(base + '/import', headers=headers(super_admin), json={'content': 'blocked'}).status_code == 409
+    assert client.post(base + '/claim', headers=headers(normal_user)).status_code == 409
+    assert client.put(base, headers=headers(super_admin), json={'name': '改名', 'members': ['alice']}).status_code == 409
+    assert client.delete(base, headers=headers(super_admin)).json()['archived'] is True
+
+
+@pytest.mark.parametrize('history_kind', ['usage', 'failure'])
+def test_project_delete_archives_email_usage_and_failure_history(client, db, super_admin, history_kind):
+    item = CardKeyProject(name=f'历史-{history_kind}', target_platform='TikTok', member_usernames='alice', created_by='root')
+    email = EmailAccount(email=f'history-{history_kind}@gmail.com')
+    db.add_all([item, email])
+    db.flush()
+    if history_kind == 'usage':
+        db.add(CardKeyEmailUsage(project_id=item.id, email_id=email.id, username='alice', platform='TikTok'))
+    else:
+        db.add(FailureReport(project_id=item.id, email_id=email.id, kind='email', project_name=item.name,
+                             platform='TikTok', username='alice', screenshots='[]'))
+    db.commit()
+    result = client.delete(f'/api/card-keys/{item.id}', headers=headers(super_admin)).json()
+    assert result['deleted'] is False and result['archived'] is True
+    db.expire_all()
+    assert db.get(CardKeyProject, item.id).archived_at is not None
+
+
+def test_card_key_email_claim_requires_explicit_admin_switch(client, db, super_admin, normal_user):
+    grant(db, normal_user, 'card_key:view')
+    item = CardKeyProject(name='默认不可领', target_platform='TikTok', member_usernames='alice', created_by='root')
+    db.add(item)
+    db.flush()
+    email = EmailAccount(email='default-disabled@gmail.com')
+    db.add(email)
+    db.commit()
+    assert email.allow_card_key_claim is False
+    base = f'/api/card-keys/{item.id}'
+    stats = next(project for project in client.get('/api/card-keys', headers=headers(super_admin)).json()
+                 if project['id'] == item.id)
+    assert stats['email_available'] == 0
+    assert client.post(base + '/email/claim', headers=headers(normal_user)).status_code == 409
+    assert client.post('/api/emails/batch-claim-availability', headers=headers(super_admin),
+                       json={'email_ids': [email.id], 'allow_card_key_claim': True}).status_code == 200
+    stats = next(project for project in client.get('/api/card-keys', headers=headers(super_admin)).json()
+                 if project['id'] == item.id)
+    assert stats['email_available'] == 1
+    claimed = client.post(base + '/email/claim', headers=headers(normal_user))
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()['email'] == 'default-disabled@gmail.com'

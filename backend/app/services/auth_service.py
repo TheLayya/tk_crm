@@ -249,7 +249,6 @@ def require_permission(perm: str) -> Callable[..., User]:
             "email:view": {"op_account:view"},
             "email:manage": {"op_account:edit"},
             "email:import": {"op_account:import"},
-            "email:check": {"op_account:collect"},
             "card_key:view": {"card_key:manage"},
             "work_item:view": {"work_item:manage"},
         }

@@ -1,6 +1,6 @@
 import request from './request'
 
-export const getCardKeyProjects = () => request.get('/card-keys')
+export const getCardKeyProjects = (params) => request.get('/card-keys', { params })
 export const getCardKeyMembers = () => request.get('/card-keys/members')
 export const createCardKeyProject = (data) => request.post('/card-keys', data)
 export const updateCardKeyProject = (id, data) => request.put(`/card-keys/${id}`, data)

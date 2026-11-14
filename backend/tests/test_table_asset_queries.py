@@ -79,7 +79,7 @@ def test_email_scope_and_invalid_filter_fields(client, db, normal_user, other_us
         "email": {"type": "text", "value": "foreign"}})["total"] == 0
     for params in ({"sort_by": "password"}, {"sort_order": "sideways"},
                    {"table_filters": '{"purchase_price":{"type":"number","min":"NaN"}}'},
-                   {"table_filters": '{"gmail_checked_at":{"type":"date","min":"broken"}}'}):
+                   {"table_filters": '{"purchase_date":{"type":"date","min":"broken"}}'}):
         response = client.get("/api/emails", params=params, headers=auth_headers(normal_user))
         assert response.status_code == 422, response.text
 

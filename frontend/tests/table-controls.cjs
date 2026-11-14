@@ -9,7 +9,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' })
   const context = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
   const errors = [], requests = [], unexpected = []
-  const email = { id: 1, email: 'alpha@example.invalid', password: 'fixture-copy-value', country: 'US', platform_tags: ['TikTok'], management_status: '闲置', gmail_check_status: '正常', current_relation_count: 0, purchase_channel: 'alpha', purchase_price: 2, sale_price: 10, gmail_checked_at: '2026-10-07T12:00:00', device_name: 'phone', node_ip: '127.0.0.1' }
+  const email = { id: 1, email: 'alpha@example.invalid', password: 'fixture-copy-value', country: 'US', platform_tags: ['TikTok'], management_status: '闲置', current_relation_count: 0, purchase_channel: 'alpha', purchase_price: 2, sale_price: 10, device_name: 'phone', node_ip: '127.0.0.1' }
   const account = { id: 1, username: 'monitor-fixture', account: 'operator-fixture', nickname: 'fixture', platform: 'tiktok', status: '正常', follower_count: 2, following_count: 3, like_count: 10, video_count: 1, is_active: true, enable_video_monitoring: true, platform_tags: [], accounts: [], latest_check_status: 'success', followers_change: 1, yesterday_video_count: 1, yesterday_video_plays: [10] }
   const member = { id: 1, username: 'member-fixture', real_name: 'Fixture', department_name: 'QA', roles: [], is_active: true }
   const reportItems = Array.from({ length: 21 }, (_, index) => ({ username: `member-${String(index).padStart(2, '0')}`, kind: 'card_key', reference: `record-${index}`, time: `2026-10-${String(index + 1).padStart(2, '0')}T12:00:00Z` }))
@@ -54,13 +54,13 @@ async function main() {
     assert.equal(JSON.parse(latestEmail().searchParams.get('table_filters')).current_relation_count.min, '0')
     panel = await openFilter('采购 / 出售'); await panel.locator('.el-select').click(); await page.getByRole('option', { name: '采购金额', exact: true }).click(); await panel.getByPlaceholder('最小值').fill('0'); await submit(panel)
     assert.equal(JSON.parse(latestEmail().searchParams.get('table_filters')).purchase_price.min, '0')
-    panel = await openFilter('最后检测')
+    panel = await openFilter('采购 / 出售'); await panel.locator('.el-select').click(); await page.getByRole('option', { name: '采购日期', exact: true }).click()
     const startDate = panel.getByPlaceholder('开始日期'), endDate = panel.getByPlaceholder('结束日期')
     await startDate.click(); await page.locator('.el-date-range-picker:visible').waitFor()
     await startDate.fill('2026-10-07'); await endDate.fill('2026-10-07'); await endDate.press('Enter')
     await page.locator('.el-date-range-picker:visible').waitFor({ state: 'hidden' })
     await submit(panel)
-    assert.equal(JSON.parse(latestEmail().searchParams.get('table_filters')).gmail_checked_at.max, '2026-10-07')
+    assert.equal(JSON.parse(latestEmail().searchParams.get('table_filters')).purchase_date.max, '2026-10-07')
     panel = await openFilter('使用状态'); await panel.locator('.el-select').click(); await page.getByRole('option', { name: '闲置', exact: true }).click(); await panel.getByRole('button', { name: '查询', exact: true }).click(); await page.waitForTimeout(100)
     assert.deepEqual(JSON.parse(latestEmail().searchParams.get('table_filters')).management_status.value, ['闲置'])
     await closePopovers(); console.log('remote filters passed')
@@ -70,15 +70,15 @@ async function main() {
     await countryHeader.locator('.sort-caret.descending').dispatchEvent('click'); await page.waitForTimeout(150); assert.equal(latestEmail().searchParams.get('sort_order'), 'desc')
     const count = requests.length; await page.waitForTimeout(100); assert(requests.length - count < 3, 'Sort synchronization flooded requests')
     await table('emails').getByRole('button', { name: '重置查询', exact: true }).click(); await page.waitForTimeout(80); assert.equal(latestEmail().searchParams.get('sort_by'), null)
-    await table('emails').locator('th').filter({ has: page.getByRole('button', { name: '最后检测筛选', exact: true }) }).locator('.sort-caret.ascending').dispatchEvent('click'); await page.waitForTimeout(100)
+    await table('emails').locator('th').filter({ has: page.getByRole('button', { name: '采购 / 出售筛选', exact: true }) }).locator('.sort-caret.ascending').dispatchEvent('click'); await page.waitForTimeout(100)
     const selection = table('emails').locator('.el-table__body-wrapper tr').first().locator('.el-checkbox')
-    await selection.click(); assert((await page.locator('.page-heading').innerText()).includes('检测选中 1'))
+    await selection.click(); assert((await page.locator('.batch-actions').innerText()).includes('已选 1 个邮箱'))
     await table('emails').getByRole('button', { name: '列设置', exact: true }).click(); console.log('settings clicked')
     const dialog = page.getByRole('dialog', { name: '列设置', exact: true }); await dialog.waitFor(); console.log('settings ready')
     const countryRow = dialog.locator('.crm-table-settings-row').filter({ hasText: /^⋮⋮国家/ })
     await countryRow.locator('.el-checkbox__label').click(); await dialog.getByRole('button', { name: '使用状态上移', exact: true }).click(); await dialog.getByRole('button', { name: '完成', exact: true }).click()
     assert.equal(await table('emails').getByRole('button', { name: '国家筛选', exact: true }).count(), 0)
-    assert((await table('emails').locator('th').filter({ has: page.getByRole('button', { name: '最后检测筛选', exact: true }) }).getAttribute('class')).includes('ascending'), 'Layout changes must restore the active sort caret')
+    assert((await table('emails').locator('th').filter({ has: page.getByRole('button', { name: '采购 / 出售筛选', exact: true }) }).getAttribute('class')).includes('ascending'), 'Layout changes must restore the active sort caret')
     const emailHeader = table('emails').locator('th').filter({ has: page.getByRole('button', { name: '邮箱筛选', exact: true }) }); await emailHeader.scrollIntoViewIfNeeded(); const beforeWidth = await emailHeader.boundingBox()
     await emailHeader.dispatchEvent('mousemove', { clientX: beforeWidth.x + beforeWidth.width - 2, clientY: beforeWidth.y + beforeWidth.height / 2 }); await emailHeader.dispatchEvent('mousedown', { clientX: beforeWidth.x + beforeWidth.width - 2, clientY: beforeWidth.y + beforeWidth.height / 2, button: 0 }); await page.mouse.move(beforeWidth.x + beforeWidth.width + 35, beforeWidth.y + beforeWidth.height / 2, { steps: 4 }); await page.mouse.up()
     await page.waitForTimeout(100)

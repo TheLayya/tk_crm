@@ -7,6 +7,7 @@ from sqlalchemy import text
 from app.models.op_account import OpAccount
 from app.schemas.op_account import OpAccountCreate, OpAccountUpdate, OpAccountResponse
 from app.services.op_account_service import create_op_account, update_op_account, export_op_accounts, import_from_excel
+from tests.conftest import auth_headers
 import uuid
 
 
@@ -43,3 +44,14 @@ def test_gmail_credentials_and_registration_round_trip(db):
     assert copied.password == "gmail-secret"
     assert copied.recovery_email == "new@example.com"
     assert copied.account_created_at == datetime(2024, 1, 2, 3, 4)
+
+
+def test_gmail_accounts_keep_compatibility_without_detection_fields(client, db, super_admin):
+    suffix = uuid.uuid4().hex[:8]
+    account = create_op_account(db, OpAccountCreate(platform="gmail", account=f"surface-{suffix}@gmail.com"))
+    item = next(row for row in client.get("/api/op-accounts", headers=auth_headers(super_admin)).json()["items"]
+                if row["id"] == account.id)
+    assert item["platform"] == "gmail"
+    assert not [key for key in item if "gmail_check" in key]
+    assert client.post("/api/op-accounts/gmail-check", headers=auth_headers(super_admin),
+                       json={"account_ids": [account.id], "consent": True}).status_code in {404, 405}

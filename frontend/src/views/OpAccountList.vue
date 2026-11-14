@@ -48,7 +48,6 @@
         </el-dropdown>
         <el-button v-if="canBatchAssign" size="small" type="primary" plain @click="openBatchAssign">批量分配</el-button>
         <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button>
-        <el-button v-if="selectedGmailIds.length" size="small" type="warning" :loading="gmailCheckLoading" @click="handleGmailCheck(selectedGmailIds)">检测 Gmail</el-button>
         <el-button size="small" @click="handleBatchCollect" :loading="collectLoading">采集</el-button>
         <el-button size="small" type="danger" @click="handleBatchDelete">批量删除</el-button>
       </div>
@@ -81,10 +80,6 @@
                 <span v-if="row.platform !== 'gmail'">关注 {{ formatNum(row.following_count) }}</span>
                 <span v-if="row.platform !== 'gmail'">点赞 {{ formatNum(row.like_count) }}</span>
                 <span v-if="row.platform !== 'gmail'">视频 {{ formatNum(row.video_count) }}</span>
-              </div>
-              <div v-if="row.platform === 'gmail'" class="inline-summary">
-                <el-tag :type="gmailCheckTagType(row.gmail_check_status)" size="small">{{ row.gmail_check_status || '未检测' }}</el-tag>
-                <span>{{ gmailCheckHint(row) }}</span>
               </div>
               <AssociationOverview kind="account" :resource-id="row.id" />
               <AccountEmailRelations v-if="authStore.hasPermission('email:view')" :account-id="row.id" />
@@ -343,15 +338,10 @@
           </template>
         </el-table-column>
         <el-table-column column-key="created_at" prop="created_at" filter-type="date" v-if="false" label="添加时间" width="150"><template #default="{ row }">{{ formatDate(row.created_at) }}</template></el-table-column>
-        <el-table-column column-key="gmail_check_status" prop="gmail_check_status" filter-type="text" v-if="accounts.some(row => row.platform === 'gmail')" label="Gmail 检测" width="110">
-          <template #default="{ row }"><el-tooltip v-if="row.platform === 'gmail'" :content="gmailCheckHint(row)"><el-tag :type="gmailCheckTagType(row.gmail_check_status)" size="small">{{ row.gmail_check_status || '未检测' }}</el-tag></el-tooltip><span v-else>—</span></template>
-        </el-table-column>
-        <el-table-column column-key="gmail_checked_at" prop="gmail_checked_at" filter-type="date" v-if="false" label="最后检测" width="150"><template #default="{ row }">{{ row.gmail_checked_at ? formatDate(row.gmail_checked_at) : '—' }}</template></el-table-column>
         <el-table-column column-key="actions" table-tools-disabled label="操作" width="220" fixed="right" class-name="op-row-actions">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
             <el-button link type="primary" size="small" @click="openRelation(row)">关联</el-button>
-            <el-button v-if="row.platform === 'gmail'" link type="warning" size="small" :loading="gmailCheckLoading" @click="handleGmailCheck([row.id])">检测</el-button>
             <el-button v-if="row.platform === 'tiktok'" link type="primary" size="small" @click="handleCollectOne(row)">采集</el-button>
             <el-button link type="primary" size="small" @click="showLogs(row)">记录</el-button>
             <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
@@ -377,7 +367,6 @@
               <span :class="['op-status-badge', `op-status-badge--${statusKey(row.status)}`]" style="margin-left:4px">{{ row.status }}</span>
             </div>
           </div>
-          <div v-if="row.platform === 'gmail'" class="ios-card-row"><span class="ios-card-row-label">Gmail 检测</span><el-tooltip :content="gmailCheckHint(row)"><el-tag :type="gmailCheckTagType(row.gmail_check_status)" size="small">{{ row.gmail_check_status || '未检测' }}</el-tag></el-tooltip></div>
           <!-- 行项 -->
           <div v-if="row.country" class="ios-card-row">
             <span class="ios-card-row-label">国家</span>
@@ -414,7 +403,6 @@
               </el-dropdown-menu></template>
             </el-dropdown>
             <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button v-if="row.platform === 'gmail'" link type="warning" size="small" :loading="gmailCheckLoading" @click="handleGmailCheck([row.id])">检测</el-button>
             <el-button v-if="row.platform === 'tiktok'" link type="primary" size="small" @click="handleCollectOne(row)">采集</el-button>
             <el-button link type="primary" size="small" @click="showLogs(row)">记录</el-button>
             <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
@@ -838,7 +826,7 @@ import { Plus, Upload, Download, Search, ArrowDown, View, Hide, CopyDocument } f
 import {
   listOpAccounts, createOpAccount, updateOpAccount, deleteOpAccount,
   batchUpdateStatus, batchAssignOperator, importOpAccounts, downloadOpAccountImportTemplate, exportOpAccounts,
-  triggerCollect, getCollectTask, getAuditLogs, checkGmailAccounts, getOpAccountFilterOptions
+  triggerCollect, getCollectTask, getAuditLogs, getOpAccountFilterOptions
 } from '@/api/op_accounts'
 import { getMembers } from '@/api/team'
 import { getDevices } from '@/api/devices'
@@ -1293,24 +1281,6 @@ const watchCollectTask = (taskId, ids) => {
       collectingIds.value = new Set([...collectingIds.value].filter(id => !ids.includes(id)))
     }
   }, 2000)
-}
-const gmailCheckLoading = ref(false)
-const selectedGmailIds = computed(() => selectedIds.value.filter(id => accounts.value.some(row => row.id === id && row.platform === 'gmail')))
-const gmailCheckTagType = (status) => ({ '正常': 'success', '封禁': 'danger', '验证': 'warning' }[status] || 'info')
-const gmailCheckHint = (row) => ['第三方探测，不代表可登录；不覆盖管理状态', row.gmail_check_raw_status, row.gmail_checked_at ? formatDate(row.gmail_checked_at) : '尚未检测'].filter(Boolean).join(' · ')
-const handleGmailCheck = async (ids) => {
-  if (gmailCheckLoading.value) return
-  if (!ids.length || ids.length > 50) return ElMessage.warning('每次请选择 1–50 个 Gmail 账号')
-  try {
-    await ElMessageBox.confirm('检测仅用于判断邮箱状态，不会发送密码或 2FA。结果来自第三方探测，不覆盖管理状态。是否继续？', '邮箱状态检测', { type: 'warning' })
-  } catch { return }
-  gmailCheckLoading.value = true
-  try {
-    const result = await checkGmailAccounts(ids)
-    ElMessage.success('已检测 ' + result.checked + ' 个 Gmail 账号')
-    await loadAccounts()
-  } catch (error) { console.error(error) }
-  finally { gmailCheckLoading.value = false }
 }
 const handleBatchCollect = () => startCollect(selectedIds.value)
 const handleCollectOne = (row) => startCollect([row.id])

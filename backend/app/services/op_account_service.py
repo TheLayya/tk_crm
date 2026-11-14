@@ -270,7 +270,7 @@ def list_op_accounts(
         query = query.filter(OpAccount.purchase_channel == purchase_channel)
     if sale_customer:
         query = query.filter(OpAccount.sale_customer == sale_customer)
-    fields = model_table_fields(OpAccount, exclude=("password", "totp_secret", "email_password", "project_id", "previous_follower_count"))
+    fields = model_table_fields(OpAccount, exclude=("password", "totp_secret", "email_password", "project_id", "previous_follower_count", "gmail_check_status", "gmail_check_raw_status", "gmail_checked_at"))
     query = apply_table_query(query, fields, sort_by, sort_order, table_filters,
                               stable_column=OpAccount.id, default_sort=(OpAccount.id, "asc"))
     total = query.count()
@@ -292,7 +292,7 @@ def query_op_account_rows(
     **filters: Any,
 ) -> tuple[list[dict[str, Any]], int]:
     """Apply one display query for the paginated list and complete exports."""
-    sql_fields = model_table_fields(OpAccount, exclude=("password", "totp_secret", "email_password", "project_id", "previous_follower_count"))
+    sql_fields = model_table_fields(OpAccount, exclude=("password", "totp_secret", "email_password", "project_id", "previous_follower_count", "gmail_check_status", "gmail_check_raw_status", "gmail_checked_at"))
     row_fields = {name: field_kind(column) for name, column in sql_fields.items()}
     row_fields.update({"device_name": "text", "node_ip": "text", "followers_change": "number",
                        "yesterday_video_count": "number", "yesterday_video_plays": "number",
@@ -481,7 +481,6 @@ _EXPORT_COLUMNS = [
     "sale_customer", "sale_price", "sale_date", "platform_user_id",
     "platform_sec_uid", "nickname", "follower_count", "following_count",
     "like_count", "video_count", "last_collected_at", "collect_status",
-    "gmail_check_status", "gmail_check_raw_status", "gmail_checked_at",
 ]
 
 # 对外文件使用中文表头；导入同时兼容这些中文表头和历史英文表头。
@@ -497,7 +496,6 @@ _COLUMN_LABELS = {
     "platform_user_id": "平台用户ID", "platform_sec_uid": "平台SEC_UID", "nickname": "昵称",
     "follower_count": "粉丝数", "following_count": "关注数", "like_count": "点赞数",
     "video_count": "视频数", "last_collected_at": "最后采集时间", "collect_status": "采集状态",
-    "gmail_check_status": "Gmail检测结果", "gmail_check_raw_status": "Gmail原始结果", "gmail_checked_at": "Gmail最后检测时间",
 }
 _IMPORT_ALIASES = {label: key for key, label in _COLUMN_LABELS.items()}
 _IMPORT_ALIASES.update({key: key for key in _EXPORT_COLUMNS})

@@ -41,8 +41,8 @@ const devices = accounts.map((account, index) => ({
 const emails = accounts.map((account, index) => ({
   id: index + 1, email: account.email, password: account.email_password, recovery_email: account.recovery_email,
   totp_secret: index % 2 ? null : 'JBSWY3DPEHPK3PXP', country: account.country, platform_tags: index % 2 ? ['TikTok'] : ['TikTok', 'Instagram'],
-  platform_registrants: { TikTok: '成员甲' }, management_status: index % 2 ? '使用中' : '闲置', gmail_check_status: index === 5 ? '验证' : '正常',
-  current_relation_count: 1, gmail_checked_at: now, device_name: devices[index].name, node_ip: devices[index].node_ip,
+  platform_registrants: { TikTok: '成员甲' }, management_status: index % 2 ? '使用中' : '闲置',
+  current_relation_count: 1, device_name: devices[index].name, node_ip: devices[index].node_ip,
   purchase_channel: '团队采购 A', purchase_price: 2.5, purchase_date: '2026-10-01', sale_price: null, registrant: '成员甲', operator: '成员乙',
   remark: '资料完整，按需领取',
 }))

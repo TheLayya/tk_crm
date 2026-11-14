@@ -1,7 +1,7 @@
 import os
 import base64
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from sqlalchemy import String
+from sqlalchemy import String, Text
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.engine import Dialect
 
@@ -56,3 +56,9 @@ class EncryptedType(TypeDecorator[str]):
         except Exception:
             # Value is not encrypted (legacy plaintext data), return as-is
             return value
+
+
+class EncryptedTextType(EncryptedType):
+    """Use the same field encryption for long credentials such as Cookie JSON."""
+    impl = Text
+    cache_ok = True

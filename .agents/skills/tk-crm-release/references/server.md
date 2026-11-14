@@ -1,5 +1,31 @@
 # Server / Docker archive
 
+For local Docker development, use the dedicated compose file and project:
+
+```powershell
+docker compose -p tk-crm-local -f docker-compose.local.yml up -d --build --wait
+docker compose -p tk-crm-local -f docker-compose.local.yml exec -T backend python -c "from app.version import APP_VERSION; print(APP_VERSION)"
+```
+
+The backend image supplies Python dependencies; keep its `build: ./backend` entry so a fresh machine can build it.
+The backend binds `backend/` into `/app`, keeps the existing `docker-local/data` bind at `/app/data`,
+and runs Uvicorn with `--reload --reload-dir /app/app`. Use `WATCHFILES_FORCE_POLLING=true` for reliable
+Python change detection through Docker Desktop on Windows. Only application Python edits reload automatically;
+after changing backend requirements, rebuild the backend image. New Alembic migrations run when the backend
+starts, so restart it after adding a migration rather than assuming application reload also runs migrations.
+
+The frontend uses the `development` Dockerfile target, binds `frontend/` into `/app`, keeps Linux dependencies
+in the separate `frontend_node_modules` volume, and serves Vite HMR at `http://127.0.0.1:8080`.
+Vite polling is enabled for Docker Desktop on Windows. When `package-lock.json` changes, refresh that dependency
+volume with `docker compose -p tk-crm-local -f docker-compose.local.yml exec frontend npm ci`, then restart frontend.
+The regular `docker-compose.yml` continues to build the final Nginx stage for published deployments.
+
+Local source reload is separate from release installation. This development compose deliberately leaves
+`UPDATE_AGENT_URL` and `UPDATE_AGENT_TOKEN` empty; release checks still compare the running backend version
+with the public manifest, but the web updater stays inactive. Do not point the default Docker update lifecycle
+at this development checkout: it targets the published compose ports/data layout and replaces source files.
+Preserve the local database, environment file and uncommitted UI work when rebuilding or restarting containers.
+
 `release-vX.Y.Z.tar.gz` is source for Docker updates; do not upload a Docker image tar, the entire working directory, or an installed runtime. Reuse `tools/updater.py`'s whitelist and `prepare_release` through `tools/release.py`.
 
 From the repository root:

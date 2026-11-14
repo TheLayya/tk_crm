@@ -7,18 +7,20 @@
     <el-card ref="projectCard" shadow="never" class="project-card">
       <div class="toolbar">
         <el-select v-model="selectedId" filterable aria-label="选择项目" placeholder="选择项目" style="width:280px" @change="changeProject">
-          <el-option v-for="project in projects" :key="project.id" :label="`${project.name}${project.is_active ? '' : '（已结束）'}`" :value="project.id" />
+          <el-option v-for="project in projects" :key="project.id" :label="`${project.name}${project.archived ? '（已归档）' : project.is_active ? '' : '（已结束）'}`" :value="project.id" />
         </el-select>
         <el-tag v-if="selected" type="success">可领取 {{ selected.available }}</el-tag>
         <el-tag v-if="selected" type="info">已领取 {{ selected.claimed }}</el-tag>
         <el-tag v-if="selected">已消耗 {{ selected.consumed }}</el-tag>
+        <el-checkbox v-if="canManage" v-model="showArchivedProjects" :disabled="loading" @change="reloadProjects">显示已归档项目</el-checkbox>
         <el-tag v-if="selected?.target_platform" type="warning">邮箱平台：{{ selected.target_platform }}</el-tag>
         <span class="project-description" :title="selected?.description">{{ selected?.description }}</span>
         <el-button v-if="canManage && selected" :disabled="!selected.is_active" @click="openImport">批量导入</el-button>
         <el-button v-if="canManage && selected" @click="openBatches">批次管理</el-button>
-        <el-button v-if="canManage && selected" @click="openProject(selected)">编辑项目</el-button><el-button v-if="canManage && selected" type="danger" plain @click="deleteProject">删除项目</el-button>
+        <el-button v-if="canManage && selected" :disabled="selected.archived" @click="openProject(selected)">编辑项目</el-button><el-button v-if="canManage && selected" :disabled="selected.archived" type="danger" plain @click="deleteProject">{{ selected.archived ? '已归档' : '删除项目' }}</el-button>
       </div>
-      <el-alert v-if="selected && !selected.is_active" title="项目已结束，停止新领取，已领取卡密仍可确认消耗" type="warning" :closable="false" />
+      <el-alert v-if="selected?.archived" title="项目已归档，停止新领取，卡密、邮箱使用和售后历史已保留" type="info" :closable="false" />
+      <el-alert v-else-if="selected && !selected.is_active" title="项目已结束，停止新领取，已领取卡密仍可确认消耗" type="warning" :closable="false" />
       <el-empty v-if="!selected" :description="canManage ? '先新建项目，选择协助成员并导入卡密' : '暂无分配给你的项目'" :image-size="70" />
       <el-tabs v-if="selected" v-model="activeWorkspace" class="workspace-tabs">
         <el-tab-pane :label="canManage ? '卡密记录' : '我的领取记录'" name="records">
@@ -35,7 +37,7 @@
       </div>
       <div v-if="selected" class="claim-bar">
         <div><strong>当前项目</strong><span>{{ selected.name }}</span><small>协助成员：{{ memberLabel(selected.members) }}</small></div>
-        <div class="project-metrics"><template v-if="selected.target_platform"><el-tag size="small" type="success">检测正常可领 {{ selected.email_normal_available }}</el-tag><el-tag size="small">可领总数 {{ selected.email_available }}</el-tag><el-tag size="small" type="info">领取中 {{ selected.email_claimed }}</el-tag><el-tag size="small">注册完成 {{ selected.emails_completed }}</el-tag></template><el-popover placement="bottom" width="360" trigger="click"><template #reference><el-button link type="primary">累计成员进度</el-button></template><div class="member-progress"><div v-for="stat in selected.member_stats" :key="stat.username" class="member-stat"><span>{{ stat.username }}</span><span>卡密已消耗 {{ stat.consumed }} · 待消耗 {{ stat.claimed }} · 注册 {{ stat.emails_completed }}</span></div></div></el-popover></div>
+        <div class="project-metrics"><template v-if="selected.target_platform"><el-tag size="small">可领邮箱 {{ selected.email_available }}</el-tag><el-tag size="small" type="info">领取中 {{ selected.email_claimed }}</el-tag><el-tag size="small">注册完成 {{ selected.emails_completed }}</el-tag></template><el-popover placement="bottom" width="360" trigger="click"><template #reference><el-button link type="primary">累计成员进度</el-button></template><div class="member-progress"><div v-for="stat in selected.member_stats" :key="stat.username" class="member-stat"><span>{{ stat.username }}</span><span>卡密已消耗 {{ stat.consumed }} · 待消耗 {{ stat.claimed }} · 注册 {{ stat.emails_completed }}</span></div></div></el-popover></div>
         <el-button type="primary" :disabled="!canClaimKey" :loading="claiming" @click="claim">{{ selectedBatch ? '领取所选批次' : '领取下一份' }}</el-button>
       </div>
       <div v-if="pendingKey" class="pending-key">
@@ -126,7 +128,7 @@ import { getCardKeyProjects, getCardKeyMembers, createCardKeyProject, updateCard
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('card_key:manage'))
 const username = computed(() => auth.user?.username)
-const projects = ref([]); const members = ref([]); const keys = ref([]); const selectedId = ref(null); const loading = ref(false); const claiming = ref(false); const saving = ref(false); const importing = ref(false); const projectVisible = ref(false); const importVisible = ref(false); const editing = ref(false); const importText = ref('')
+const projects = ref([]); const members = ref([]); const showArchivedProjects = ref(false); const keys = ref([]); const selectedId = ref(null); const loading = ref(false); const claiming = ref(false); const saving = ref(false); const importing = ref(false); const projectVisible = ref(false); const importVisible = ref(false); const editing = ref(false); const importText = ref('')
 const projectForm = reactive({ id: null, name: '', description: '', target_platform: '', members: [], is_active: true }); const selected = computed(() => projects.value.find(x => x.id === selectedId.value))
 const { tableQuery, queryParams } = useTableQuery('card-key-records')
 const handleTableQuery = (nextQuery) => { tableQuery.value = nextQuery; filters.page = 1; loadKeys() }
@@ -197,7 +199,7 @@ const clearData = () => {
 const load = async () => {
   const version = ++projectRequestVersion
   try {
-    const [result, platformResult] = await Promise.all([getCardKeyProjects(), getCardKeyPlatforms()])
+    const [result, platformResult] = await Promise.all([getCardKeyProjects({ include_archived: showArchivedProjects.value }), getCardKeyPlatforms()])
     if (version !== projectRequestVersion) return
     projects.value = result
     platforms.value = platformResult
@@ -283,7 +285,17 @@ const openProject = (row) => { editing.value = !!row; Object.assign(projectForm,
 const normalizeMembers = (values) => { if (values.includes('__all__')) projectForm.members = ['__all__'] }
 const memberLabel = (values) => values.includes('__all__') ? '全员' : values.join('、')
 const saveProject = async () => { if (!projectForm.name.trim() || !projectForm.members.length) return ElMessage.warning('请填写项目名称并选择协助成员'); saving.value = true; try { const data = { name: projectForm.name, description: projectForm.description, target_platform: projectForm.target_platform, members: projectForm.members, is_active: projectForm.is_active }; const result = editing.value ? await updateCardKeyProject(projectForm.id, data) : await createCardKeyProject(data); projectVisible.value = false; await load(); if (selectedId.value !== result.id) { selectedId.value = result.id; await changeProject() } } finally { saving.value = false } }
-const deleteProject = async () => { if (!selected.value) return; try { await ElMessageBox.confirm(`确认删除项目“${selected.value.name}”？项目卡密记录也会删除，已有完成记录的项目不能删除。`, '删除项目', { type: 'warning', confirmButtonText: '确认删除' }) } catch { return }; await deleteCardKeyProject(selected.value.id); selectedId.value = null; await load(); ElMessage.success('项目已删除') }
+const reloadProjects = () => { selectedId.value = null; load() }
+const deleteProject = async () => {
+  if (!selected.value || selected.value.archived) return
+  try { await ElMessageBox.confirm(`确认处理项目“${selected.value.name}”？无任何领取、归还、消耗、售后或邮箱使用记录的项目会直接删除；有历史记录的项目将归档并停止新领取，保留全部历史。`, '删除 / 归档项目', { type: 'warning', confirmButtonText: '确认处理' }) } catch { return }
+  try {
+    const result = await deleteCardKeyProject(selected.value.id)
+    selectedId.value = null
+    await load()
+    ElMessage.success(result.archived ? '项目有历史记录，已归档保留并停止新领取' : '项目已删除')
+  } catch (error) { ElMessage.error(error.response?.data?.detail || '项目处理失败，请稍后重试') }
+}
 const claimEmailAction = async () => {
   const projectId = selectedId.value
   claimingEmail.value = true

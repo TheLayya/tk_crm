@@ -52,3 +52,8 @@
 更新后重新保存角色。角色保存成功但成员菜单未更新时，让成员退出后重新登录，重新获取权限。仅查看权限不允许新建项目、导入卡密或新建备忘；卡密的查看权限允许参与成员领取、消耗和归还自己的卡密。
 
 在 `backend` 目录执行 `python -m pytest tests/test_permission_registry.py tests/test_card_keys.py tests/test_card_batch_migration.py tests/test_fresh_migrations.py tests/test_work_items.py -q`，验证权限、批次流转与删除、并发边界和历史升级。前端隔离验收使用 `node frontend/tests/card-key-batches.cjs`。
+# 卡密项目与邮箱领取
+
+- 卡密项目领取邮箱时，只使用管理员开启“允许卡密领取”的邮箱，并且邮箱必须闲置、未被其他成员领取、尚未登记目标平台。
+- 管理员可在邮箱管理中批量开启或禁止卡密领取，最多 500 个；禁止操作遇到正在领取的邮箱会整批拒绝，避免中断注册。
+- 删除项目时，没有领取、归还、消耗、邮箱使用或售后历史的项目会硬删除；已有历史的项目会自动归档并保留记录。归档项目默认隐藏，可用“包含归档”查看，不能再次编辑、导入或领取。

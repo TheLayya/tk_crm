@@ -327,7 +327,7 @@ PREDEFINED_PERMISSIONS = {
     "monitor:view", "monitor:check", "monitor:proxy",
     "op_account:view", "op_account:create", "op_account:edit", "op_account:delete",
     "op_account:import", "op_account:export", "op_account:collect",
-    "email:view", "email:manage", "email:import", "email:check",
+    "email:view", "email:manage", "email:import",
     "device:view", "device:manage",
     "proxy_node:view", "proxy_node:manage",
     "settings:view", "settings:edit",

@@ -167,7 +167,6 @@ const rules = {
       { value: 'email:view', label: '查看' },
       { value: 'email:manage', label: '管理' },
       { value: 'email:import', label: '导入' },
-      { value: 'email:check', label: '检测' }
     ]
   },
   {

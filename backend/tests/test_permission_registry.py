@@ -9,6 +9,7 @@ def test_role_editor_permissions_match_backend_registry():
     editor = (repository / "frontend/src/views/team/RoleManage.vue").read_text(encoding="utf-8")
     permissions = set(re.findall(r"value:\s*['\"]([a-z_]+(?::[a-z_]+)+)['\"]", editor))
     assert permissions == PREDEFINED_PERMISSIONS
+    assert "email:check" not in PREDEFINED_PERMISSIONS
 
 
 def test_api_permissions_are_registered():

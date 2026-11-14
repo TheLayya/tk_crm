@@ -11,7 +11,7 @@ from alembic.config import Config
 from sqlalchemy import inspect, text
 from sqlalchemy import update
 
-from app.models.card_key import CardKey
+from app.models.card_key import CardKey, CardKeyProject
 from app.models.failure_report import FailureReport
 from app.models.op_account import EmailAccount
 from tests.test_card_keys import grant, headers, project
@@ -85,7 +85,11 @@ def test_key_failure_requires_image_and_parent_isolation(client, db, super_admin
     assert report.image_count == 1 and report.remark == '兑换报错'
     assert client.get(base + f'/failure-reports/{report.id}/screenshots/-1', headers=headers(super_admin)).status_code == 404
     assert client.get(f'/api/card-keys/{project_id + 1}/keys/{key_id}/failure-reports', headers=headers(super_admin)).status_code == 404
-    assert client.delete(f'/api/card-keys/{project_id}', headers=headers(super_admin)).status_code == 409
+    archived = client.delete(f'/api/card-keys/{project_id}', headers=headers(super_admin)).json()
+    assert archived['deleted'] is False and archived['archived'] is True
+    db.expire_all()
+    assert db.query(CardKeyProject).filter_by(id=project_id).first().archived_at is not None
+    assert db.query(FailureReport).count() == 1
 
 
 @pytest.mark.parametrize('payload', [

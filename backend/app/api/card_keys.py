@@ -101,12 +101,10 @@ def _project_json(project: CardKeyProject, db: Session, user: User | None = None
     ).filter(CardKey.project_id == project.id).one()
     platform = (project.target_platform or "").strip()
     email_available = email_claimed = 0
-    email_normal_available = 0
     if platform:
-        email_query = db.query(EmailAccount).filter(EmailAccount.management_status == "闲置")
+        email_query = db.query(EmailAccount).filter(EmailAccount.management_status == "闲置", EmailAccount.allow_card_key_claim.is_(True))
         email_available = email_query.filter(EmailAccount.claimed_by.is_(None), or_(EmailAccount.platform_tags.is_(None), ~EmailAccount.platform_tags.icontains(json.dumps(platform, ensure_ascii=False), autoescape=True))).count()
         email_claimed = db.query(EmailAccount).filter(EmailAccount.claimed_platform == platform, EmailAccount.claimed_by.isnot(None)).count()
-        email_normal_available = email_query.filter(EmailAccount.claimed_by.is_(None), EmailAccount.gmail_check_status == "正常", or_(EmailAccount.platform_tags.is_(None), ~EmailAccount.platform_tags.icontains(json.dumps(platform, ensure_ascii=False), autoescape=True))).count()
     members = _members(project)
     member_stats = []
     usernames = {row.username for row in db.query(User).filter(User.is_active.is_(True)).all()} if "__all__" in members else set(members)
@@ -127,8 +125,10 @@ def _project_json(project: CardKeyProject, db: Session, user: User | None = None
             "members": members, "total": total or 0, "available": available or 0,
             "claimed": claimed or 0, "consumed": consumed or 0, "created_by": project.created_by,
             "created_at": _time_json(project.created_at), "is_active": project.is_active,
-            "can_claim": bool(user and _allowed(project, user, db) and project.is_active),
-            "email_available": email_available, "email_normal_available": email_normal_available,
+            "archived": project.archived_at is not None, "archived_at": _time_json(project.archived_at),
+            "archived_by": project.archived_by,
+            "can_claim": bool(user and _allowed(project, user, db) and project.is_active and project.archived_at is None),
+            "email_available": email_available,
             "email_claimed": email_claimed, "member_stats": member_stats,
             "emails_completed": sum(email_stats.values())}
 
@@ -254,8 +254,11 @@ def update_platform(platform_id: int, body: PlatformBody, db: Session = Depends(
 
 
 @router.get("", response_model=None)
-def list_projects(db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> list[dict[str, object]]:
-    projects = db.query(CardKeyProject).order_by(CardKeyProject.updated_at.desc()).all()
+def list_projects(include_archived: bool = False, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:view"))) -> list[dict[str, object]]:
+    query = db.query(CardKeyProject)
+    if not include_archived:
+        query = query.filter(CardKeyProject.archived_at.is_(None))
+    projects = query.order_by(CardKeyProject.updated_at.desc()).all()
     return [_project_json(p, db, user) for p in projects if _allowed(p, user, db) or db.query(CardKey.id).filter(
         CardKey.project_id == p.id, CardKey.claimed_by == user.username).first()]
 
@@ -276,6 +279,8 @@ def update_project(project_id: int, body: ProjectBody, db: Session = Depends(get
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
+    if project.archived_at is not None:
+        raise HTTPException(409, "项目已归档，历史记录保留，不能再修改")
     if (body.target_platform.strip() or None) != project.target_platform and project.target_platform and db.query(EmailAccount).filter(
         EmailAccount.claimed_platform == project.target_platform, EmailAccount.claimed_by.isnot(None),
     ).first():
@@ -287,23 +292,43 @@ def update_project(project_id: int, body: ProjectBody, db: Session = Depends(get
 
 
 @router.delete("/{project_id}", response_model=None)
-def delete_project(project_id: int, db: Session = Depends(get_db), _: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
+def delete_project(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_permission("card_key:manage"))) -> dict[str, object]:
     project = db.get(CardKeyProject, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
+    if project.archived_at is not None:
+        return {"deleted": False, "archived": True, "id": project.id}
+    now = datetime.utcnow()
     # Take the SQLite write transaction before checking history so a concurrent claim is either observed or excluded.
-    db.execute(update(CardKeyProject).where(CardKeyProject.id == project_id).values(is_active=False))
-    if db.query(CardKey).filter(CardKey.project_id == project_id, ~_untouched_key()).first() or db.query(CardKeyEmailUsage).filter_by(project_id=project_id).first() or db.query(FailureReport.id).filter_by(project_id=project_id).first():
+    locked = db.execute(update(CardKeyProject).where(
+        CardKeyProject.id == project_id, CardKeyProject.archived_at.is_(None),
+    ).values(is_active=False, updated_at=now)).rowcount
+    if locked != 1:
         db.rollback()
-        raise HTTPException(409, "项目已有领取或完成记录，请结束项目以保留历史")
-    if project.target_platform and db.query(EmailAccount).filter(EmailAccount.claimed_platform == project.target_platform, EmailAccount.claimed_by.isnot(None)).first():
-        db.rollback()
-        raise HTTPException(409, "该平台有领取中的邮箱，请先完成注册或归还")
+        raise HTTPException(409, "项目状态已变化，请刷新后重试")
+    has_history = bool(
+        db.query(CardKey.id).filter(CardKey.project_id == project_id, ~_untouched_key()).first()
+        or db.query(CardKeyEmailUsage.id).filter_by(project_id=project_id).first()
+        or db.query(FailureReport.id).filter_by(project_id=project_id).first()
+    )
+    if has_history:
+        changed = db.execute(update(CardKeyProject).where(
+            CardKeyProject.id == project_id, CardKeyProject.archived_at.is_(None),
+        ).values(archived_at=now, archived_by=user.username)).rowcount
+        if changed != 1:
+            db.rollback()
+            raise HTTPException(409, "项目状态已变化，请刷新后重试")
+        db.commit()
+        return {"deleted": False, "archived": True, "id": project_id,
+                "archived_at": _time_json(now), "archived_by": user.username}
     db.query(CardKey).filter_by(project_id=project_id).delete(synchronize_session=False)
     db.query(CardKeyBatch).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.delete(project)
+    deleted = db.query(CardKeyProject).filter(CardKeyProject.id == project_id).delete(synchronize_session=False)
+    if deleted != 1:
+        db.rollback()
+        raise HTTPException(409, "项目状态已变化，请刷新后重试")
     db.commit()
-    return {"deleted": True}
+    return {"deleted": True, "archived": False, "id": project_id}
 
 
 @router.post("/{project_id}/import", response_model=None)
@@ -711,14 +736,14 @@ def claim_email(project_id: int, db: Session = Depends(get_db), user: User = Dep
         raise HTTPException(409, "项目已结束，不能领取新邮箱")
     candidates = db.query(EmailAccount).filter(
         EmailAccount.management_status == "闲置", EmailAccount.claimed_by.is_(None),
-        EmailAccount.gmail_check_status == "正常",
+        EmailAccount.allow_card_key_claim.is_(True),
         or_(EmailAccount.platform_tags.is_(None), ~EmailAccount.platform_tags.icontains(json.dumps(platform, ensure_ascii=False), autoescape=True)),
     ).order_by(EmailAccount.id).all()
     for candidate in candidates:
         try:
             changed = db.execute(update(EmailAccount).where(
                 EmailAccount.id == candidate.id, EmailAccount.management_status == "闲置",
-                EmailAccount.claimed_by.is_(None), EmailAccount.gmail_check_status == "正常",
+                EmailAccount.claimed_by.is_(None), EmailAccount.allow_card_key_claim.is_(True),
                 EmailAccount.platform_tags == candidate.platform_tags,
             ).values(claimed_by=user.username, claimed_at=datetime.utcnow(), claimed_platform=platform)).rowcount
         except IntegrityError:

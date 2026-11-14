@@ -79,3 +79,4 @@ def test_localized_export_uses_chinese_headers(db):
     workbook = openpyxl.load_workbook(io.BytesIO(exported), read_only=True)
     headers = [cell.value for cell in workbook.active[1]]
     assert headers[:2] == ["账号", "平台"]
+    assert not {"Gmail检测结果", "Gmail原始结果", "Gmail最后检测时间"} & set(headers)

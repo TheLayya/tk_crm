@@ -4,7 +4,7 @@
     <span v-if="error">加载失败 <el-button link @click="load">重试</el-button></span>
     <template v-else>
       <span v-if="!current.length">暂无当前关联</span>
-      <el-tag v-for="relation in current" :key="relation.id" size="small" type="success">{{ relation.email }}{{ relation.check_status ? ` · ${relation.check_status}` : '' }}</el-tag>
+      <el-tag v-for="relation in current" :key="relation.id" size="small" type="success">{{ relation.email }}</el-tag>
       <details v-if="history.length"><summary>历史关联 {{ history.length }} 次</summary><div v-for="relation in history" :key="relation.id">{{ relation.email }} · 已解绑</div></details>
       <el-button link type="primary" @click="router.push('/emails')">管理邮箱</el-button>
     </template>

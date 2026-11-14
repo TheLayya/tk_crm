@@ -3,14 +3,14 @@
     <!-- 侧边栏：移动端隐藏 -->
     <el-aside
       v-if="!isMobile"
-      :width="isTablet ? '64px' : '200px'"
+      :width="isTablet ? '64px' : '232px'"
       class="sidebar"
       :class="{ 'sidebar-collapsed': sidebarCollapsed }"
     >
       <div class="logo" :class="{ 'logo-collapsed': sidebarCollapsed }">
         <img v-if="settings.logo_image" :src="settings.logo_image" alt="Logo" class="logo-image" />
         <el-icon v-else class="logo-symbol"><Monitor /></el-icon>
-        <span v-if="!sidebarCollapsed" class="logo-text">{{ settings.site_name }}</span>
+        <span v-if="!sidebarCollapsed" class="logo-text">{{ settings.site_name }}<small>TEAM WORKSPACE</small></span>
       </div>
       <div v-if="!sidebarCollapsed" class="workspace-caption">团队工作台</div>
       <el-menu
@@ -62,6 +62,10 @@
           <template #title><span>系统设置</span></template>
         </el-menu-item>
       </el-menu>
+      <div v-if="!sidebarCollapsed" class="lay-companion">
+        <img src="/lay/koharu-avatar.webp" alt="" width="44" height="44" />
+        <div><strong>今天也一起加油</strong><span>你的团队搭档，lay</span></div>
+      </div>
       <button class="sidebar-version" type="button" @click="openVersionDrawer">
         <span v-if="!sidebarCollapsed">版本 {{ APP_VERSION }}</span>
         <span v-else>v{{ APP_VERSION }}</span>
@@ -71,7 +75,7 @@
 
     <el-container>
       <!-- 顶部栏 -->
-      <el-header class="header" :class="{ 'header-mobile': isMobile }" :height="isMobile ? undefined : '56px'">
+      <el-header class="header" :class="{ 'header-mobile': isMobile }" :height="isMobile ? undefined : '64px'">
         <!-- 移动端：iOS 风格顶部栏 -->
         <template v-if="isMobile">
           <div class="header-mobile-left"></div>
@@ -98,6 +102,14 @@
       </el-header>
 
       <el-main class="main-content">
+        <section v-if="['/overview', '/monitor'].includes(route.path)" class="lay-welcome" aria-label="团队工作台">
+          <div class="lay-welcome-copy">
+            <p class="lay-welcome-greeting">欢迎回来，{{ authStore.user?.real_name || authStore.user?.username }}</p>
+            <h1>{{ currentPageTitle }}</h1>
+            <p>让每一份数据，都成为团队默契的一部分。</p>
+            <span class="lay-welcome-note"><i aria-hidden="true" /> 你的团队搭档，lay</span>
+          </div>
+        </section>
         <router-view />
       </el-main>
     </el-container>
@@ -122,7 +134,7 @@
         <el-alert v-if="updateInfo?.updating" type="info" :closable="false" :title="updateInfo.update_message || '正在更新，服务可能暂时重启，等待恢复后页面会自动刷新'" />
         <el-alert v-if="updateInfo?.update_waiting" type="warning" :closable="false" :title="updateInfo.update_message" show-icon />
         <el-alert v-if="updateInfo?.update_error" type="error" :closable="false" :title="updateInfo.update_error" show-icon />
-        <el-alert v-if="updateInfo && !updateInfo.error && !updateInfo.configured" type="warning" :closable="false" title="本机尚未初始化更新器，暂不能自动更新" />
+        <el-alert v-if="updateInfo?.has_update && !updateInfo.error && !updateInfo.configured" type="warning" :closable="false" title="本机尚未初始化更新器，暂不能自动更新" />
         <el-alert v-if="updateInfo?.has_update && updateInfo.client_type === 'desktop' && updateInfo.desktop_supported === false" type="warning" :closable="false" title="当前发布暂未提供 Windows 安装包，请联系管理员发布桌面安装包" />
         <el-alert v-if="updateInfo?.has_update && !authStore.hasPermission('settings:edit')" type="warning" :closable="false" title="当前账号只有查看权限，请联系管理员执行更新" />
         <ul v-if="updateInfo?.has_update" class="update-changes">
@@ -157,13 +169,13 @@ import MemoReminder from '@/components/MemoReminder.vue'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const APP_VERSION = '1.1.23'
+const APP_VERSION = '1.1.24'
 const versionDrawerVisible = ref(false)
 const RELEASES = [
   {
     version: APP_VERSION,
-    date: '2026-10-16',
-    items: ['长卡密单行预览，点击查看全文并完整复制', '卡密记录按视口自适应滚动，分页保持可见', '成员工作量独立页签，按日期和成员查看汇总与明细']
+    date: '2026-11-14',
+    items: ['邮箱新增独立 CK 栏目并支持 Flow 加号提取', '管理员可批量控制邮箱是否允许卡密领取', 'Gmail 检测移除，项目历史支持安全归档']
   },
   {
     version: '1.1.22',
@@ -580,14 +592,14 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #172333;
+  background: #253147;
   color: #d3dce7;
-  border-right: 1px solid #223247;
+  border-right: 1px solid #303e54;
   transition: width 160ms ease;
 }
 
 .logo {
-  height: 68px;
+  height: 86px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -596,17 +608,18 @@ onUnmounted(() => {
 }
 
 .logo-collapsed { padding: 0 12px; justify-content: center; }
-.logo-text { font-size: 16px; font-weight: 650; letter-spacing: -.3px; color: #f1f5fa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.logo-symbol { width: 28px; height: 28px; flex-shrink: 0; color: #91baf0; font-size: 22px; }
+.logo-text { font-size: 16px; font-weight: 650; letter-spacing: -.3px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.logo-text small { display: block; margin-top: 6px; color: #b1bdd1; font-size: 10px; font-weight: 400; letter-spacing: 1.2px; }
+.logo-symbol { width: 34px; height: 34px; flex-shrink: 0; color: transparent; font-size: 0; border-radius: 50%; background: #fff0f5 url('/lay/koharu-avatar.webp') center / cover no-repeat; }
 .logo-image { max-width: 48px; max-height: 36px; object-fit: contain; flex-shrink: 0; }
 .logo-collapsed .logo-image { max-width: 36px; max-height: 36px; }
-.workspace-caption { padding: 6px 22px 10px; color: #7e90a8; font-size: 11px; letter-spacing: 1px; }
+.workspace-caption { padding: 6px 22px 10px; color: #b1bdd1; font-size: 11px; letter-spacing: .4px; }
 
 .sidebar-menu {
   --el-menu-bg-color: transparent;
   --el-menu-text-color: #aebed0;
-  --el-menu-hover-bg-color: #223247;
-  --el-menu-active-color: #e7f0fc;
+  --el-menu-hover-bg-color: #344259;
+  --el-menu-active-color: #f2a6c6;
   --el-menu-item-height: 42px;
   min-height: 0;
   overflow-y: auto;
@@ -615,7 +628,7 @@ onUnmounted(() => {
   flex: 1;
   padding: 0 0 12px;
   scrollbar-width: thin;
-  scrollbar-color: #3b4c63 transparent;
+  scrollbar-color: #53627b transparent;
 }
 
 .sidebar-menu :deep(.el-menu-item),
@@ -623,22 +636,26 @@ onUnmounted(() => {
   height: 42px;
   line-height: 42px;
   margin: 3px 10px;
-  border-radius: 6px;
-  color: #aebed0;
+  border-radius: 9px;
+  color: #b1bdd1;
   font-size: 13px;
   transition: color 140ms ease, background-color 140ms ease;
 }
 
 .sidebar-menu :deep(.el-menu-item .el-icon) { font-size: 18px; margin-right: 10px; }
 .sidebar-menu :deep(.el-menu-item:hover),
-.sidebar-menu :deep(.el-sub-menu__title:hover) { background: #223247; color: #f1f5fa; }
-.sidebar-menu :deep(.el-menu-item.is-active) { background: #293d56; color: #f1f6ff; box-shadow: inset 3px 0 #86b6f4; font-weight: 600; }
-.sidebar-menu :deep(.el-menu--inline) { background: #142030; }
+.sidebar-menu :deep(.el-sub-menu__title:hover) { background: #344259; color: #fff; }
+.sidebar-menu :deep(.el-menu-item.is-active) { background: #4e3d52; color: #f2a6c6; box-shadow: none; font-weight: 600; }
+.sidebar-menu :deep(.el-menu--inline) { background: #202a40; }
 .sidebar-menu :deep(.el-menu--inline .el-menu-item) { min-width: unset; }
 .sidebar-menu :deep(.el-menu-item:focus-visible) { outline: 2px solid #86b6f4; outline-offset: -2px; }
 .sidebar-collapsed .sidebar-menu { width: 64px; }
 .sidebar-collapsed .sidebar-menu :deep(.el-menu-item) { margin: 4px 8px; padding: 0; justify-content: center; }
 .sidebar-collapsed .sidebar-menu :deep(.el-menu-item .el-icon) { margin: 0; }
+.lay-companion { display: flex; align-items: center; flex-shrink: 0; gap: 10px; margin: 8px 14px 14px; padding: 12px; border-radius: 12px; background: #303e54; }
+.lay-companion img { flex-shrink: 0; border-radius: 50%; object-fit: cover; }
+.lay-companion strong { display: block; color: #edf0f7; font-size: 12px; font-weight: 500; }
+.lay-companion span { display: block; margin-top: 4px; color: #b1bdd1; font-size: 11px; }
 
 .sidebar-version {
   flex-shrink: 0;
@@ -647,14 +664,14 @@ onUnmounted(() => {
   margin: 0 12px;
   padding: 0 10px;
   border: 0;
-  border-top: 1px solid #2a394c;
+  border-top: 1px solid #303e54;
   background: transparent;
-  color: #8fa1b8;
+  color: #9daac0;
   font-size: 11px;
   text-align: left;
   cursor: pointer;
 }
-.sidebar-version:hover { color: #e3edf9; }
+.sidebar-version:hover { color: #fff; }
 .sidebar-version:focus-visible { outline: 2px solid #86b6f4; outline-offset: -2px; }
 .sidebar-collapsed .sidebar-version { width: 100%; margin: 0; padding: 0; text-align: center; font-size: 10px; }
 .version-update-dot { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: #ef8a87; vertical-align: middle; }
@@ -665,7 +682,7 @@ onUnmounted(() => {
   justify-content: space-between;
   flex-shrink: 0;
   gap: 16px;
-  padding: 0 20px;
+  padding: 0 32px;
   background: #fff;
   border-bottom: 1px solid var(--color-border);
 }
@@ -675,12 +692,19 @@ onUnmounted(() => {
 .header-context :deep(.el-breadcrumb__separator) { color: #bac3cf; font-weight: 400; margin: 0 12px; }
 .header-right { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
 .user-identity { display: flex; align-items: center; gap: 8px; padding-left: 16px; border-left: 1px solid var(--color-border); }
-.user-avatar { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: #edf2f8; border: 1px solid #dfe6ef; border-radius: 7px; color: #3d5879; font-size: 12px; font-weight: 600; }
+.user-avatar { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--workspace-accent-soft); border: 1px solid #f6cdda; border-radius: 50%; color: var(--workspace-accent); font-size: 12px; font-weight: 600; }
 .username { font-size: 13px; color: #425268; }
 .header-right :deep(.el-button.is-link) { font-size: 12px; color: #64758b; }
 .header-right :deep(.el-button.is-link:hover) { color: var(--color-accent); }
 
-.main-content { background: var(--color-bg-page); padding: 18px 20px 24px; }
+.main-content { background: var(--color-bg-page); padding: 24px 32px 32px; }
+.lay-welcome { min-height: 208px; display: flex; align-items: center; margin-bottom: 20px; padding: 28px 32px; border-radius: 18px; background: #fff0f5 url('/lay/koharu-banner.webp') center 15% / cover no-repeat; }
+.lay-welcome-copy { width: 53%; min-width: 0; }
+.lay-welcome-greeting { margin: 0 0 10px; color: #7d5c70; font-size: 13px; }
+.lay-welcome h1 { margin: 0 0 12px; color: #283348; font-size: 28px; line-height: 1.3; letter-spacing: -.6px; }
+.lay-welcome-copy > p:not(.lay-welcome-greeting) { margin: 0; color: #6b758a; font-size: 13px; line-height: 1.7; }
+.lay-welcome-note { display: inline-flex; align-items: center; gap: 7px; margin-top: 22px; color: #9c4266; font-size: 12px; }
+.lay-welcome-note i { width: 6px; height: 6px; border-radius: 50%; background: #ce3e77; }
 
 /* Mobile keeps its fixed navigation and touch targets. */
 .header-mobile {
@@ -692,9 +716,7 @@ onUnmounted(() => {
   padding-top: env(safe-area-inset-top);
   padding-left: 8px;
   padding-right: 8px;
-  background: rgba(255, 255, 255, .94);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: #fff;
   border-bottom: 1px solid var(--color-border);
   z-index: 100;
 }
@@ -718,6 +740,12 @@ onUnmounted(() => {
   .header { padding: 0 16px; }
 }
 @media (max-width: 768px) {
+  .lay-welcome { min-height: 150px; margin: 0 12px 12px; padding: 20px; border-radius: 14px; background-position: 55% 10%; }
+  .lay-welcome-copy { width: 60%; }
+  .lay-welcome h1 { font-size: 22px; margin-bottom: 8px; }
+  .lay-welcome-greeting { font-size: 12px; }
+  .lay-welcome-copy > p:not(.lay-welcome-greeting) { display: none; }
+  .lay-welcome-note { font-size: 11px; margin-top: 8px; }
   .main-content {
     padding-top: calc(44px + env(safe-area-inset-top) + 12px) !important;
     padding-bottom: calc(49px + env(safe-area-inset-bottom) + 12px) !important;
@@ -726,4 +754,5 @@ onUnmounted(() => {
     background: var(--ios-bg);
   }
 }
+@media (max-height: 740px) { .lay-companion { display: none; } }
 </style>

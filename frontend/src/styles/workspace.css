@@ -1,23 +1,23 @@
-﻿:root {
-  --workspace-bg: #f3f6fa;
+:root {
+  --workspace-bg: #f7f8fc;
   --workspace-surface: #ffffff;
-  --workspace-surface-muted: #f7f9fc;
-  --workspace-border: #e2e8f0;
-  --workspace-border-soft: #edf1f6;
-  --workspace-text: #203047;
-  --workspace-text-2: #596b82;
-  --workspace-text-3: #8a98aa;
-  --workspace-accent: #3269a9;
-  --workspace-accent-soft: #eaf2fb;
-  --workspace-accent-border: #c8dcf3;
-  --workspace-success: #23815b;
-  --workspace-warning: #a66b19;
-  --workspace-danger: #c34e59;
-  --workspace-radius: 8px;
-  --workspace-shadow: 0 1px 2px rgba(27, 51, 79, .04), 0 5px 16px rgba(35, 65, 98, .035);
+  --workspace-surface-muted: #f3f5fa;
+  --workspace-border: #e5e9f1;
+  --workspace-border-soft: #edf0f5;
+  --workspace-text: #283348;
+  --workspace-text-2: #536077;
+  --workspace-text-3: #6b758a;
+  --workspace-accent: #ce3e77;
+  --workspace-accent-soft: #fff0f5;
+  --workspace-accent-border: #f0acc6;
+  --workspace-success: #31856e;
+  --workspace-warning: #a97232;
+  --workspace-danger: #cb4d61;
+  --workspace-radius: 14px;
+  --workspace-shadow: 0 8px 24px rgba(40, 51, 72, .055);
   --color-bg-page: var(--workspace-bg);
   --color-bg-card: var(--workspace-surface);
-  --color-bg-hover: #f4f8fd;
+  --color-bg-hover: #fff7fa;
   --color-border: var(--workspace-border);
   --color-border-subtle: var(--workspace-border-soft);
   --color-text-primary: var(--workspace-text);
@@ -26,15 +26,20 @@
   --color-accent: var(--workspace-accent);
   --color-accent-light: var(--workspace-accent-soft);
   --shadow-card: var(--workspace-shadow);
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --el-color-primary-dark-2: #285b96;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --el-color-primary-dark-2: #b72c65;
   --el-color-primary: var(--workspace-accent);
-  --el-color-primary-light-3: #6d96c4;
-  --el-color-primary-light-5: #9bb7d7;
-  --el-color-primary-light-7: #c6d8eb;
-  --el-color-primary-light-8: #dbe7f3;
-  --el-color-primary-light-9: #edf4fb;
+  --el-color-primary-light-3: #e983a9;
+  --el-color-primary-light-5: #f0acc6;
+  --el-color-primary-light-7: #f6cdda;
+  --el-color-primary-light-8: #fbe1e9;
+  --el-color-primary-light-9: #fff0f5;
+  --el-color-success: var(--workspace-success);
+  --el-color-warning: var(--workspace-warning);
+  --el-color-danger: var(--workspace-danger);
+  --ios-blue: var(--workspace-accent);
+  --ios-bg: var(--workspace-bg);
   --el-border-color: var(--workspace-border);
   --el-border-color-light: var(--workspace-border-soft);
   --el-fill-color-blank: var(--workspace-surface);
@@ -42,7 +47,7 @@
   --el-text-color-primary: var(--workspace-text);
   --el-text-color-regular: var(--workspace-text-2);
   --el-text-color-secondary: var(--workspace-text-3);
-  --el-border-radius-base: 6px;
+  --el-border-radius-base: 10px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -85,19 +90,19 @@ body, button, input, textarea, select { font-family: -apple-system, BlinkMacSyst
   min-height: 32px;
   background: #fff;
   box-shadow: 0 0 0 1px var(--workspace-border) inset;
-  border-radius: 6px;
+  border-radius: 10px;
   transition: box-shadow 140ms ease, background-color 140ms ease;
 }
 .layout-container .el-input__wrapper:hover,
-.layout-container .el-select__wrapper:hover { box-shadow: 0 0 0 1px #b9c9dc inset; }
+.layout-container .el-select__wrapper:hover { box-shadow: 0 0 0 1px #d1c5d0 inset; }
 .layout-container .el-input__wrapper.is-focus,
 .layout-container .el-select__wrapper.is-focused,
 .layout-container .el-textarea__inner:focus,
 .layout-container .el-date-editor.el-input__wrapper.is-focus { box-shadow: 0 0 0 2px var(--workspace-accent-border) inset; }
-.layout-container .el-button { border-radius: 6px; font-weight: 500; transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, transform 100ms ease; }
+.layout-container .el-button { border-radius: 10px; font-weight: 500; transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, transform 100ms ease; }
 .layout-container .el-button:not(.is-link):not(.is-text) { min-height: 32px; }
 .layout-container .el-button:active { transform: translateY(1px); }
-.layout-container .el-button--primary.is-plain { color: var(--workspace-accent); border-color: var(--workspace-accent-border); background: #f8fbff; }
+.layout-container .el-button--primary.is-plain { color: var(--workspace-accent); border-color: var(--workspace-accent-border); background: #fff8fb; }
 .layout-container .el-button--primary.is-plain:hover { background: var(--workspace-accent-soft); }
 .layout-container .el-button:focus-visible,
 .layout-container .el-checkbox__input:focus-visible + .el-checkbox__label { outline: 2px solid var(--workspace-accent-border); outline-offset: 2px; }
@@ -105,18 +110,18 @@ body, button, input, textarea, select { font-family: -apple-system, BlinkMacSyst
 /* Data tables: quiet header, strong row rhythm, useful selection state. */
 .layout-container .el-table {
   --el-table-border-color: var(--workspace-border-soft);
-  --el-table-header-bg-color: #f7f9fc;
+  --el-table-header-bg-color: #fbf9fb;
   --el-table-header-text-color: var(--workspace-text-2);
-  --el-table-row-hover-bg-color: #f5f9fd;
+  --el-table-row-hover-bg-color: #fff7fa;
   color: var(--workspace-text);
   font-size: 13px;
 }
-.layout-container .el-table th.el-table__cell { height: 38px; padding: 7px 0; background: #f7f9fc; color: var(--workspace-text-2); font-size: 12px; font-weight: 600; }
+.layout-container .el-table th.el-table__cell { height: 38px; padding: 7px 0; background: #fbf9fb; color: var(--workspace-text-2); font-size: 12px; font-weight: 600; }
 .layout-container .el-table td.el-table__cell { height: 42px; padding: 7px 0; }
 .layout-container .el-table .el-table__row td.el-table__cell { border-bottom-color: var(--workspace-border-soft); }
 .layout-container .el-table .el-table__row.current-row td.el-table__cell,
 .layout-container .el-table .el-table__row.el-table__row--striped.current-row td.el-table__cell { background: var(--workspace-accent-soft); }
-.layout-container .el-table :where(.el-table__row):hover > td.el-table__cell { background: #f5f9fd; }
+.layout-container .el-table :where(.el-table__row):hover > td.el-table__cell { background: #fff7fa; }
 .layout-container .el-table .cell { line-height: 20px; }
 .layout-container .el-table--border::after,
 .layout-container .el-table--group::after,
@@ -165,7 +170,7 @@ body, button, input, textarea, select { font-family: -apple-system, BlinkMacSyst
 .layout-container .el-form-item { margin-bottom: 14px; }
 .layout-container .el-form-item__label { color: var(--workspace-text-2); font-size: 13px; }
 .layout-container .el-divider { border-color: var(--workspace-border-soft); }
-.layout-container .el-alert { border-radius: 6px; }
+.layout-container .el-alert { border-radius: 10px; }
 .el-message-box { border-radius: 10px; }
 
 /* Number-heavy operations remain easy to scan. */
@@ -184,8 +189,8 @@ body, button, input, textarea, select { font-family: -apple-system, BlinkMacSyst
   .layout-container .email-page .filters .el-select { width: 174px; min-width: 174px; flex: 0 0 174px; }
   .layout-container .email-page .filters .el-input { width: 300px; flex: 1 1 260px; max-width: 420px; }
   .layout-container .main-content .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper table,
-  .layout-container .main-content .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper th { background: #f7f9fc !important; }
-  .layout-container .main-content .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper { top: -18px; }
+  .layout-container .main-content .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper th { background: #fbf9fb !important; }
+  .layout-container .main-content .el-table:not(.el-table--scrollable-y) > .el-table__inner-wrapper > .el-table__header-wrapper { top: -24px; }
 }
 
 @media (min-width: 769px) and (max-width: 1180px) {
@@ -193,6 +198,10 @@ body, button, input, textarea, select { font-family: -apple-system, BlinkMacSyst
 }
 
 @media (max-width: 768px) {
+  .layout-container .main-content { background: var(--workspace-bg); }
+  .layout-container .mobile-tab-bar { background: #fff; border-top-color: var(--workspace-border); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .layout-container .mobile-tab-bar .tab-item { color: #8b8490; }
+  .layout-container .mobile-tab-bar .tab-item.is-active { color: var(--workspace-accent); }
   .layout-container .main-content .el-card__body { padding: 14px; }
   .layout-container .main-content .page-heading { margin-bottom: 10px; }
   .layout-container .el-table th.el-table__cell { height: 36px; }

@@ -11,7 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
-from app.services.encryption_service import EncryptedType
+from app.services.encryption_service import EncryptedTextType, EncryptedType
 
 if TYPE_CHECKING:
     from app.models.device import Device
@@ -93,7 +93,7 @@ class OpAccount(Base):
         nullable=False,
     )
     collect_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    # Legacy Gmail detection columns retained for existing databases; detection is removed.
     gmail_check_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     gmail_check_raw_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
     gmail_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -150,6 +150,7 @@ class EmailAccount(Base):
     password: Mapped[str | None] = mapped_column(EncryptedType, nullable=True)
     recovery_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     totp_secret: Mapped[str | None] = mapped_column(EncryptedType, nullable=True)
+    ck: Mapped[str | None] = mapped_column(EncryptedTextType, nullable=True)
     account_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     account_created_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     country: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -157,6 +158,11 @@ class EmailAccount(Base):
     claimed_by: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     claimed_platform: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    allow_card_key_claim: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    # Legacy Gmail detection columns retained for existing databases; detection is removed.
+    gmail_check_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    gmail_check_raw_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    gmail_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     device_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True, index=True)
     node_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("proxy_nodes.id", ondelete="SET NULL"), nullable=True, index=True)
     purchase_channel: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -172,9 +178,6 @@ class EmailAccount(Base):
         nullable=False,
         index=True,
     )
-    gmail_check_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    gmail_check_raw_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    gmail_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     registrant: Mapped[str | None] = mapped_column(String(255), nullable=True)
     operator: Mapped[str | None] = mapped_column(String(255), nullable=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)

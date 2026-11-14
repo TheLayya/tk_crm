@@ -3,15 +3,6 @@
  */
 import request from './request'
 
-export function checkGmailAccounts(accountIds) {
-  return request({
-    url: '/op-accounts/gmail-check',
-    method: 'post',
-    data: { account_ids: accountIds, consent: true },
-    timeout: 90000
-  })
-}
-
 /**
  * Get op account stats (total, by_status, by_platform, costs)
  */

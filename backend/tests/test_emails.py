@@ -421,12 +421,12 @@ def test_email_delete_rejects_relation_history(client, db, super_admin):
     assert response.status_code == 409
 
 
-def test_email_scope_and_check_require_consent(client, db, normal_user, monkeypatch):
+def test_email_scope_requires_visibility_and_check_route_is_removed(client, db, normal_user):
     role = Role(name="email-manager", data_scope="self")
     db.add(role)
     db.flush()
     db.add(UserRole(user_id=normal_user.id, role_id=role.id))
-    for permission in ("email:view", "email:manage", "email:check"):
+    for permission in ("email:view", "email:manage"):
         db.add(RolePermission(role_id=role.id, permission=permission))
     hidden = EmailAccount(email="hidden@gmail.com", registrant="root")
     db.add(hidden)
@@ -434,9 +434,18 @@ def test_email_scope_and_check_require_consent(client, db, normal_user, monkeypa
     headers = auth_headers(normal_user)
     assert client.get("/api/emails", headers=headers).json()["total"] == 0
     assert client.put(f"/api/emails/{hidden.id}", headers=headers, json={"country": "France"}).status_code == 404
-    monkeypatch.setattr("app.api.emails.check_gmail_accounts", lambda emails: pytest.fail("unexpected transmission"))
-    assert client.post("/api/emails/check", headers=headers, json={"account_ids": [hidden.id], "consent": True}).status_code == 404
-    assert client.post("/api/emails/check", headers=headers, json={"account_ids": [hidden.id], "consent": False}).status_code == 422
+    assert client.post("/api/emails/check", headers=headers, json={"account_ids": [hidden.id], "consent": True}).status_code == 405
+
+
+def test_email_api_exposes_ck_without_gmail_detection_fields(client, db, super_admin):
+    email = EmailAccount(email="surface@gmail.com", registrant=super_admin.username, ck="fixture-cookie")
+    db.add(email)
+    db.commit()
+    headers = auth_headers(super_admin)
+    item = client.get("/api/emails", headers=headers).json()["items"][0]
+    assert item["ck"] == "fixture-cookie"
+    assert not [key for key in item if "gmail" in key.lower()]
+    assert client.post("/api/emails/check", headers=headers, json={"account_ids": [email.id], "consent": True}).status_code == 405
 
 
 def test_email_totp_standard_vector_and_auth(client, db, super_admin, normal_user, monkeypatch):
@@ -521,17 +530,6 @@ def test_email_totp_respects_scope(client, db, normal_user, other_user, super_ad
             assert response.status_code == 404
             assert secret not in response.text and "287082" not in response.text
     assert client.get("/api/emails/999999/totp", headers=headers).status_code == 404
-
-
-def test_email_probe_does_not_override_management_status(client, db, super_admin, monkeypatch):
-    email = EmailAccount(email="probe@gmail.com", registrant="root", management_status="锁定")
-    db.add(email)
-    db.commit()
-    monkeypatch.setattr("app.api.emails.check_gmail_accounts", lambda emails: [{"email": emails[0], "status": "Disabled"}])
-    response = client.post("/api/emails/check", headers=auth_headers(super_admin), json={"account_ids": [email.id], "consent": True})
-    assert response.status_code == 200, response.text
-    db.refresh(email)
-    assert (email.gmail_check_status, email.management_status) == ("封禁", "锁定")
 
 
 def test_email_trade_and_shared_assets(client, db, super_admin, make_node):
@@ -769,8 +767,7 @@ def test_email_batch_status_only_changes_usage_and_records_operator(client, db, 
     account = make_account(db)
     emails = [EmailAccount(email=f"status-{index}@gmail.com", registrant=super_admin.username,
                            password="original-password", totp_secret="ORIGINALKEY", recovery_email="helper@example.com",
-                           management_status="使用中", gmail_check_status="正常", gmail_check_raw_status="live",
-                           gmail_checked_at=datetime(2026, 10, 1), operator="original-operator", platform_tags='["TikTok"]',
+                           management_status="使用中", operator="original-operator", platform_tags='["TikTok"]',
                            sale_customer="原客户", sale_price=Decimal("8.50"), sale_date=date(2026, 10, 1), sellers='["seller"]')
               for index in range(2)]
     db.add_all(emails)
@@ -789,33 +786,12 @@ def test_email_batch_status_only_changes_usage_and_records_operator(client, db, 
         assert email.management_status == status
         assert (email.password, email.totp_secret, email.recovery_email, email.operator, email.platform_tags) == (
             "original-password", "ORIGINALKEY", "helper@example.com", "original-operator", '["TikTok"]')
-        assert (email.gmail_check_status, email.gmail_check_raw_status, email.gmail_checked_at) == (
-            "正常", "live", datetime(2026, 10, 1))
         assert (email.sale_customer, email.sale_price, email.sale_date, email.sellers) == (
             "原客户", Decimal("8.50"), date(2026, 10, 1), '["seller"]')
     db.refresh(relation)
     assert relation.unbound_at is None
     log = db.query(OperationLog).filter_by(summary="UPDATE /api/emails/batch-status").one()
     assert (log.module, log.action, log.username, log.result) == ("邮箱管理", "UPDATE", "root", "success")
-
-
-@pytest.mark.parametrize("status", ["正常", "封禁", "验证", "未注册", "检测失败", None])
-def test_email_batch_check_status_is_manual_and_keeps_claims_and_trade(client, db, super_admin, status):
-    email = EmailAccount(email="manual-check@example.com", registrant=super_admin.username,
-                         management_status="已出售", gmail_check_status="封禁", gmail_check_raw_status="disabled",
-                         gmail_checked_at=datetime(2026, 10, 1), claimed_by="claim-user", claimed_platform="TikTok",
-                         claimed_at=datetime(2026, 10, 2), sale_customer="原客户", sale_price=Decimal("8.50"))
-    db.add(email)
-    db.commit()
-    response = client.post("/api/emails/batch-status", headers=auth_headers(super_admin),
-                           json={"email_ids": [email.id], "gmail_check_status": status})
-    assert response.status_code == 200, response.text
-    db.refresh(email)
-    assert (email.gmail_check_status, email.gmail_check_raw_status, email.gmail_checked_at) == (
-        status, "手动标记" if status else None, None)
-    assert (email.management_status, email.claimed_by, email.claimed_platform, email.claimed_at) == (
-        "已出售", "claim-user", "TikTok", datetime(2026, 10, 2))
-    assert (email.sale_customer, email.sale_price) == ("原客户", Decimal("8.50"))
 
 
 def test_email_batch_status_requires_one_valid_field_and_bounded_ids(client, db, super_admin):
@@ -837,17 +813,16 @@ def test_email_batch_status_requires_one_valid_field_and_bounded_ids(client, db,
                                json={"email_ids": ids, "management_status": "锁定"})
         assert response.status_code == 422, (ids[:2], response.text)
     db.refresh(email)
-    assert email.management_status == "闲置" and email.gmail_check_status is None
+    assert email.management_status == "闲置"
 
 
-@pytest.mark.parametrize("field, status", [("management_status", "锁定"), ("gmail_check_status", "正常")])
 @pytest.mark.parametrize("scope, expected", [
     ("self", {"registrant", "operator"}),
     ("dept", {"registrant", "operator", "peer"}),
     ("all", {"registrant", "operator", "peer", "outside"}),
 ])
 def test_email_batch_status_respects_permissions_scope_and_atomicity(client, db, normal_user, other_user,
-                                                                    super_admin, field, status, scope, expected):
+                                                                    super_admin, scope, expected):
     department = Department(name="email-status-team")
     role = Role(name=f"email-status-{scope}", data_scope=scope)
     db.add_all([department, role])
@@ -859,7 +834,8 @@ def test_email_batch_status_respects_permissions_scope_and_atomicity(client, db,
     emails = {name: EmailAccount(email=f"status-{name}@gmail.com", **owner) for name, owner in owners.items()}
     db.add_all(emails.values())
     db.commit()
-    payload = {"email_ids": [emails["registrant"].id], field: status}
+    status = "锁定"
+    payload = {"email_ids": [emails["registrant"].id], "management_status": status}
     headers = auth_headers(normal_user)
     assert client.post("/api/emails/batch-status", json=payload).status_code == 401
     assert client.post("/api/emails/batch-status", headers=headers, json=payload).status_code == 403
@@ -867,15 +843,16 @@ def test_email_batch_status_respects_permissions_scope_and_atomicity(client, db,
     db.commit()
     for other_id in [999999, *([emails["outside"].id] if scope != "all" else [])]:
         response = client.post("/api/emails/batch-status", headers=headers,
-                               json={"email_ids": [emails["registrant"].id, other_id], field: status})
+                               json={"email_ids": [emails["registrant"].id, other_id], "management_status": status})
         assert response.status_code == 404, response.text
         db.refresh(emails["registrant"])
-        assert getattr(emails["registrant"], field) == ("闲置" if field == "management_status" else None)
+        assert emails["registrant"].management_status == "闲置"
     for name, email in emails.items():
-        response = client.post("/api/emails/batch-status", headers=headers, json={"email_ids": [email.id], field: status})
+        response = client.post("/api/emails/batch-status", headers=headers,
+                               json={"email_ids": [email.id], "management_status": status})
         assert response.status_code == (200 if name in expected else 404), response.text
         db.refresh(email)
-        assert getattr(email, field) == (status if name in expected else "闲置" if field == "management_status" else None)
+        assert email.management_status == (status if name in expected else "闲置")
 
 
 @pytest.mark.parametrize("protected", ["sale", "claim"])
@@ -937,105 +914,77 @@ def test_email_batch_status_supports_500_rows(client, db, super_admin):
     assert db.query(EmailAccount).filter_by(management_status="锁定").count() == 500
 
 
-def test_email_manual_check_and_probe_share_lock_without_blocking_usage_changes(client, db, super_admin, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event
-    from app.api import emails as emails_api
-    from app.api.op_accounts import gmail_check_lock
-    email = EmailAccount(email="status-check-race@gmail.com", registrant=super_admin.username,
-                         gmail_check_status="封禁", gmail_check_raw_status="disabled")
-    db.add(email)
+def test_email_batch_claim_availability_permission_scope_boundaries_and_atomicity(client, db, normal_user, other_user, super_admin):
+    role = Role(name="email-claim-policy", data_scope="self")
+    db.add(role)
+    db.flush()
+    db.add(UserRole(user_id=normal_user.id, role_id=role.id))
+    db.add(RolePermission(role_id=role.id, permission="email:view"))
+    own = EmailAccount(email="claim-own@example.com", registrant=normal_user.username)
+    outside = EmailAccount(email="claim-outside@example.com", registrant=other_user.username)
+    db.add_all([own, outside])
     db.commit()
-    email_id = email.id
-    started, finish = Event(), Event()
-    headers = auth_headers(super_admin)
-    get_email = emails_api.get_email
-
-    def get_email_while_locked(*args, **kwargs):
-        assert gmail_check_lock.locked()
-        return get_email(*args, **kwargs)
-
-    def blocking_probe(addresses):
-        started.set()
-        assert finish.wait(timeout=10)
-        return [{"email": address, "status": "live"} for address in addresses]
-
-    monkeypatch.setattr(emails_api, "get_email", get_email_while_locked)
-    monkeypatch.setattr(emails_api, "check_gmail_accounts", blocking_probe)
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        probe = executor.submit(client.post, "/api/emails/check", headers=headers, json={"account_ids": [email_id], "consent": True})
-        try:
-            assert started.wait(timeout=10)
-            manual = client.post("/api/emails/batch-status", headers=headers,
-                                 json={"email_ids": [email_id], "gmail_check_status": "验证"})
-            assert manual.status_code == 429, manual.text
-            usage = client.post("/api/emails/batch-status", headers=headers,
-                                json={"email_ids": [email_id], "management_status": "锁定"})
-            assert usage.status_code == 200, usage.text
-        finally:
-            finish.set()
-        response = probe.result(timeout=10)
+    headers = auth_headers(normal_user)
+    payload = {"email_ids": [own.id], "allow_card_key_claim": False}
+    assert client.post("/api/emails/batch-claim-availability", headers=headers, json=payload).status_code == 403
+    db.add(RolePermission(role_id=role.id, permission="email:manage"))
+    db.commit()
+    response = client.post("/api/emails/batch-claim-availability", headers=headers, json=payload)
     assert response.status_code == 200, response.text
-    db.refresh(email)
-    assert (email.gmail_check_status, email.gmail_check_raw_status, email.management_status) == ("正常", "live", "锁定")
-    assert email.gmail_checked_at is not None
-    manual = client.post("/api/emails/batch-status", headers=headers,
-                         json={"email_ids": [email_id], "gmail_check_status": "验证"})
-    assert manual.status_code == 200, manual.text
-    db.refresh(email)
-    assert (email.gmail_check_status, email.gmail_check_raw_status, email.gmail_checked_at) == ("验证", "手动标记", None)
-    response = client.post("/api/emails/check", headers=headers, json={"account_ids": [email_id], "consent": True})
-    assert response.status_code == 200, response.text
-    db.refresh(email)
-    assert (email.gmail_check_status, email.gmail_check_raw_status) == ("正常", "live")
-    assert email.gmail_checked_at is not None and not gmail_check_lock.locked()
+    assert response.json() == {"updated": 1, "email_ids": [own.id], "allow_card_key_claim": False}
+    db.refresh(own)
+    assert own.allow_card_key_claim is False
+    blocked = client.post("/api/emails/batch-claim-availability", headers=headers,
+                          json={"email_ids": [own.id, outside.id], "allow_card_key_claim": True})
+    assert blocked.status_code == 404
+    db.refresh(own)
+    assert own.allow_card_key_claim is False
+    bulk = [EmailAccount(email=f"claim-bulk-{index}@example.com", registrant=normal_user.username)
+            for index in range(500)]
+    db.add_all(bulk)
+    db.commit()
+    ids = [email.id for email in bulk]
+    assert client.post("/api/emails/batch-claim-availability", headers=headers,
+                       json={"email_ids": ids, "allow_card_key_claim": False}).json()["updated"] == 500
+    assert client.post("/api/emails/batch-claim-availability", headers=headers,
+                       json={"email_ids": [*ids, own.id], "allow_card_key_claim": True}).status_code == 422
+    for invalid in ({}, {"email_ids": [], "allow_card_key_claim": True},
+                    {"email_ids": [0], "allow_card_key_claim": True},
+                    {"email_ids": [True], "allow_card_key_claim": True},
+                    {"email_ids": ["1"], "allow_card_key_claim": True},
+                    {"email_ids": [1.5], "allow_card_key_claim": True},
+                    {"email_ids": [own.id]},
+                    {"email_ids": [own.id], "allow_card_key_claim": True, "gmail_check_status": "正常"}):
+        assert client.post("/api/emails/batch-claim-availability", headers=headers, json=invalid).status_code == 422, invalid
 
 
-@pytest.mark.parametrize("error", ["missing", "conflict", "commit"])
-def test_email_batch_manual_check_releases_lock_after_error(client, db, super_admin, monkeypatch, error):
-    from fastapi import HTTPException
+def test_email_batch_claim_availability_rejects_disabling_claimed_and_handles_race(client, db, super_admin, monkeypatch):
     from sqlalchemy.orm import Query
-    from app.api import emails as emails_api
-    from app.api.op_accounts import gmail_check_lock
-    email = EmailAccount(email="manual-check-error@gmail.com", registrant=super_admin.username)
-    db.add(email)
+    idle = EmailAccount(email="claim-idle@example.com", registrant=super_admin.username, allow_card_key_claim=True)
+    claimed = EmailAccount(email="claim-claimed@example.com", registrant=super_admin.username,
+                           claimed_by="alice", claimed_platform="TikTok", allow_card_key_claim=True)
+    db.add_all([idle, claimed])
     db.commit()
     headers = auth_headers(super_admin)
-    with monkeypatch.context() as patch:
-        if error == "conflict":
-            patch.setattr(Query, "update", lambda *args, **kwargs: 0)
-        elif error == "commit":
-            def failed_save(session):
-                session.rollback()
-                raise HTTPException(status_code=409, detail="保存冲突")
-            patch.setattr(emails_api, "save", failed_save)
-        response = client.post("/api/emails/batch-status", headers=headers,
-                               json={"email_ids": [999999 if error == "missing" else email.id], "gmail_check_status": "正常"})
-        assert response.status_code == (404 if error == "missing" else 409), response.text
-    assert not gmail_check_lock.locked()
-    response = client.post("/api/emails/batch-status", headers=headers,
-                           json={"email_ids": [email.id], "gmail_check_status": "正常"})
-    assert response.status_code == 200, response.text
-    assert not gmail_check_lock.locked()
+    response = client.post("/api/emails/batch-claim-availability", headers=headers,
+                           json={"email_ids": [idle.id, claimed.id], "allow_card_key_claim": False})
+    assert response.status_code == 409
+    db.refresh(idle)
+    db.refresh(claimed)
+    assert idle.allow_card_key_claim is True and claimed.allow_card_key_claim is True
+    assert client.post("/api/emails/batch-claim-availability", headers=headers,
+                       json={"email_ids": [idle.id, claimed.id], "allow_card_key_claim": True}).status_code == 200
+    original_update = Query.update
 
+    def racing_update(query, *args, **kwargs):
+        claimed.claimed_by = "alice"
+        claimed.claimed_platform = "TikTok"
+        db.commit()
+        return original_update(query, *args, **kwargs)
 
-@pytest.mark.parametrize("failure", ["missing", "unsupported", "service"])
-def test_email_probe_releases_lock_after_validation_or_service_error(client, db, super_admin, monkeypatch, failure):
-    from app.api import emails as emails_api
-    from app.api.op_accounts import gmail_check_lock
-    email = EmailAccount(email="probe-error@example.com" if failure == "unsupported" else "probe-error@gmail.com",
-                         registrant=super_admin.username)
-    db.add(email)
-    db.commit()
-
-    def failed_probe(addresses):
-        raise RuntimeError("synthetic probe failure")
-
-    monkeypatch.setattr(emails_api, "check_gmail_accounts", failed_probe)
-    response = client.post("/api/emails/check", headers=auth_headers(super_admin),
-                           json={"account_ids": [999999 if failure == "missing" else email.id], "consent": True})
-    assert response.status_code == {"missing": 404, "unsupported": 422, "service": 502}[failure], response.text
-    assert not gmail_check_lock.locked()
-    response = client.post("/api/emails/batch-status", headers=auth_headers(super_admin),
-                           json={"email_ids": [email.id], "gmail_check_status": "正常"})
-    assert response.status_code == 200, response.text
+    monkeypatch.setattr(Query, "update", racing_update)
+    response = client.post("/api/emails/batch-claim-availability", headers=headers,
+                           json={"email_ids": [idle.id, claimed.id], "allow_card_key_claim": False})
+    assert response.status_code == 409
+    db.refresh(idle)
+    assert idle.allow_card_key_claim is True
