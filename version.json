@@ -1,17 +1,14 @@
 {
-  "version": "1.1.23",
-  "date": "2026-10-16",
+  "version": "1.1.24",
+  "date": "2026-11-14",
   "changes": [
-    "长卡密和链接单行预览，点击查看全文，复制保留完整原值",
-    "卡密记录按视口自适应高度并独立滚动，支持每页15至100条",
-    "成员工作量独立页签，支持今天、近7天、全部时间及成员筛选",
-    "成员汇总与完成明细独立切换，导出当前日期和成员范围的完整CSV"
+    "邮箱新增独立 CK Cookie 栏目，支持 Flow 加号提取与复制",
+    "管理员可批量控制邮箱是否允许卡密项目领取，默认关闭",
+    "卡密项目领取仅使用明确允许的闲置邮箱，项目历史支持归档删除",
+    "移除 Gmail 检测能力并保留历史数据库列兼容"
   ],
-  "source_commit": "bdd04dc22f9b0f28364eea0e2e84fdd4dd0ce5f5",
-  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.23/release-v1.1.23.tar.gz",
-  "sha256": "7832f84be668a014598a4e631cbf4d70729af6e46a2d2912fd31b8bf9077569b",
-  "server_source_commit": "bdd04dc22f9b0f28364eea0e2e84fdd4dd0ce5f5",
-  "windows_source_commit": "bdd04dc22f9b0f28364eea0e2e84fdd4dd0ce5f5",
-  "windows_package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.23/TkCRM-1.1.23-win-x64-setup.exe",
-  "windows_sha256": "ae2ab9a2bfef6e8288e30926001fe81e441379757f815940d1c87a94cb2cbcfb"
+  "source_commit": "b5890034235a019daf763592c6012456437c91be",
+  "package_url": "https://github.com/TheLayya/tk_crm/releases/download/v1.1.24/release-v1.1.24.tar.gz",
+  "sha256": "6a7a43440955191b9ed17e79bae964f857fd6c948e5e6c9b123f551e5658e6d6",
+  "server_source_commit": "b5890034235a019daf763592c6012456437c91be"
 }
